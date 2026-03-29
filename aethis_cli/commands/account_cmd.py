@@ -66,7 +66,7 @@ def generate(
 ) -> None:
     """Create a new API key by signing in through your browser."""
     if scopes is None:
-        scopes = ["decide"]
+        scopes = ["decide", "projects:write", "bundles:read", "bundles:explain"]
 
     # Validate inputs
     invalid_scopes = set(scopes) - VALID_SCOPES
