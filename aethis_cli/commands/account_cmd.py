@@ -84,7 +84,7 @@ def generate(
     info("Creating API key...")
     try:
         resp = httpx.post(
-            f"{base_url}/api/v1/keys",
+            f"{base_url}/api/v1/keys/",
             headers={"Authorization": f"Bearer {access_token}"},
             json={"name": name, "scopes": scopes, "rate_limit_tier": tier},
             timeout=15.0,
@@ -132,7 +132,7 @@ def keys(
 
     try:
         resp = httpx.get(
-            f"{base_url}/api/v1/keys",
+            f"{base_url}/api/v1/keys/",
             headers={"Authorization": f"Bearer {access_token}"},
             timeout=15.0,
         )
