@@ -48,3 +48,9 @@ def decide(
     console.print(f"Fields:   {result.get('fields_provided')}/{result.get('fields_evaluated')} provided")
     if result.get("missing_fields"):
         console.print(f"Missing:  {', '.join(result['missing_fields'])}")
+    nq = result.get("next_question")
+    if nq:
+        console.print(f"\nNext question: [bold]{nq['question']}[/bold]  ({nq['field_id']}, weight={nq['weight']})")
+    path = result.get("optimal_path")
+    if path:
+        console.print(f"Remaining:    {len(path)} questions (total weight={sum(q['weight'] for q in path)})")
