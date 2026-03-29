@@ -15,7 +15,7 @@ from aethis_cli.errors import AuthenticationError
 from aethis_cli.output import console, error_panel, info, success
 
 CLERK_DOMAIN = os.environ.get("AETHIS_CLERK_DOMAIN", "clerk.aethis.ai")
-CLERK_CLIENT_ID = os.environ.get("AETHIS_CLERK_CLIENT_ID", "")
+CLERK_CLIENT_ID = os.environ.get("AETHIS_CLERK_CLIENT_ID", "cwH009p1vPtyy1EG")
 
 VALID_SCOPES = {"decide", "bundles:read", "bundles:explain", "keys:manage", "projects:write"}
 VALID_TIERS = {"free", "starter", "pro"}

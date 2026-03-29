@@ -114,8 +114,7 @@ tests:
 |----------|-------------|---------|
 | `AETHIS_API_KEY` | Your API key (`ak_live_...`) | — |
 | `AETHIS_BASE_URL` | API base URL | `https://api.aethis.ai` |
-| `AETHIS_CLERK_CLIENT_ID` | Clerk OAuth client ID (for `account` commands) | — |
-| `AETHIS_CLERK_DOMAIN` | Clerk domain | `clerk.aethis.ai` |
+| `AETHIS_CLERK_DOMAIN` | Clerk domain override (development only) | `clerk.aethis.ai` |
 
 ## Development
 
