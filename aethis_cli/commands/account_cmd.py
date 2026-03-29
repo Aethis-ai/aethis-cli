@@ -78,14 +78,20 @@ def generate(
         raise typer.Exit(code=1)
 
     access_token = _clerk_auth(timeout)
+    success("Authenticated successfully.")
 
     # Create API key via the key management endpoint
-    resp = httpx.post(
-        f"{base_url}/api/v1/keys",
-        headers={"Authorization": f"Bearer {access_token}"},
-        json={"name": name, "scopes": scopes, "rate_limit_tier": tier},
-        timeout=15.0,
-    )
+    info("Creating API key...")
+    try:
+        resp = httpx.post(
+            f"{base_url}/api/v1/keys",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={"name": name, "scopes": scopes, "rate_limit_tier": tier},
+            timeout=15.0,
+        )
+    except httpx.HTTPError as e:
+        console.print(f"[red]Could not reach API at {base_url}: {e}[/red]")
+        raise typer.Exit(code=1) from None
 
     if resp.status_code != 201:
         console.print(f"[red]Key creation failed (HTTP {resp.status_code}): {resp.text}[/red]")
@@ -122,12 +128,17 @@ def keys(
 ) -> None:
     """List your API keys (requires browser sign-in)."""
     access_token = _clerk_auth(timeout)
+    success("Authenticated successfully.")
 
-    resp = httpx.get(
-        f"{base_url}/api/v1/keys",
-        headers={"Authorization": f"Bearer {access_token}"},
-        timeout=15.0,
-    )
+    try:
+        resp = httpx.get(
+            f"{base_url}/api/v1/keys",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=15.0,
+        )
+    except httpx.HTTPError as e:
+        console.print(f"[red]Could not reach API at {base_url}: {e}[/red]")
+        raise typer.Exit(code=1) from None
 
     if resp.status_code != 200:
         console.print(f"[red]Failed to list keys (HTTP {resp.status_code}): {resp.text}[/red]")
@@ -175,12 +186,17 @@ def revoke(
             raise typer.Abort()
 
     access_token = _clerk_auth(timeout)
+    success("Authenticated successfully.")
 
-    resp = httpx.delete(
-        f"{base_url}/api/v1/keys/{key_id}",
-        headers={"Authorization": f"Bearer {access_token}"},
-        timeout=15.0,
-    )
+    try:
+        resp = httpx.delete(
+            f"{base_url}/api/v1/keys/{key_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=15.0,
+        )
+    except httpx.HTTPError as e:
+        console.print(f"[red]Could not reach API at {base_url}: {e}[/red]")
+        raise typer.Exit(code=1) from None
 
     if resp.status_code == 204:
         success(f"Key {key_id} revoked.")
