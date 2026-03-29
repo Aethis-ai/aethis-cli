@@ -11,8 +11,9 @@ pip install aethis-cli
 ## Quick start
 
 ```bash
-# 1. Authenticate
-aethis login
+# 1. Authenticate (creates a key via browser sign-in)
+aethis account generate
+# Or paste an existing key: aethis login
 
 # 2. Initialise a project
 mkdir my-rules && cd my-rules
@@ -40,7 +41,7 @@ A complete, runnable example is included in `examples/spacecraft-crew-rules/`:
 
 ```bash
 cp -r examples/spacecraft-crew-rules my-first-rules && cd my-first-rules
-aethis login
+aethis account generate
 aethis generate --poll
 aethis test
 aethis decide -i '{"space.crew.species": "Human", "space.crew.age": 35, "space.crew.flight_hours": 600, "space.crew.has_pilot_license": true, "space.crew.has_gaa_exam": true, "space.medical.cert_valid": true, "space.mission.type": "suborbital", "space.crew.has_towel": true}'
@@ -52,7 +53,10 @@ See `examples/spacecraft-crew-rules/README.md` for details.
 
 | Command | Description |
 |---------|-------------|
-| `aethis login` | Authenticate with the Aethis API |
+| `aethis account generate` | Create a new API key (browser sign-in) |
+| `aethis account keys` | List your API keys (masked) |
+| `aethis account revoke` | Revoke an API key by ID |
+| `aethis login` | Paste an existing API key |
 | `aethis init` | Initialise a new project in the current directory |
 | `aethis generate` | Upload sources + guidance, trigger generation, poll until done |
 | `aethis status` | Check generation job progress |
@@ -110,6 +114,8 @@ tests:
 |----------|-------------|---------|
 | `AETHIS_API_KEY` | Your API key (`ak_live_...`) | — |
 | `AETHIS_BASE_URL` | API base URL | `https://api.aethis.ai` |
+| `AETHIS_CLERK_CLIENT_ID` | Clerk OAuth client ID (for `account` commands) | — |
+| `AETHIS_CLERK_DOMAIN` | Clerk domain | `clerk.aethis.ai` |
 
 ## Development
 
