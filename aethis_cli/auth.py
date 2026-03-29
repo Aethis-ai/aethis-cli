@@ -127,7 +127,7 @@ def authenticate_with_clerk(
         "response_type": "code",
         "client_id": client_id,
         "redirect_uri": redirect_uri,
-        "scope": "openid profile email",
+        "scope": "profile email",
         "code_challenge": challenge,
         "code_challenge_method": "S256",
         "state": state,
