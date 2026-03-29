@@ -14,3 +14,7 @@ class AethisAPIError(Exception):
 
 class ConfigError(Exception):
     """Raised when aethis.yaml is missing or invalid."""
+
+
+class AuthenticationError(Exception):
+    """Raised when browser-based OAuth authentication fails."""

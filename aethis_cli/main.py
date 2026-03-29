@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import typer
 
+from aethis_cli.commands.account_cmd import account_app
 from aethis_cli.commands.init_cmd import init
 from aethis_cli.commands.login_cmd import login
 from aethis_cli.commands.generate_cmd import generate
@@ -20,6 +21,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+app.add_typer(account_app, name="account")
 app.command()(init)
 app.command()(login)
 app.command()(generate)
