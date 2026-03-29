@@ -35,6 +35,16 @@ def generate(
     try:
         # Resolve or create project
         pid = project_id or cfg.project_id
+        if pid:
+            # Verify the project still exists (may be stale from a different server)
+            try:
+                client.get_project(pid)
+            except AethisAPIError as e:
+                if e.status_code == 404:
+                    info(f"Project {pid} not found on server, creating new project")
+                    pid = None
+                else:
+                    raise
         if not pid:
             result = client.create_project(cfg.project, cfg.project, "")
             pid = result["project_id"]
