@@ -16,7 +16,7 @@ import httpx
 
 from aethis_cli.errors import AuthenticationError
 
-_PORT_RANGE = range(9876, 9886)
+_CALLBACK_PORT = 9876
 _SUCCESS_HTML = """\
 <!DOCTYPE html>
 <html><head><title>Aethis CLI</title></head>
@@ -60,27 +60,25 @@ class OAuthCallbackServer:
         self.port: int = 0
 
     def start(self) -> int:
-        """Bind to an available port and start serving in a background thread.
+        """Bind to port 9876 and start serving in a background thread.
 
-        Returns the port number.
+        Returns the port number. Uses a fixed port to match the redirect URI
+        registered with the OAuth provider.
         """
-        for port in _PORT_RANGE:
-            try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                sock.bind(("127.0.0.1", port))
-                sock.close()
-                self._server = HTTPServer(("127.0.0.1", port), _CallbackHandler)
-                self._server._auth_code = None  # type: ignore[attr-defined]
-                self._server._auth_state = None  # type: ignore[attr-defined]
-                self._server._auth_error = None  # type: ignore[attr-defined]
-                self.port = port
-                thread = threading.Thread(target=self._server.handle_request, daemon=True)
-                thread.start()
-                return port
-            except OSError:
-                continue
-        raise AuthenticationError("Could not bind to any port in range 9876-9885")
+        port = _CALLBACK_PORT
+        try:
+            self._server = HTTPServer(("127.0.0.1", port), _CallbackHandler)
+            self._server._auth_code = None  # type: ignore[attr-defined]
+            self._server._auth_state = None  # type: ignore[attr-defined]
+            self._server._auth_error = None  # type: ignore[attr-defined]
+            self.port = port
+            thread = threading.Thread(target=self._server.handle_request, daemon=True)
+            thread.start()
+            return port
+        except OSError:
+            raise AuthenticationError(
+                f"Port {port} is already in use. Close the process using it and try again."
+            )
 
     def result(self, timeout: float) -> tuple[Optional[str], Optional[str], Optional[str]]:
         """Wait for the callback and return (code, state, error)."""

@@ -46,7 +46,7 @@ class TestCallbackServer:
     def test_server_starts_and_captures_code(self):
         server = OAuthCallbackServer()
         port = server.start()
-        assert 9876 <= port <= 9885
+        assert port == 9876
 
         # Simulate Clerk redirect
         httpx.get(f"http://127.0.0.1:{port}/callback?code=test_code&state=test_state")
