@@ -21,6 +21,15 @@ class AethisClient:
             verify=True,
         )
 
+    def close(self) -> None:
+        self._client.close()
+
+    def __enter__(self) -> "AethisClient":
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        self.close()
+
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         resp = self._client.request(method, path, **kwargs)
         if resp.status_code >= 400:
@@ -29,6 +38,8 @@ class AethisClient:
             except (ValueError, KeyError):
                 detail = resp.text or f"HTTP {resp.status_code}"
             raise AethisAPIError(resp.status_code, detail)
+        if resp.status_code == 204:
+            return {}
         return resp.json()
 
     # -- Decision API --

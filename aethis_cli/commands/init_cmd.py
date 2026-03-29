@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import typer
@@ -15,12 +16,12 @@ api_key_env: AETHIS_API_KEY
 """
 
 HINTS_YAML_TEMPLATE = """\
-hints: []
+hints:
   # - "Add your guidance hints here"
 """
 
 SCENARIOS_YAML_TEMPLATE = """\
-tests: []
+tests:
   # - name: "eligible case"
   #   inputs: {{field_key: value}}
   #   expect: {{outcome: eligible}}
@@ -33,6 +34,10 @@ GITIGNORE = """\
 
 def init(name: str = typer.Argument(..., help="Project name")) -> None:
     """Scaffold a new Aethis project directory."""
+    if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$", name):
+        console.print("[red]Project name must be alphanumeric (with . _ - allowed, no path separators).[/red]")
+        raise typer.Exit(code=1)
+
     proj = Path(name)
     if proj.exists():
         console.print(f"[red]Directory '{name}' already exists.[/red]")

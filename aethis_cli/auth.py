@@ -5,8 +5,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import secrets
-import socket
 import threading
+import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Optional
@@ -35,14 +35,30 @@ def generate_pkce_pair() -> tuple[str, str]:
     return verifier, challenge
 
 
+class _AuthHTTPServer(HTTPServer):
+    """HTTPServer subclass with typed auth attributes."""
+
+    auth_code: Optional[str] = None
+    auth_state: Optional[str] = None
+    auth_error: Optional[str] = None
+
+
 class _CallbackHandler(BaseHTTPRequestHandler):
-    """Single-use handler that captures the OAuth callback."""
+    """Handler that captures the OAuth callback, ignoring other requests (e.g. favicon)."""
+
+    server: _AuthHTTPServer
 
     def do_GET(self) -> None:  # noqa: N802
-        qs = parse_qs(urlparse(self.path).query)
-        self.server._auth_code = qs.get("code", [None])[0]  # type: ignore[attr-defined]
-        self.server._auth_state = qs.get("state", [None])[0]  # type: ignore[attr-defined]
-        self.server._auth_error = qs.get("error", [None])[0]  # type: ignore[attr-defined]
+        parsed = urlparse(self.path)
+        if parsed.path != "/callback":
+            # Ignore favicon and other requests
+            self.send_response(404)
+            self.end_headers()
+            return
+        qs = parse_qs(parsed.query)
+        self.server.auth_code = qs.get("code", [None])[0]
+        self.server.auth_state = qs.get("state", [None])[0]
+        self.server.auth_error = qs.get("error", [None])[0]
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
         self.end_headers()
@@ -56,8 +72,14 @@ class OAuthCallbackServer:
     """Ephemeral HTTP server on 127.0.0.1 to catch Clerk's redirect."""
 
     def __init__(self) -> None:
-        self._server: Optional[HTTPServer] = None
+        self._server: Optional[_AuthHTTPServer] = None
         self.port: int = 0
+
+    def _serve_until_auth(self) -> None:
+        """Handle requests until we get the auth callback or server is closed."""
+        assert self._server is not None
+        while not (self._server.auth_code or self._server.auth_error):
+            self._server.handle_request()
 
     def start(self) -> int:
         """Bind to port 9876 and start serving in a background thread.
@@ -67,12 +89,10 @@ class OAuthCallbackServer:
         """
         port = _CALLBACK_PORT
         try:
-            self._server = HTTPServer(("127.0.0.1", port), _CallbackHandler)
-            self._server._auth_code = None  # type: ignore[attr-defined]
-            self._server._auth_state = None  # type: ignore[attr-defined]
-            self._server._auth_error = None  # type: ignore[attr-defined]
+            self._server = _AuthHTTPServer(("127.0.0.1", port), _CallbackHandler)
+            self._server.timeout = 5.0  # Per-request timeout for the loop
             self.port = port
-            thread = threading.Thread(target=self._server.handle_request, daemon=True)
+            thread = threading.Thread(target=self._serve_until_auth, daemon=True)
             thread.start()
             return port
         except OSError:
@@ -84,15 +104,12 @@ class OAuthCallbackServer:
         """Wait for the callback and return (code, state, error)."""
         if not self._server:
             raise AuthenticationError("Server not started")
-        self._server.timeout = timeout
-        # The handle_request in the thread will complete; wait for it.
-        import time
 
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            code = self._server._auth_code  # type: ignore[attr-defined]
-            state = self._server._auth_state  # type: ignore[attr-defined]
-            error = self._server._auth_error  # type: ignore[attr-defined]
+            code = self._server.auth_code
+            state = self._server.auth_state
+            error = self._server.auth_error
             if code or error:
                 return code, state, error
             time.sleep(0.2)
@@ -108,7 +125,7 @@ def authenticate_with_clerk(
     client_id: str,
     timeout: int = 120,
 ) -> str:
-    """Run full OAuth/PKCE flow and return an access token (JWT).
+    """Run full OAuth/PKCE flow and return an access token.
 
     Opens the user's browser to the Clerk sign-in page. After authentication,
     Clerk redirects to a localhost callback. The authorization code is exchanged
@@ -173,7 +190,10 @@ def authenticate_with_clerk(
     )
 
     if resp.status_code != 200:
-        raise AuthenticationError(f"Token exchange failed (HTTP {resp.status_code}): {resp.text}")
+        raise AuthenticationError(
+            f"Token exchange failed (HTTP {resp.status_code}). "
+            "Check your Clerk OAuth configuration and try again."
+        )
 
     token_data = resp.json()
     access_token = token_data.get("access_token")

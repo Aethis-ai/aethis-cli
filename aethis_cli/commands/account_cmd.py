@@ -11,10 +11,10 @@ import typer
 from aethis_cli.auth import authenticate_with_clerk
 from aethis_cli.commands.login_cmd import _save_to_keyring, _save_to_file
 from aethis_cli.config import DEFAULT_BASE_URL
-
-_BASE_URL = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
 from aethis_cli.errors import AuthenticationError
 from aethis_cli.output import console, error_panel, info, success
+
+_BASE_URL = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
 
 CLERK_DOMAIN = os.environ.get("AETHIS_CLERK_DOMAIN", "clerk.aethis.legal")
 CLERK_CLIENT_ID = os.environ.get("AETHIS_CLERK_CLIENT_ID", "cwH009p1vPtyy1EG")
@@ -100,13 +100,16 @@ def generate(
         raise typer.Exit(code=1)
 
     data = resp.json()
-    full_key = data["full_key"]
+    full_key = data.get("full_key")
+    if not full_key:
+        console.print("[red]Unexpected API response: missing 'full_key'.[/red]")
+        raise typer.Exit(code=1)
 
     console.print()
     success("API key created:")
-    console.print(f"  Key ID:   {data['key_id']}")
-    console.print(f"  Name:     {data['name']}")
-    console.print(f"  Scopes:   {', '.join(data['scopes'])}")
+    console.print(f"  Key ID:   {data.get('key_id', 'unknown')}")
+    console.print(f"  Name:     {data.get('name', name)}")
+    console.print(f"  Scopes:   {', '.join(data.get('scopes', scopes))}")
     console.print(f"  Tier:     {data.get('rate_limit_tier', tier)}")
     console.print()
     console.print("[bold yellow]Full key (shown once only):[/bold yellow]")

@@ -12,7 +12,7 @@ from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 
 from aethis_cli.client import AethisClient
 from aethis_cli.config import load_project_config, resolve_api_key, write_state
-from aethis_cli.errors import AethisAPIError
+from aethis_cli.errors import AethisAPIError, ConfigError
 from aethis_cli.output import console, error_panel, info, success
 
 
@@ -27,8 +27,13 @@ def generate(
     timeout: int = typer.Option(600, "--timeout", "-t", help="Polling timeout in seconds"),
 ) -> None:
     """Upload sources + guidance, trigger bundle generation, and poll until done."""
-    cfg = load_project_config()
-    api_key = resolve_api_key(cfg)
+    try:
+        cfg = load_project_config()
+        api_key = resolve_api_key(cfg)
+    except ConfigError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(code=1)
+
     client = AethisClient(api_key, cfg.base_url)
     project_dir = cfg.config_path
 
@@ -124,7 +129,7 @@ def generate(
 
 
 def _poll_until_done(client: AethisClient, pid: str, project_dir: Path, timeout: int = 600) -> None:
-    deadline = time.time() + timeout
+    deadline = time.monotonic() + timeout
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -132,7 +137,7 @@ def _poll_until_done(client: AethisClient, pid: str, project_dir: Path, timeout:
         console=console,
     ) as progress:
         task = progress.add_task("Generating bundle...", total=100)
-        while time.time() < deadline:
+        while time.monotonic() < deadline:
             result = client.get_status(pid)
             job = result.get("job") or {}
             pct = job.get("progress_percent", 0)
