@@ -41,10 +41,13 @@ def load_project_config(path: Optional[Path] = None) -> ProjectConfig:
     project_dir = yaml_path.parent
     project_id = _read_state_field(project_dir, "project_id")
 
+    # AETHIS_BASE_URL env var overrides aethis.yaml (useful for local dev)
+    base_url = os.environ.get("AETHIS_BASE_URL") or raw.get("base_url", DEFAULT_BASE_URL)
+
     return ProjectConfig(
         project=raw["project"],
         api_key_env=raw.get("api_key_env", "AETHIS_API_KEY"),
-        base_url=raw.get("base_url", DEFAULT_BASE_URL),
+        base_url=base_url,
         project_id=project_id,
         config_path=project_dir,
     )

@@ -11,6 +11,8 @@ import typer
 from aethis_cli.auth import authenticate_with_clerk
 from aethis_cli.commands.login_cmd import _save_to_keyring, _save_to_file
 from aethis_cli.config import DEFAULT_BASE_URL
+
+_BASE_URL = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
 from aethis_cli.errors import AuthenticationError
 from aethis_cli.output import console, error_panel, info, success
 
@@ -58,7 +60,7 @@ def generate(
     name: str = typer.Option("cli-generated", "--name", "-n", help="Key name"),
     scopes: Optional[List[str]] = typer.Option(None, "--scope", "-s", help="Key scopes (repeatable)"),
     tier: str = typer.Option("free", "--tier", "-t", help="Rate limit tier: free|starter|pro"),
-    base_url: str = typer.Option(DEFAULT_BASE_URL, "--base-url", help="API base URL"),
+    base_url: str = typer.Option(_BASE_URL, "--base-url", help="API base URL"),
     no_save: bool = typer.Option(False, "--no-save", help="Print key but don't save"),
     timeout: int = typer.Option(120, "--timeout", help="Browser auth timeout in seconds"),
 ) -> None:
@@ -123,7 +125,7 @@ def generate(
 
 @account_app.command()
 def keys(
-    base_url: str = typer.Option(DEFAULT_BASE_URL, "--base-url", help="API base URL"),
+    base_url: str = typer.Option(_BASE_URL, "--base-url", help="API base URL"),
     timeout: int = typer.Option(120, "--timeout", help="Browser auth timeout in seconds"),
 ) -> None:
     """List your API keys (requires browser sign-in)."""
@@ -175,7 +177,7 @@ def keys(
 @account_app.command()
 def revoke(
     key_id: str = typer.Argument(..., help="Key ID to revoke (ak_...)"),
-    base_url: str = typer.Option(DEFAULT_BASE_URL, "--base-url", help="API base URL"),
+    base_url: str = typer.Option(_BASE_URL, "--base-url", help="API base URL"),
     timeout: int = typer.Option(120, "--timeout", help="Browser auth timeout in seconds"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
 ) -> None:
