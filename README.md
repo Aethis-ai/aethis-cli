@@ -31,8 +31,22 @@ aethis test
 aethis publish
 
 # 7. Evaluate eligibility
-aethis decide -i '{"applicant_age": 35, "flight_fitness_certified": true}'
+aethis decide -i '{"space.crew.age": 35, "space.medical.cert_valid": true}'
 ```
+
+## Try the example
+
+A complete, runnable example is included in `examples/spacecraft-crew-rules/`:
+
+```bash
+cp -r examples/spacecraft-crew-rules my-first-rules && cd my-first-rules
+aethis login
+aethis generate --poll
+aethis test
+aethis decide -i '{"space.crew.species": "Human", "space.crew.age": 35, "space.crew.flight_hours": 600, "space.crew.has_pilot_license": true, "space.crew.has_gaa_exam": true, "space.medical.cert_valid": true, "space.mission.type": "suborbital", "space.crew.has_towel": true}'
+```
+
+See `examples/spacecraft-crew-rules/README.md` for details.
 
 ## Commands
 
@@ -76,15 +90,16 @@ base_url: https://api.aethis.ai
 
 ```yaml
 tests:
-  - name: "Eligible — experienced pilot"
+  - name: "Eligible — all requirements met"
     inputs:
-      applicant_age: 35
-      simulator_hours: 500
+      space.crew.age: 35
+      space.crew.flight_hours: 600
+      space.crew.has_pilot_license: true
     expect:
       outcome: eligible
   - name: "Not eligible — no medical cert"
     inputs:
-      flight_fitness_certified: false
+      space.medical.cert_valid: false
     expect:
       outcome: not_eligible
 ```

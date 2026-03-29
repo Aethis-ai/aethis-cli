@@ -1,0 +1,63 @@
+tests:
+  - name: "Vogon crew member — disqualifying species (Section 3)"
+    inputs:
+      space.crew.species: Vogon
+    expect:
+      outcome: not_eligible
+
+  - name: "No towel — mandatory equipment violation (Section 9)"
+    inputs:
+      space.crew.species: Human
+      space.crew.flight_hours: 600
+      space.crew.has_pilot_license: true
+      space.crew.has_gaa_exam: true
+      space.medical.cert_valid: true
+      space.crew.age: 35
+      space.mission.type: suborbital
+      space.crew.has_towel: false
+    expect:
+      outcome: not_eligible
+
+  - name: "Orbital mission — radiation cert absent (Section 5)"
+    inputs:
+      space.crew.species: Human
+      space.crew.flight_hours: 600
+      space.crew.has_pilot_license: true
+      space.crew.has_gaa_exam: true
+      space.medical.cert_valid: true
+      space.crew.age: 35
+      space.mission.type: orbital
+      space.crew.has_radiation_cert: false
+      space.crew.has_towel: true
+    expect:
+      outcome: not_eligible
+
+  - name: "Full compliance — Human, suborbital, all requirements met"
+    inputs:
+      space.crew.species: Human
+      space.crew.flight_hours: 600
+      space.crew.has_pilot_license: true
+      space.crew.has_gaa_exam: true
+      space.crew.has_approved_provider_cert: true
+      space.crew.has_radiation_cert: true
+      space.medical.cert_valid: true
+      space.crew.age: 35
+      space.mission.type: suborbital
+      space.vessel.propulsion_type: conventional
+      space.crew.has_towel: true
+    expect:
+      outcome: eligible
+
+  - name: "Age exemption — senior crew (age >= 60) exempt from flight readiness"
+    inputs:
+      space.crew.species: Human
+      space.crew.age: 65
+      space.crew.has_gaa_exam: true
+      space.crew.has_approved_provider_cert: true
+      space.crew.has_radiation_cert: true
+      space.medical.cert_valid: true
+      space.mission.type: suborbital
+      space.vessel.propulsion_type: conventional
+      space.crew.has_towel: true
+    expect:
+      outcome: eligible
