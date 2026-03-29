@@ -51,11 +51,22 @@ def load_project_config(path: Optional[Path] = None) -> ProjectConfig:
 
 
 def resolve_api_key(config: ProjectConfig) -> str:
-    """Resolve API key: env var first, then ~/.config/aethis/credentials."""
+    """Resolve API key: env var → OS keychain → credentials file."""
     key = os.environ.get(config.api_key_env)
     if key:
         return key
 
+    # Try OS keychain (if keyring is installed)
+    try:
+        import keyring
+
+        key = keyring.get_password("aethis-cli", "api_key")
+        if key:
+            return key
+    except Exception:
+        pass
+
+    # Fall back to plaintext credentials file
     creds_path = credentials_path()
     if creds_path.exists():
         raw = yaml.safe_load(creds_path.read_text()) or {}

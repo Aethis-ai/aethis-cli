@@ -18,6 +18,7 @@ class AethisClient:
             base_url=base_url,
             headers={"X-API-Key": api_key},
             timeout=60.0,
+            verify=True,
         )
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:

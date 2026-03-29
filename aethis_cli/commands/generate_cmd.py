@@ -44,7 +44,11 @@ def generate(
         # Upload source files (batch in groups of 5)
         sources_dir = project_dir / "sources"
         if sources_dir.is_dir():
-            source_files = sorted(f for f in sources_dir.rglob("*") if f.is_file())
+            resolved_root = sources_dir.resolve()
+            source_files = sorted(
+                f for f in sources_dir.rglob("*")
+                if f.is_file() and f.resolve().is_relative_to(resolved_root)
+            )
             if source_files:
                 for batch in _chunks(source_files, 5):
                     client.upload_sources(pid, batch)
@@ -53,6 +57,9 @@ def generate(
         # Upload guidance hints
         hints_path = project_dir / "guidance" / "hints.yaml"
         if hints_path.exists():
+            if hints_path.stat().st_size > 1_000_000:
+                console.print(f"[red]{hints_path} exceeds 1 MB limit[/red]")
+                raise typer.Exit(code=1)
             try:
                 raw = yaml.safe_load(hints_path.read_text()) or {}
             except yaml.YAMLError as e:
@@ -68,6 +75,9 @@ def generate(
         # Upload test cases
         tests_path = project_dir / "tests" / "scenarios.yaml"
         if tests_path.exists():
+            if tests_path.stat().st_size > 1_000_000:
+                console.print(f"[red]{tests_path} exceeds 1 MB limit[/red]")
+                raise typer.Exit(code=1)
             try:
                 raw = yaml.safe_load(tests_path.read_text()) or {}
             except yaml.YAMLError as e:
