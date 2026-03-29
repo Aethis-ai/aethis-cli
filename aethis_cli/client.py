@@ -25,7 +25,7 @@ class AethisClient:
         if resp.status_code >= 400:
             try:
                 detail = resp.json().get("detail", resp.text)
-            except Exception:
+            except (ValueError, KeyError):
                 detail = resp.text or f"HTTP {resp.status_code}"
             raise AethisAPIError(resp.status_code, detail)
         return resp.json()

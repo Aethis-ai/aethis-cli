@@ -36,7 +36,7 @@ def generate(
         # Resolve or create project
         pid = project_id or cfg.project_id
         if not pid:
-            result = client.create_project(cfg.project, cfg.project)
+            result = client.create_project(cfg.project, cfg.project, "")
             pid = result["project_id"]
             write_state(project_dir, {"project_id": pid})
             info(f"Created project {pid}")

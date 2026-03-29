@@ -27,7 +27,7 @@ build-backend = "setuptools.build_meta"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-    "manual: requires real API + OPENAI_API_KEY (deselected by default)",
+    "manual: requires real Aethis API (AETHIS_API_KEY + AETHIS_BASE_URL)",
 ]
 addopts = "-m 'not manual'"
 

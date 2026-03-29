@@ -35,6 +35,10 @@ def decide(
         console.print(f"[red]Invalid JSON: {e}[/red]")
         raise typer.Exit(code=1)
 
+    if not isinstance(field_values, dict):
+        console.print("[red]Input must be a JSON object, not a list or scalar.[/red]")
+        raise typer.Exit(code=1)
+
     try:
         result = client.decide(bundle_id, field_values)
     except AethisAPIError as e:
