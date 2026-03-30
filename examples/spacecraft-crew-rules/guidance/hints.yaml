@@ -14,31 +14,6 @@ hints:
     space.vessel.propulsion_type (Sort.ENUM: ion, fusion, bistromatic, conventional)
 
   - >
-    Generate FieldDefinition and Criterion objects. Use ONLY the group names
-    listed below — do NOT invent additional groups.
-
-  - >
-    Vogon species disqualified (group='species_check'):
-    Op(NE, [FieldRef(key='space.crew.species'), Const(sort=Sort.ENUM, value='Vogon')])
-
-  - >
-    Flight readiness (group='flight_readiness'): SINGLE Criterion using
-    Op(OR, [Op(GE, [FieldRef(key='space.crew.age'), Const(sort=Sort.INT, value=60)]),
-    Op(AND, [Op(GE, [FieldRef(key='space.crew.flight_hours'), Const(sort=Sort.INT, value=500)]),
-    Op(EQ, [FieldRef(key='space.crew.has_pilot_license'), Const(sort=Sort.BOOL, value=True)])])]).
-    Age >= 60 is an exemption alternative, NOT a separate group.
-
-  - >
-    Medical certification (group='medical_certification'): two Criterion objects
-    in the SAME group (OR'd): route A = has_gaa_exam EQ True,
-    route B = has_approved_provider_cert EQ True
-
-  - "Medical cert validity (group='medical_cert_validity'): space.medical.cert_valid EQ True"
-
-  - >
-    Radiation for orbital missions (group='radiation_cert'): SINGLE Criterion using
-    Op(IMPLIES, [Op(EQ, [FieldRef(key='space.mission.type'), Const(sort=Sort.ENUM, value='orbital')]),
-    Op(EQ, [FieldRef(key='space.crew.has_radiation_cert'), Const(sort=Sort.BOOL, value=True)])]).
-    Non-orbital missions do NOT need radiation cert.
-
-  - "Towel required (group='towel_compliance'): space.crew.has_towel EQ True"
+    Use these group names: species_check, flight_readiness,
+    medical_certification, medical_cert_validity, radiation_cert,
+    towel_compliance.
