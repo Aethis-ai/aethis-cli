@@ -5,6 +5,8 @@ from __future__ import annotations
 import typer
 
 from aethis_cli.commands.account_cmd import account_app
+from aethis_cli.commands.bundles_cmd import bundles_app
+from aethis_cli.commands.projects_cmd import projects_app
 from aethis_cli.commands.init_cmd import init
 from aethis_cli.commands.login_cmd import login
 from aethis_cli.commands.generate_cmd import generate
@@ -22,6 +24,8 @@ app = typer.Typer(
 )
 
 app.add_typer(account_app, name="account")
+app.add_typer(bundles_app, name="bundles")
+app.add_typer(projects_app, name="projects")
 app.command()(init)
 app.command()(login)
 app.command()(generate)

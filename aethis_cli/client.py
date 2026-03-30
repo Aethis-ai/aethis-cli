@@ -66,8 +66,11 @@ class AethisClient:
             "domain": domain,
         })
 
-    def list_projects(self) -> list[dict]:
-        return self._request("GET", "/api/v1/public/projects/")
+    def list_projects(self, include_archived: bool = False) -> list[dict]:
+        params: dict[str, str] = {}
+        if include_archived:
+            params["include_archived"] = "true"
+        return self._request("GET", "/api/v1/public/projects/", params=params)
 
     def get_project(self, project_id: str) -> dict:
         return self._request("GET", f"/api/v1/public/projects/{project_id}")
@@ -100,3 +103,15 @@ class AethisClient:
 
     def publish(self, project_id: str) -> dict:
         return self._request("POST", f"/api/v1/public/projects/{project_id}/publish")
+
+    def list_bundles(self, project_id: str, status: str | None = None) -> list[dict]:
+        params: dict[str, str] = {}
+        if status:
+            params["status"] = status
+        return self._request("GET", f"/api/v1/public/projects/{project_id}/bundles", params=params)
+
+    def archive_project(self, project_id: str) -> dict:
+        return self._request("POST", f"/api/v1/public/projects/{project_id}/archive")
+
+    def archive_bundle(self, bundle_id: str) -> dict:
+        return self._request("POST", f"/api/v1/public/bundles/{bundle_id}/archive")

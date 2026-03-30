@@ -19,7 +19,7 @@ _BASE_URL = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
 CLERK_DOMAIN = os.environ.get("AETHIS_CLERK_DOMAIN", "clerk.aethis.legal")
 CLERK_CLIENT_ID = os.environ.get("AETHIS_CLERK_CLIENT_ID", "cwH009p1vPtyy1EG")
 
-VALID_SCOPES = {"decide", "bundles:read", "bundles:explain", "keys:manage", "projects:write"}
+VALID_SCOPES = {"decide", "bundles:read", "bundles:explain", "bundles:write", "keys:manage", "projects:write"}
 VALID_TIERS = {"free", "starter", "pro"}
 
 account_app = typer.Typer(
@@ -66,7 +66,7 @@ def generate(
 ) -> None:
     """Create a new API key by signing in through your browser."""
     if scopes is None:
-        scopes = ["decide", "projects:write", "bundles:read", "bundles:explain"]
+        scopes = ["decide", "projects:write", "bundles:read", "bundles:explain", "bundles:write"]
 
     # Validate inputs
     invalid_scopes = set(scopes) - VALID_SCOPES
