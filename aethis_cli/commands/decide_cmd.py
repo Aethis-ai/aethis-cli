@@ -76,6 +76,13 @@ def decide(
         _print_explanation(result["explanation"])
 
 
+_STATUS_ICONS = {
+    "satisfied": "[green]PASS[/green]", "SAT": "[green]PASS[/green]",
+    "not_satisfied": "[red]FAIL[/red]", "UNSAT": "[red]FAIL[/red]",
+    "pending": "[yellow]PENDING[/yellow]",
+}
+
+
 def _print_trace(trace: dict) -> None:
     """Print per-group and per-requirement evaluation results."""
     console.print("\n[bold]Reasoning[/bold]")
@@ -86,12 +93,7 @@ def _print_trace(trace: dict) -> None:
     groups = trace.get("group_statuses")
     if groups:
         for group, status in groups.items():
-            _status_icons = {
-                "satisfied": "[green]PASS[/green]", "SAT": "[green]PASS[/green]",
-                "not_satisfied": "[red]FAIL[/red]", "UNSAT": "[red]FAIL[/red]",
-                "pending": "[yellow]PENDING[/yellow]",
-            }
-            icon = _status_icons.get(status, f"[yellow]{status}[/yellow]")
+            icon = _STATUS_ICONS.get(status, f"[yellow]{status}[/yellow]")
             console.print(f"  {icon}  {group}")
 
     reqs = trace.get("requirements")
