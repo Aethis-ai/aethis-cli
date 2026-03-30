@@ -149,7 +149,12 @@ def _poll_until_done(client: AethisClient, pid: str, project_dir: Path, timeout:
                 bundle_id = result.get("latest_bundle_id")
                 write_state(project_dir, {"bundle_id": bundle_id})
                 console.print()
-                success(f"Done! Bundle: {bundle_id}")
+                # Auto-publish so the bundle is immediately usable
+                try:
+                    client.publish(pid)
+                    success(f"Done! Bundle published: {bundle_id}")
+                except AethisAPIError:
+                    success(f"Done! Bundle: {bundle_id} (run 'aethis publish' to activate)")
                 return
 
             if job_status == "failed":
