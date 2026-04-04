@@ -14,6 +14,20 @@ from aethis_cli.errors import ConfigError
 
 DEFAULT_BASE_URL = "https://api.aethis.ai"
 
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "host.docker.internal"}
+
+
+def _validate_base_url(url: str) -> None:
+    """Reject http:// URLs unless targeting localhost (local dev)."""
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if parsed.scheme == "http" and parsed.hostname not in _LOCAL_HOSTS:
+        raise ConfigError(
+            f"Refusing to use HTTP for remote host '{parsed.hostname}'. "
+            "Use HTTPS or target localhost for local development."
+        )
+
 
 @dataclass
 class ProjectConfig:
@@ -43,6 +57,7 @@ def load_project_config(path: Optional[Path] = None) -> ProjectConfig:
 
     # AETHIS_BASE_URL env var overrides aethis.yaml (useful for local dev)
     base_url = os.environ.get("AETHIS_BASE_URL") or raw.get("base_url", DEFAULT_BASE_URL)
+    _validate_base_url(base_url)
 
     return ProjectConfig(
         project=raw["project"],
