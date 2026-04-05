@@ -5,7 +5,7 @@
 # Shows three decision outcomes using the English Language requirement bundle:
 #   1. Eligible     — age exemption
 #   2. Not eligible — all fields fail every route
-#   3. PENDING  (undetermined) — partial input, engine picks the next question
+#   3. Undetermined — partial input, engine picks the next question
 #
 # Prerequisites:
 #   - aethis-core running on localhost:8080  (cd aethis-core && make dev)
@@ -86,12 +86,12 @@ run_decide() {
         --bundle-id "$BUNDLE" --input "$input" "$@") 2>/dev/null
 }
 
-# ── 1. Eligible (age exemption) ──────────────────────
+# ── 1. Eligible (age exemption) ────────────────────────────
 header "1. Eligible (age >= 65 triggers age exemption)"
 
 run_decide '{"lang.age": 70}'
 
-# ── 2. Not eligible (all routes exhausted) ─────────
+# ── 2. Not eligible (all routes exhausted) ─────────────────
 header "2. Not eligible (all fields provided, no route satisfied)"
 
 run_decide '{
