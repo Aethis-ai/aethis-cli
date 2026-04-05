@@ -1,7 +1,22 @@
 __pycache__/
+*.pyc
 *.egg-info/
 dist/
 build/
 .pytest_cache/
 uv.lock
 .venv/
+
+# Secrets
+.env
+.env.*
+credentials
+
+# OS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
