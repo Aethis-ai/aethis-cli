@@ -52,7 +52,7 @@ testpaths = ["tests"]
 markers = [
     "manual: requires real Aethis API (AETHIS_API_KEY + AETHIS_BASE_URL)",
 ]
-addopts = "-m 'not manual'"
+addopts = "-m 'not manual' --cov=aethis_cli --cov-fail-under=45"
 
 [tool.ruff]
 target-version = "py311"

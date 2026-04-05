@@ -13,7 +13,7 @@ def tmp_project(tmp_path: Path) -> Path:
     (tmp_path / "aethis.yaml").write_text(
         "project: test-policy\n"
         "api_key_env: AETHIS_API_KEY\n"
-        "base_url: http://test.local\n"
+        "base_url: https://test.local\n"
     )
     (tmp_path / "sources").mkdir()
     (tmp_path / "sources" / "policy.md").write_text("# Test Policy\nAll applicants must be over 18.")

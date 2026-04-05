@@ -125,6 +125,13 @@ pip install -e ".[dev]"
 pytest tests/ -v
 ```
 
+## Shell completions
+
+```bash
+# Install tab completion for your shell
+aethis --install-completion bash   # or zsh, fish, powershell
+```
+
 ## License
 
 MIT

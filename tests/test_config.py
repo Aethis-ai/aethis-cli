@@ -14,7 +14,7 @@ def test_load_config_from_cwd(tmp_project, monkeypatch):
     cfg = load_project_config()
     assert cfg.project == "test-policy"
     assert cfg.api_key_env == "AETHIS_API_KEY"
-    assert cfg.base_url == "http://test.local"
+    assert cfg.base_url == "https://test.local"
 
 
 def test_load_config_walks_up(tmp_project, monkeypatch):
