@@ -49,6 +49,7 @@ if [[ -n "${1:-}" ]]; then
     BUNDLE="$1"
 else
     BUNDLE=$(curl -sf "${BASE_URL}/api/rules/available-rules" \
+        -H "X-API-Key: ${AETHIS_API_KEY}" \
         | python3 -c "
 import json, sys
 rules = json.load(sys.stdin).get('rules', [])
