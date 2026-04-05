@@ -77,10 +77,12 @@ def decide(
 
 
 _STATUS_ICONS = {
-    "satisfied": "[green]PASS[/green]", "SAT": "[green]PASS[/green]",
-    "not_satisfied": "[red]FAIL[/red]", "UNSAT": "[red]FAIL[/red]",
+    "satisfied": "[green]PASS[/green]",
+    "not_satisfied": "[red]FAIL[/red]",
     "pending": "[yellow]PENDING[/yellow]",
 }
+# Map API response values to display labels
+_API_STATUS_MAP = {"SAT": "satisfied", "UNSAT": "not_satisfied", "UNKNOWN": "pending"}
 
 
 def _print_trace(trace: dict) -> None:
@@ -93,7 +95,8 @@ def _print_trace(trace: dict) -> None:
     groups = trace.get("group_statuses")
     if groups:
         for group, status in groups.items():
-            icon = _STATUS_ICONS.get(status, f"[yellow]{status}[/yellow]")
+            mapped = _API_STATUS_MAP.get(status, status)
+            icon = _STATUS_ICONS.get(mapped, f"[yellow]{mapped}[/yellow]")
             console.print(f"  {icon}  {group}")
 
     reqs = trace.get("requirements")
