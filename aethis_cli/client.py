@@ -75,8 +75,23 @@ class AethisClient:
     def get_project(self, project_id: str) -> dict:
         return self._request("GET", f"/api/v1/public/projects/{project_id}")
 
-    def add_guidance(self, project_id: str, guidance_text: str) -> dict:
+    def add_guidance(self, project_id: str, guidance_text: str, source: str = "human") -> dict:
         return self._request("POST", f"/api/v1/public/projects/{project_id}/guidance", json={
+            "guidance_text": guidance_text,
+            "source": source,
+        })
+
+    def list_guidance(self, project_id: str) -> list:
+        return self._request("GET", f"/api/v1/public/projects/{project_id}/guidance")
+
+    def export_guidance(self, project_id: str) -> dict:
+        return self._request("GET", f"/api/v1/public/projects/{project_id}/guidance/export")
+
+    def deactivate_guidance(self, project_id: str, hint_id: str) -> dict:
+        return self._request("DELETE", f"/api/v1/public/projects/{project_id}/guidance/{hint_id}")
+
+    def update_guidance(self, project_id: str, hint_id: str, guidance_text: str) -> dict:
+        return self._request("PATCH", f"/api/v1/public/projects/{project_id}/guidance/{hint_id}", json={
             "guidance_text": guidance_text,
         })
 
