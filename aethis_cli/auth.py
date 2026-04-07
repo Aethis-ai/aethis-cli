@@ -22,8 +22,8 @@ _SUCCESS_HTML = """\
 <html><head><title>Aethis CLI</title></head>
 <body style="font-family:system-ui;display:flex;justify-content:center;align-items:center;height:90vh">
 <div style="text-align:center">
-<h2>Authenticated</h2>
-<p>You can close this tab and return to the terminal.</p>
+<h2>&#10003; Sign-in received</h2>
+<p>Return to your terminal to complete setup.</p>
 </div></body></html>"""
 
 

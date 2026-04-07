@@ -7,7 +7,7 @@ from typing import Optional
 import typer
 
 from aethis_cli._version import __version__
-from aethis_cli.errors import AuthenticationError, ConfigError
+from aethis_cli.errors import AethisAPIError, AuthenticationError, ConfigError
 from aethis_cli.output import console
 from aethis_cli.commands.account_cmd import account_app
 from aethis_cli.commands.bundles_cmd import bundles_app
@@ -68,6 +68,11 @@ def cli() -> None:
         raise SystemExit(1)
     except AuthenticationError as e:
         console.print(f"[red]Auth error:[/red] {e}")
+        raise SystemExit(1)
+    except AethisAPIError as e:
+        console.print(f"[red]Error: {e.detail} (HTTP {e.status_code})[/red]", highlight=False)
+        if e.status_code == 401:
+            console.print("[dim]Run 'aethis login' to re-authenticate.[/dim]")
         raise SystemExit(1)
 
 

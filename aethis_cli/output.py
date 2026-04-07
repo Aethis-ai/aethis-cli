@@ -12,6 +12,8 @@ console = Console()
 def error_panel(e: AethisAPIError) -> None:
     """Render an API error as a single line."""
     console.print(f"[red]Error: {e.detail} (HTTP {e.status_code})[/red]", highlight=False)
+    if e.status_code == 401:
+        console.print("[dim]Run 'aethis login' to re-authenticate.[/dim]")
 
 
 def success(msg: str) -> None:
