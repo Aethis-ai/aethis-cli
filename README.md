@@ -1,6 +1,6 @@
 # aethis-cli
 
-CLI for the [Aethis](https://aethis.ai) developer API — author, test, and publish rule bundles from the terminal.
+CLI for the [Aethis](https://aethis.ai) developer API — evaluate eligibility, author rule bundles, and publish from the terminal.
 
 ## Install
 
@@ -9,6 +9,23 @@ pip install aethis-cli
 ```
 
 ## Quick start
+
+No sign-up needed. Decision tools work immediately.
+
+```bash
+# Evaluate eligibility against a published bundle
+aethis decide -b <bundle_id> -i '{"space.crew.age": 35, "space.medical.cert_valid": true}'
+
+# Inspect the input fields a bundle expects
+aethis fields -b <bundle_id>
+
+# Get human-readable rule descriptions
+aethis explain -b <bundle_id>
+```
+
+## Author your own rules
+
+Authoring requires an API key. Access is rolling out now — [register interest](https://aethis.ai/dashboard).
 
 ```bash
 # 1. Authenticate (creates a key via browser sign-in)
@@ -30,9 +47,6 @@ aethis test
 
 # 6. Publish the bundle
 aethis publish
-
-# 7. Evaluate eligibility
-aethis decide -i '{"space.crew.age": 35, "space.medical.cert_valid": true}'
 ```
 
 ## Try the example
@@ -110,11 +124,11 @@ tests:
 
 ## Environment variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `AETHIS_API_KEY` | Your API key (`ak_live_...`) | — |
-| `AETHIS_BASE_URL` | API base URL | `https://api.aethis.ai` |
-| `AETHIS_CLERK_DOMAIN` | Clerk domain override (development only) | `clerk.aethis.legal` |
+| Variable | Description | Required | Default |
+|----------|-------------|----------|---------|
+| `AETHIS_API_KEY` | Your API key (`ak_live_...`) | Authoring only | — |
+| `AETHIS_BASE_URL` | API base URL | No | `https://api.aethis.ai` |
+| `AETHIS_CLERK_DOMAIN` | Clerk domain override (development only) | No | `clerk.aethis.legal` |
 
 ## Development
 
@@ -131,6 +145,10 @@ pytest tests/ -v
 # Install tab completion for your shell
 aethis --install-completion bash   # or zsh, fish, powershell
 ```
+
+## Benchmarks
+
+See how the engine compares to frontier LLMs on real-world eligibility rules: [aethis-examples](https://github.com/Aethis-ai/aethis-examples)
 
 ## License
 
