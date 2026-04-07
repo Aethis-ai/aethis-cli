@@ -30,7 +30,7 @@ Documentation = "https://github.com/Aethis-ai/aethis-cli#readme"
 "Bug Tracker" = "https://github.com/Aethis-ai/aethis-cli/issues"
 
 [project.scripts]
-aethis = "aethis_cli.main:app"
+aethis = "aethis_cli.main:cli"
 
 [project.optional-dependencies]
 keyring = ["keyring>=25.0.0"]

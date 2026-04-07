@@ -7,6 +7,8 @@ from typing import Optional
 import typer
 
 from aethis_cli._version import __version__
+from aethis_cli.errors import AuthenticationError, ConfigError
+from aethis_cli.output import console
 from aethis_cli.commands.account_cmd import account_app
 from aethis_cli.commands.bundles_cmd import bundles_app
 from aethis_cli.commands.guidance_cmd import guidance_app
@@ -57,5 +59,17 @@ app.command()(fields)
 app.command()(explain)
 app.command()(decide)
 
+def cli() -> None:
+    """Entry point wrapper that catches config/auth errors cleanly."""
+    try:
+        app()
+    except ConfigError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise SystemExit(1)
+    except AuthenticationError as e:
+        console.print(f"[red]Auth error:[/red] {e}")
+        raise SystemExit(1)
+
+
 if __name__ == "__main__":
-    app()
+    cli()
