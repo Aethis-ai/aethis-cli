@@ -91,6 +91,34 @@ def export_hints(
         console.print(yaml_output)
 
 
+@guidance_app.command("deactivate")
+def deactivate_hint(
+    hint_id: str = typer.Argument(..., help="UUID of the hint to deactivate"),
+    project_id: Optional[str] = typer.Option(None, "--project-id", "-p"),
+) -> None:
+    """Soft-deactivate a hint (preserved in database, excluded from future runs)."""
+    try:
+        cfg = load_project_config()
+        api_key = resolve_api_key(cfg)
+    except ConfigError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(code=1)
+
+    client = AethisClient(api_key, cfg.base_url)
+
+    pid = project_id or cfg.project_id
+    if not pid:
+        console.print("[red]No project ID.[/red]")
+        raise typer.Exit(code=1)
+
+    try:
+        client.deactivate_guidance(pid, hint_id)
+        success(f"Hint {hint_id} deactivated")
+    except AethisAPIError as e:
+        error_panel(e)
+        raise typer.Exit(code=1)
+
+
 @guidance_app.command("import")
 def import_hints(
     file: Path = typer.Argument(..., help="YAML file with hints to import"),
