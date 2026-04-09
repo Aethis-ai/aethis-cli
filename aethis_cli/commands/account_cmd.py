@@ -19,14 +19,78 @@ _BASE_URL = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
 CLERK_DOMAIN = os.environ.get("AETHIS_CLERK_DOMAIN", "clerk.aethis.legal")
 CLERK_CLIENT_ID = os.environ.get("AETHIS_CLERK_CLIENT_ID", "cwH009p1vPtyy1EG")
 
-VALID_SCOPES = {"decide", "bundles:read", "bundles:explain", "bundles:write", "keys:manage", "projects:write"}
+VALID_SCOPES = {
+    "decide",
+    "bundles:read",
+    "bundles:explain",
+    "bundles:write",
+    "keys:manage",
+    "projects:read",
+    "projects:write",
+    "rulesets:read",
+    "rulesets:write",
+}
 VALID_TIERS = {"free", "starter", "pro"}
+DEFAULT_SCOPES = ["decide", "projects:read", "projects:write", "bundles:read", "bundles:explain", "bundles:write"]
 
 account_app = typer.Typer(
     name="account",
     help="Manage your Aethis account and API keys (browser sign-in).",
     no_args_is_help=True,
 )
+
+
+def _format_api_error(resp: httpx.Response) -> str:
+    try:
+        data = resp.json()
+    except Exception:
+        return resp.text
+
+    detail = data.get("detail") if isinstance(data, dict) else data
+    if isinstance(detail, dict):
+        reason = detail.get("reason_code", "unknown")
+        action = detail.get("action", "unknown")
+        missing = detail.get("missing_permissions", [])
+        missing_str = ", ".join(missing) if isinstance(missing, list) else str(missing)
+        msg = detail.get("message") or detail.get("error") or "Request denied"
+        return f"{msg} (reason={reason}, action={action}, missing={missing_str})"
+    if isinstance(detail, str):
+        return detail
+    return str(detail)
+
+
+def _fetch_permissions(base_url: str) -> tuple[list[dict], set[str]]:
+    try:
+        resp = httpx.get(f"{base_url}/api/v1/public/permissions", timeout=10.0)
+    except httpx.HTTPError:
+        return [], set(VALID_SCOPES)
+
+    if resp.status_code != 200:
+        return [], set(VALID_SCOPES)
+
+    try:
+        items = resp.json()
+    except Exception:
+        return [], set(VALID_SCOPES)
+
+    if not isinstance(items, list):
+        return [], set(VALID_SCOPES)
+
+    permissions: set[str] = set()
+    parsed_items: list[dict] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        req = item.get("required_permissions", [])
+        if isinstance(req, list):
+            for p in req:
+                if isinstance(p, str) and p:
+                    permissions.add(p)
+        parsed_items.append(item)
+
+    if not permissions:
+        permissions = set(VALID_SCOPES)
+    return parsed_items, permissions
 
 
 def _get_clerk_config() -> tuple[str, str]:
@@ -66,13 +130,15 @@ def generate(
 ) -> None:
     """Create a new API key by signing in through your browser."""
     if scopes is None:
-        scopes = ["decide", "projects:write", "bundles:read", "bundles:explain", "bundles:write"]
+        scopes = list(DEFAULT_SCOPES)
+
+    _, available_permissions = _fetch_permissions(base_url)
 
     # Validate inputs
-    invalid_scopes = set(scopes) - VALID_SCOPES
+    invalid_scopes = set(scopes) - available_permissions
     if invalid_scopes:
         console.print(f"[red]Invalid scope(s): {', '.join(invalid_scopes)}[/red]")
-        console.print(f"Valid scopes: {', '.join(sorted(VALID_SCOPES))}")
+        console.print(f"Valid scopes: {', '.join(sorted(available_permissions))}")
         raise typer.Exit(code=1)
 
     if tier not in VALID_TIERS:
@@ -96,7 +162,7 @@ def generate(
         raise typer.Exit(code=1) from None
 
     if resp.status_code != 201:
-        console.print(f"[red]Key creation failed (HTTP {resp.status_code}): {resp.text}[/red]")
+        console.print(f"[red]Key creation failed (HTTP {resp.status_code}): {_format_api_error(resp)}[/red]")
         raise typer.Exit(code=1)
 
     data = resp.json()
@@ -146,7 +212,7 @@ def keys(
         raise typer.Exit(code=1) from None
 
     if resp.status_code != 200:
-        console.print(f"[red]Failed to list keys (HTTP {resp.status_code}): {resp.text}[/red]")
+        console.print(f"[red]Failed to list keys (HTTP {resp.status_code}): {_format_api_error(resp)}[/red]")
         raise typer.Exit(code=1)
 
     data = resp.json()
@@ -209,5 +275,33 @@ def revoke(
         console.print(f"[red]Key {key_id} not found.[/red]")
         raise typer.Exit(code=1)
     else:
-        console.print(f"[red]Revoke failed (HTTP {resp.status_code}): {resp.text}[/red]")
+        console.print(f"[red]Revoke failed (HTTP {resp.status_code}): {_format_api_error(resp)}[/red]")
         raise typer.Exit(code=1)
+
+
+@account_app.command("permissions")
+def permissions(
+    base_url: str = typer.Option(_BASE_URL, "--base-url", help="API base URL"),
+) -> None:
+    """List canonical API permissions and action mappings."""
+    items, available_permissions = _fetch_permissions(base_url)
+
+    if not items:
+        info("Permission registry endpoint unavailable; showing fallback scope list.")
+        console.print("\n".join(sorted(available_permissions)))
+        return
+
+    from rich.table import Table
+
+    table = Table(title="API Permissions")
+    table.add_column("Action", style="bold")
+    table.add_column("Required permissions")
+    table.add_column("Description")
+
+    for item in items:
+        table.add_row(
+            str(item.get("action", "")),
+            ", ".join(item.get("required_permissions", [])),
+            str(item.get("description", "")),
+        )
+    console.print(table)

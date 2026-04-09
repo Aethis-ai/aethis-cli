@@ -24,6 +24,17 @@ from aethis_cli.commands.explain_cmd import explain
 from aethis_cli.commands.decide_cmd import decide
 
 
+def _format_error_detail(detail: object) -> str:
+    if isinstance(detail, dict):
+        reason = detail.get("reason_code", "unknown")
+        action = detail.get("action", "unknown")
+        missing = detail.get("missing_permissions", [])
+        missing_str = ", ".join(missing) if isinstance(missing, list) else str(missing)
+        message = detail.get("message") or detail.get("error") or "Request denied"
+        return f"{message} (reason={reason}, action={action}, missing={missing_str})"
+    return str(detail)
+
+
 def _version_callback(value: bool) -> None:
     if value:
         print(f"aethis {__version__}")
@@ -39,8 +50,9 @@ app = typer.Typer(
 
 @app.callback(invoke_without_command=True)
 def main(
-    version: Optional[bool] = typer.Option(None, "--version", "-V", callback=_version_callback, is_eager=True,
-                                           help="Show version and exit."),
+    version: Optional[bool] = typer.Option(
+        None, "--version", "-V", callback=_version_callback, is_eager=True, help="Show version and exit."
+    ),
 ) -> None:
     """CLI for the Aethis developer API — author, test, and publish rule bundles."""
 
@@ -59,6 +71,7 @@ app.command()(fields)
 app.command()(explain)
 app.command()(decide)
 
+
 def cli() -> None:
     """Entry point wrapper that catches config/auth errors cleanly."""
     try:
@@ -70,7 +83,8 @@ def cli() -> None:
         console.print(f"[red]Auth error:[/red] {e}")
         raise SystemExit(1)
     except AethisAPIError as e:
-        console.print(f"[red]Error: {e.detail} (HTTP {e.status_code})[/red]", highlight=False)
+        detail = _format_error_detail(e.detail)
+        console.print(f"[red]Error: {detail} (HTTP {e.status_code})[/red]", highlight=False)
         if e.status_code == 401:
             console.print("[dim]Run 'aethis login' to re-authenticate.[/dim]")
         raise SystemExit(1)

@@ -9,6 +9,7 @@ import pytest
 from typer.testing import CliRunner
 
 from aethis_cli.main import app
+from aethis_cli.commands.account_cmd import VALID_SCOPES
 
 runner = CliRunner()
 
@@ -44,10 +45,11 @@ MOCK_KEYS_LIST = [
 
 
 class TestAccountGenerate:
+    @patch("aethis_cli.commands.account_cmd._fetch_permissions", return_value=([], set(VALID_SCOPES)))
     @patch("aethis_cli.commands.account_cmd._save_to_keyring", return_value=True)
     @patch("aethis_cli.commands.account_cmd.httpx.post")
     @patch("aethis_cli.commands.account_cmd._clerk_auth", return_value=MOCK_ACCESS_TOKEN)
-    def test_generate_success(self, mock_auth, mock_post, mock_keyring):
+    def test_generate_success(self, mock_auth, mock_post, mock_keyring, mock_permissions):
         mock_post.return_value = MagicMock(status_code=201, json=MagicMock(return_value=MOCK_KEY_RESPONSE))
 
         result = runner.invoke(app, ["account", "generate", "--name", "test-key"])
@@ -56,10 +58,11 @@ class TestAccountGenerate:
         assert "ak_live_abcdef123456" in result.output
         assert "saved" in result.output.lower()
 
+    @patch("aethis_cli.commands.account_cmd._fetch_permissions", return_value=([], set(VALID_SCOPES)))
     @patch("aethis_cli.commands.account_cmd._save_to_keyring", return_value=True)
     @patch("aethis_cli.commands.account_cmd.httpx.post")
     @patch("aethis_cli.commands.account_cmd._clerk_auth", return_value=MOCK_ACCESS_TOKEN)
-    def test_generate_no_save(self, mock_auth, mock_post, mock_keyring):
+    def test_generate_no_save(self, mock_auth, mock_post, mock_keyring, mock_permissions):
         mock_post.return_value = MagicMock(status_code=201, json=MagicMock(return_value=MOCK_KEY_RESPONSE))
 
         result = runner.invoke(app, ["account", "generate", "--no-save"])
@@ -68,9 +71,10 @@ class TestAccountGenerate:
         assert "--no-save" in result.output
         mock_keyring.assert_not_called()
 
+    @patch("aethis_cli.commands.account_cmd._fetch_permissions", return_value=([], set(VALID_SCOPES)))
     @patch("aethis_cli.commands.account_cmd.httpx.post")
     @patch("aethis_cli.commands.account_cmd._clerk_auth", return_value=MOCK_ACCESS_TOKEN)
-    def test_generate_api_failure(self, mock_auth, mock_post):
+    def test_generate_api_failure(self, mock_auth, mock_post, mock_permissions):
         mock_post.return_value = MagicMock(status_code=500, text="Internal error")
 
         result = runner.invoke(app, ["account", "generate"])
@@ -83,22 +87,25 @@ class TestAccountGenerate:
         # Actually scope validation happens after auth. Let's mock auth.
         pass
 
+    @patch("aethis_cli.commands.account_cmd._fetch_permissions", return_value=([], set(VALID_SCOPES)))
     @patch("aethis_cli.commands.account_cmd._clerk_auth", return_value=MOCK_ACCESS_TOKEN)
-    def test_generate_invalid_scope_rejected(self, mock_auth):
+    def test_generate_invalid_scope_rejected(self, mock_auth, mock_permissions):
         result = runner.invoke(app, ["account", "generate", "--scope", "not_a_scope"])
         assert result.exit_code == 1
         assert "Invalid scope" in result.output
 
+    @patch("aethis_cli.commands.account_cmd._fetch_permissions", return_value=([], set(VALID_SCOPES)))
     @patch("aethis_cli.commands.account_cmd._clerk_auth", return_value=MOCK_ACCESS_TOKEN)
-    def test_generate_invalid_tier_rejected(self, mock_auth):
+    def test_generate_invalid_tier_rejected(self, mock_auth, mock_permissions):
         result = runner.invoke(app, ["account", "generate", "--tier", "enterprise"])
         assert result.exit_code == 1
         assert "Invalid tier" in result.output
 
+    @patch("aethis_cli.commands.account_cmd._fetch_permissions", return_value=([], set(VALID_SCOPES)))
     @patch("aethis_cli.commands.account_cmd._save_to_keyring", return_value=True)
     @patch("aethis_cli.commands.account_cmd.httpx.post")
     @patch("aethis_cli.commands.account_cmd._clerk_auth", return_value=MOCK_ACCESS_TOKEN)
-    def test_generate_sends_bearer_token(self, mock_auth, mock_post, mock_keyring):
+    def test_generate_sends_bearer_token(self, mock_auth, mock_post, mock_keyring, mock_permissions):
         mock_post.return_value = MagicMock(status_code=201, json=MagicMock(return_value=MOCK_KEY_RESPONSE))
 
         runner.invoke(app, ["account", "generate"])
@@ -127,6 +134,61 @@ class TestAccountKeys:
         result = runner.invoke(app, ["account", "keys"])
         assert result.exit_code == 0
         assert "No API keys" in result.output
+
+
+class TestAccountPermissions:
+    @patch("aethis_cli.commands.account_cmd.httpx.get")
+    def test_permissions_renders_registry_table(self, mock_get):
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            json=MagicMock(
+                return_value=[
+                    {
+                        "action": "project.write",
+                        "required_permissions": ["projects:write"],
+                        "description": "Create and mutate projects",
+                    }
+                ]
+            ),
+        )
+        result = runner.invoke(app, ["account", "permissions"])
+        assert result.exit_code == 0
+        assert "project.write" in result.output
+        assert "projects:write" in result.output
+
+    @patch("aethis_cli.commands.account_cmd.httpx.get")
+    def test_permissions_falls_back_when_endpoint_unavailable(self, mock_get):
+        mock_get.return_value = MagicMock(status_code=500, json=MagicMock(return_value={"detail": "error"}))
+        result = runner.invoke(app, ["account", "permissions"])
+        assert result.exit_code == 0
+        assert "fallback" in result.output.lower()
+        assert "decide" in result.output
+
+
+class TestApiErrorFormatting:
+    @patch("aethis_cli.commands.account_cmd._fetch_permissions", return_value=([], set(VALID_SCOPES)))
+    @patch("aethis_cli.commands.account_cmd.httpx.post")
+    @patch("aethis_cli.commands.account_cmd._clerk_auth", return_value=MOCK_ACCESS_TOKEN)
+    def test_generate_surfaces_authz_error_detail(self, mock_auth, mock_post, mock_permissions):
+        mock_post.return_value = MagicMock(
+            status_code=403,
+            text="forbidden",
+            json=MagicMock(
+                return_value={
+                    "detail": {
+                        "reason_code": "denied_missing_permission",
+                        "action": "scope.projects:write",
+                        "missing_permissions": ["projects:write"],
+                        "message": "API key missing required scope",
+                    }
+                }
+            ),
+        )
+
+        result = runner.invoke(app, ["account", "generate"])
+        assert result.exit_code == 1
+        assert "reason=denied_missing_permission" in result.output
+        assert "missing=projects:write" in result.output
 
 
 class TestAccountRevoke:
