@@ -142,6 +142,7 @@ tests:
 | `AETHIS_API_KEY` | Your API key (`ak_live_...`) | Authoring only | — |
 | `AETHIS_BASE_URL` | API base URL | No | `https://api.aethis.ai` |
 | `AETHIS_CLERK_DOMAIN` | Clerk domain override (development only) | No | `clerk.aethis.legal` |
+| `AETHIS_ACCESS_TOKEN` | Clerk bearer token for non-interactive IAM commands | No | — |
 
 ## IAM workflows (CLI-first)
 
@@ -164,6 +165,8 @@ aethis iam groups-remove-user eng user_123 --org-id org_1
 aethis iam relationships-add --org-id org_1 --domain tda --subject-id sol_1 --relation assigned_to --object-type client --object-id client_1
 aethis iam relationships-list --org-id org_1 --domain tda
 ```
+
+Developer guide: `docs/iam-developer-guide.md`
 
 ## Development
 
