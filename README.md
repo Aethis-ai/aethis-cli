@@ -168,6 +168,8 @@ aethis iam relationships-list --org-id org_1 --domain tda
 
 Developer guide: `docs/iam-developer-guide.md`
 
+Administrator onboarding guide (core-side): `aethis-core/docs/iam-admin-user-guide.md`
+
 ## Development
 
 ```bash
