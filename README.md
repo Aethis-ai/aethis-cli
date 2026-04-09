@@ -170,6 +170,7 @@ Developer guide: `docs/iam-developer-guide.md`
 Command reference: `docs/iam-command-reference.md`
 
 Administrator onboarding guide (core-side): `aethis-core/docs/iam-admin-user-guide.md`
+Administrator quickstart (core-side): `aethis-core/docs/iam-admin-quickstart.md`
 
 ## Development
 
