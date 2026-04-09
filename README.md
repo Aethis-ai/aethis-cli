@@ -71,18 +71,6 @@ See `examples/spacecraft-crew-rules/README.md` for details.
 | `aethis account keys` | List your API keys (masked) |
 | `aethis account revoke` | Revoke an API key by ID |
 | `aethis account permissions` | List canonical API permission mappings |
-| `aethis iam users-list` | List users in an org |
-| `aethis iam grant-role` | Grant role to a user |
-| `aethis iam revoke-role` | Revoke role from a user |
-| `aethis iam groups-list` | List groups in an org |
-| `aethis iam groups-create` | Create a group |
-| `aethis iam groups-delete` | Delete a group |
-| `aethis iam groups-add-user` | Add user to group |
-| `aethis iam groups-remove-user` | Remove user from group |
-| `aethis iam relationships-list` | List relationship tuples |
-| `aethis iam relationships-add` | Add a relationship tuple |
-| `aethis iam relationships-remove` | Remove a relationship tuple |
-| `aethis iam audit` | Query IAM audit events |
 | `aethis login` | Paste an existing API key |
 | `aethis init` | Initialise a new project in the current directory |
 | `aethis generate` | Upload sources + guidance, trigger generation, poll until done |
@@ -142,35 +130,10 @@ tests:
 | `AETHIS_API_KEY` | Your API key (`ak_live_...`) | Authoring only | — |
 | `AETHIS_BASE_URL` | API base URL | No | `https://api.aethis.ai` |
 | `AETHIS_CLERK_DOMAIN` | Clerk domain override (development only) | No | `clerk.aethis.legal` |
-| `AETHIS_ACCESS_TOKEN` | Clerk bearer token for non-interactive IAM commands | No | — |
 
-## IAM workflows (CLI-first)
+## Internal admin workflows
 
-Use IAM commands to manage access for users and groups:
-
-```bash
-# List users in an org
-aethis iam users-list --org-id org_1
-
-# Grant and revoke a role
-aethis iam grant-role user_123 --org-id org_1 --domain core --role author
-aethis iam revoke-role user_123 author --org-id org_1 --domain core
-
-# Manage groups
-aethis iam groups-create eng --name "Engineering" --org-id org_1
-aethis iam groups-add-user eng user_123 --org-id org_1
-aethis iam groups-remove-user eng user_123 --org-id org_1
-
-# Relationship-based access (e.g. solicitor -> client)
-aethis iam relationships-add --org-id org_1 --domain tda --subject-id sol_1 --relation assigned_to --object-type client --object-id client_1
-aethis iam relationships-list --org-id org_1 --domain tda
-```
-
-Developer guide: `docs/iam-developer-guide.md`
-Command reference: `docs/iam-command-reference.md`
-
-Administrator onboarding guide (core-side): `aethis-core/docs/iam-admin-user-guide.md`
-Administrator quickstart (core-side): `aethis-core/docs/iam-admin-quickstart.md`
+IAM administration commands have moved to the internal `aethis-admin` tool.
 
 ## Development
 
