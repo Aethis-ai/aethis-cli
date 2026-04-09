@@ -124,7 +124,7 @@ def login(
             headers={"Authorization": f"Bearer {access_token}"},
             json={
                 "name": "cli-login",
-                "scopes": ["decide", "projects:write", "bundles:read", "bundles:explain", "bundles:write"],
+                "scopes": ["decide", "projects:read", "projects:write", "bundles:read", "bundles:explain", "bundles:write"],
                 "rate_limit_tier": "free",
             },
             timeout=15.0,
