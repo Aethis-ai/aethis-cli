@@ -21,6 +21,9 @@ iam_app = typer.Typer(name="iam", help="Manage IAM users/groups/relationships.",
 
 
 def _clerk_auth(timeout: int) -> str:
+    access_token = os.environ.get("AETHIS_ACCESS_TOKEN")
+    if access_token:
+        return access_token
     try:
         return authenticate_with_clerk(CLERK_DOMAIN, CLERK_CLIENT_ID, timeout)
     except AuthenticationError as e:

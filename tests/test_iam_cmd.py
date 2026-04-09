@@ -119,3 +119,10 @@ def test_iam_structured_deny_is_rendered(monkeypatch) -> None:
     finally:
         server.shutdown()
         thread.join(timeout=1)
+
+
+def test_iam_uses_env_access_token(monkeypatch) -> None:
+    monkeypatch.setenv("AETHIS_ACCESS_TOKEN", "tok_env")
+    from aethis_cli.commands.iam_cmd import _clerk_auth
+
+    assert _clerk_auth(120) == "tok_env"
