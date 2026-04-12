@@ -27,8 +27,8 @@ VALID_SCOPES = {
     "keys:manage",
     "projects:read",
     "projects:write",
-    "rulesets:read",
-    "rulesets:write",
+    "rulebooks:read",
+    "rulebooks:write",
 }
 VALID_TIERS = {"free", "starter", "pro"}
 DEFAULT_SCOPES = ["decide", "projects:read", "projects:write", "bundles:read", "bundles:explain", "bundles:write"]

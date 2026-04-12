@@ -57,6 +57,9 @@ class AethisClient:
     def explain(self, bundle_id: str) -> dict:
         return self._request("GET", f"/api/v1/public/bundles/{bundle_id}/explain")
 
+    def get_source(self, bundle_id: str) -> dict:
+        return self._request("GET", f"/api/v1/public/bundles/{bundle_id}/source")
+
     # -- Projects API --
 
     def create_project(self, name: str, section_id: str, domain: str = "") -> dict:

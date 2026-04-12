@@ -22,6 +22,7 @@ from aethis_cli.commands.publish_cmd import publish
 from aethis_cli.commands.fields_cmd import fields
 from aethis_cli.commands.explain_cmd import explain
 from aethis_cli.commands.decide_cmd import decide
+from aethis_cli.commands.source_cmd import source
 
 
 def _format_error_detail(detail: object) -> str:
@@ -70,6 +71,7 @@ app.command()(publish)
 app.command()(fields)
 app.command()(explain)
 app.command()(decide)
+app.command()(source)
 
 
 def cli() -> None:
