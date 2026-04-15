@@ -11,6 +11,7 @@ from aethis_cli.errors import AethisAPIError, AuthenticationError, ConfigError
 from aethis_cli.output import console
 from aethis_cli.commands.account_cmd import account_app
 from aethis_cli.commands.bundles_cmd import bundles_app
+from aethis_cli.commands.domain_guidance_cmd import domain_guidance_app
 from aethis_cli.commands.guidance_cmd import guidance_app
 from aethis_cli.commands.projects_cmd import projects_app
 from aethis_cli.commands.init_cmd import init
@@ -48,6 +49,8 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+domain_app = typer.Typer(help="Domain-level operations.", no_args_is_help=True)
+
 
 @app.callback(invoke_without_command=True)
 def main(
@@ -58,8 +61,11 @@ def main(
     """CLI for the Aethis developer API — author, test, and publish rule bundles."""
 
 
+domain_app.add_typer(domain_guidance_app, name="guidance")
+
 app.add_typer(account_app, name="account")
 app.add_typer(bundles_app, name="bundles")
+app.add_typer(domain_app, name="domain")
 app.add_typer(guidance_app, name="guidance")
 app.add_typer(projects_app, name="projects")
 app.command()(init)

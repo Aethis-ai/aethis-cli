@@ -81,11 +81,20 @@ def generate(
                 console.print(f"[red]Invalid YAML in {hints_path}: {e}[/red]")
                 raise typer.Exit(code=1)
             hints = raw.get("hints", [])
+            count = 0
             for hint in hints:
-                if hint:
-                    client.add_guidance(pid, str(hint))
-            if hints:
-                info(f"Added {len(hints)} guidance hint(s)")
+                if not hint:
+                    continue
+                if isinstance(hint, str):
+                    client.add_guidance(pid, hint)
+                else:
+                    text = hint.get("text", "")
+                    if text:
+                        process_type = hint.get("process_type", "rule_generation")
+                        client.add_guidance(pid, text, process_type=process_type)
+                count += 1
+            if count:
+                info(f"Added {count} guidance hint(s)")
 
         # Upload test cases
         tests_path = project_dir / "tests" / "scenarios.yaml"

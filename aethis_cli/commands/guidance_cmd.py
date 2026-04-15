@@ -152,13 +152,26 @@ def import_hints(
 
     try:
         count = 0
+        skipped = 0
         for hint in hints:
-            text = hint if isinstance(hint, str) else hint.get("text", "")
-            source = "human" if isinstance(hint, str) else hint.get("source", "human")
+            if isinstance(hint, str):
+                text = hint
+                source = "human"
+                process_type = "rule_generation"
+            else:
+                text = hint.get("text", "")
+                source = hint.get("source", "human")
+                process_type = hint.get("process_type", "rule_generation")
             if text:
-                client.add_guidance(pid, text, source=source)
-                count += 1
-        success(f"Imported {count} hint(s)")
+                result = client.add_guidance(pid, text, source=source, process_type=process_type)
+                if result.get("skipped"):
+                    skipped += 1
+                else:
+                    count += 1
+        parts = [f"Imported {count} hint(s)"]
+        if skipped:
+            parts.append(f"{skipped} skipped (already exist)")
+        success(", ".join(parts))
     except AethisAPIError as e:
         error_panel(e)
         raise typer.Exit(code=1)

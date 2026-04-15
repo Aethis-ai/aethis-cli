@@ -79,6 +79,7 @@ See `examples/spacecraft-crew-rules/README.md` for details.
 | `aethis publish` | Set the bundle as active |
 | `aethis fields` | Show input fields for the current bundle |
 | `aethis explain` | Show human-readable rule descriptions |
+| `aethis source` | Fetch the DSL source for a published bundle |
 | `aethis decide` | Evaluate eligibility with a JSON input |
 
 ## Project structure

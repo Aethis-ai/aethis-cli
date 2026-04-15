@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import httpx
 
@@ -78,10 +78,17 @@ class AethisClient:
     def get_project(self, project_id: str) -> dict:
         return self._request("GET", f"/api/v1/public/projects/{project_id}")
 
-    def add_guidance(self, project_id: str, guidance_text: str, source: str = "human") -> dict:
+    def add_guidance(
+        self,
+        project_id: str,
+        guidance_text: str,
+        source: str = "human",
+        process_type: str = "rule_generation",
+    ) -> dict:
         return self._request("POST", f"/api/v1/public/projects/{project_id}/guidance", json={
             "guidance_text": guidance_text,
             "source": source,
+            "process_type": process_type,
         })
 
     def list_guidance(self, project_id: str) -> list:
@@ -133,3 +140,20 @@ class AethisClient:
 
     def archive_bundle(self, bundle_id: str) -> dict:
         return self._request("POST", f"/api/v1/public/bundles/{bundle_id}/archive")
+
+    # -- Domain guidance API --
+
+    def add_domain_guidance(
+        self,
+        domain: str,
+        guidance_text: str,
+        process_type: str = "rule_generation",
+        notes: Optional[str] = None,
+    ) -> dict:
+        body: dict[str, Any] = {"guidance_text": guidance_text, "process_type": process_type}
+        if notes:
+            body["notes"] = notes
+        return self._request("POST", f"/api/v1/public/domains/{domain}/guidance", json=body)
+
+    def list_domain_guidance(self, domain: str) -> list:
+        return self._request("GET", f"/api/v1/public/domains/{domain}/guidance")
