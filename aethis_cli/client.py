@@ -13,10 +13,18 @@ from aethis_cli.errors import AethisAPIError
 class AethisClient:
     """Synchronous client wrapping all Aethis API endpoints."""
 
-    def __init__(self, api_key: str, base_url: str = "https://api.aethis.ai") -> None:
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str = "https://api.aethis.ai",
+        anthropic_key: Optional[str] = None,
+    ) -> None:
+        headers: dict[str, str] = {"X-API-Key": api_key}
+        if anthropic_key:
+            headers["X-Anthropic-Key"] = anthropic_key
         self._client = httpx.Client(
             base_url=base_url,
-            headers={"X-API-Key": api_key},
+            headers=headers,
             timeout=60.0,
             verify=True,
         )

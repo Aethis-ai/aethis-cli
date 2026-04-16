@@ -33,6 +33,7 @@ def _validate_base_url(url: str) -> None:
 class ProjectConfig:
     project: str
     api_key_env: str = "AETHIS_API_KEY"
+    anthropic_key_env: str = "ANTHROPIC_API_KEY"
     base_url: str = DEFAULT_BASE_URL
     project_id: Optional[str] = None
     config_path: Path = field(default_factory=lambda: Path.cwd())
@@ -62,6 +63,7 @@ def load_project_config(path: Optional[Path] = None) -> ProjectConfig:
     return ProjectConfig(
         project=raw["project"],
         api_key_env=raw.get("api_key_env", "AETHIS_API_KEY"),
+        anthropic_key_env=raw.get("anthropic_key_env", "ANTHROPIC_API_KEY"),
         base_url=base_url,
         project_id=project_id,
         config_path=project_dir,
@@ -95,6 +97,11 @@ def resolve_api_key(config: ProjectConfig) -> str:
     raise ConfigError(
         f"API key not found. Set ${config.api_key_env} or run 'aethis login'."
     )
+
+
+def resolve_anthropic_key(config: ProjectConfig) -> Optional[str]:
+    """Resolve Anthropic API key from env var. Returns None if not set."""
+    return os.environ.get(config.anthropic_key_env) or None
 
 
 def write_state(config_path: Path, data: dict) -> None:

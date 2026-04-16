@@ -11,7 +11,7 @@ import yaml
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 
 from aethis_cli.client import AethisClient
-from aethis_cli.config import load_project_config, resolve_api_key, write_state
+from aethis_cli.config import load_project_config, resolve_anthropic_key, resolve_api_key, write_state
 from aethis_cli.errors import AethisAPIError, ConfigError
 from aethis_cli.output import console, error_panel, info, success
 
@@ -30,11 +30,12 @@ def generate(
     try:
         cfg = load_project_config()
         api_key = resolve_api_key(cfg)
+        anthropic_key = resolve_anthropic_key(cfg)
     except ConfigError as e:
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(code=1)
 
-    client = AethisClient(api_key, cfg.base_url)
+    client = AethisClient(api_key, cfg.base_url, anthropic_key=anthropic_key)
     project_dir = cfg.config_path
 
     try:
