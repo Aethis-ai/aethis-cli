@@ -1,6 +1,6 @@
 [project]
 name = "aethis-cli"
-dynamic = ["version"]
+version = "0.1.1"
 description = "CLI for the Aethis developer API — author, test, and publish rule bundles"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -42,11 +42,8 @@ dev = [
 ]
 
 [build-system]
-requires = ["setuptools>=72", "setuptools-scm>=8", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
-
-[tool.setuptools_scm]
-version_file = "aethis_cli/_version.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
