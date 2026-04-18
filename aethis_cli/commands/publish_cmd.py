@@ -19,6 +19,17 @@ def publish(
         "--force",
         help="Publish even when tests are failing. Not recommended for production.",
     ),
+    slug: Optional[str] = typer.Option(
+        None,
+        "--slug",
+        help=(
+            "Optional stable human-readable alias for this bundle, e.g. "
+            "'acme/insurance/car'. Survives regeneration — callers can hit "
+            "the slug from /decide and always get the current active bundle. "
+            "Format: lowercase ASCII segments separated by '/'. The 'aethis/*' "
+            "namespace is reserved for official bundles."
+        ),
+    ),
 ) -> None:
     """Publish the latest generated bundle (make it active for /decide).
 
@@ -68,9 +79,12 @@ def publish(
             )
 
     try:
-        result = client.publish(pid)
+        result = client.publish(pid, slug=slug)
     except AethisAPIError as e:
         error_panel(e)
         raise typer.Exit(code=1)
 
-    success(f"Published bundle {result.get('bundle_id')}")
+    msg = f"Published bundle {result.get('bundle_id')}"
+    if result.get("slug"):
+        msg += f" — slug: {result['slug']}"
+    success(msg)

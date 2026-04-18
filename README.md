@@ -29,7 +29,7 @@ aethis explain -b <bundle_id>
 
 ## Author your own rules
 
-Authoring requires an API key. Access is rolling out now — [register interest](https://aethis.ai/dashboard).
+Rule authoring is **invite-only private beta**. Decision tools (`aethis decide`, `aethis fields`, `aethis explain`) work immediately with no sign-up — this section is for approved beta tenants. [Request access →](https://aethis.ai/sign-up)
 
 ```bash
 # 1. Authenticate (creates a key via browser sign-in)

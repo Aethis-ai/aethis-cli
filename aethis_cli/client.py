@@ -134,8 +134,18 @@ class AethisClient:
     def run_tests(self, project_id: str) -> dict:
         return self._request("POST", f"/api/v1/public/projects/{project_id}/test-run")
 
-    def publish(self, project_id: str) -> dict:
-        return self._request("POST", f"/api/v1/public/projects/{project_id}/publish")
+    def publish(self, project_id: str, *, slug: str | None = None) -> dict:
+        body: dict = {}
+        if slug is not None:
+            body["slug"] = slug
+        kwargs: dict = {}
+        if body:
+            kwargs["json"] = body
+        return self._request(
+            "POST",
+            f"/api/v1/public/projects/{project_id}/publish",
+            **kwargs,
+        )
 
     def list_bundles(self, project_id: str, status: str | None = None) -> list[dict]:
         params: dict[str, str] = {}
