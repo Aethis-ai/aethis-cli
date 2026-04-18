@@ -59,6 +59,10 @@ class AethisClient:
             **opts,
         })
 
+    def whoami(self) -> dict:
+        """Return metadata for the current API key."""
+        return self._request("GET", "/api/v1/public/me")
+
     def get_schema(self, bundle_id: str) -> dict:
         return self._request("GET", f"/api/v1/public/bundles/{bundle_id}/schema")
 

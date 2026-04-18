@@ -24,6 +24,7 @@ from aethis_cli.commands.fields_cmd import fields
 from aethis_cli.commands.explain_cmd import explain
 from aethis_cli.commands.decide_cmd import decide
 from aethis_cli.commands.source_cmd import source
+from aethis_cli.commands.whoami_cmd import whoami
 
 
 def _format_error_detail(detail: object) -> str:
@@ -78,6 +79,7 @@ app.command()(fields)
 app.command()(explain)
 app.command()(decide)
 app.command()(source)
+app.command()(whoami)
 
 
 def cli() -> None:
