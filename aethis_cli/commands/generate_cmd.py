@@ -38,6 +38,24 @@ def generate(
     client = AethisClient(api_key, cfg.base_url, anthropic_key=anthropic_key)
     project_dir = cfg.config_path
 
+    # Fail-fast on empty sources: generation without any source documents wastes
+    # 60-120s on the server and produces a cryptic LLM failure.
+    sources_dir = project_dir / "sources"
+    if sources_dir.is_dir():
+        _resolved = sources_dir.resolve()
+        _source_files = [
+            f for f in sources_dir.rglob("*")
+            if f.is_file() and f.resolve().is_relative_to(_resolved)
+        ]
+    else:
+        _source_files = []
+    if not _source_files:
+        console.print(
+            f"[red]No source documents found in {sources_dir}.[/red]\n"
+            "[dim]Add at least one source file (.md, .txt, .pdf) before running 'aethis generate'.[/dim]"
+        )
+        raise typer.Exit(code=1)
+
     try:
         # Resolve or create project
         pid = project_id or cfg.project_id

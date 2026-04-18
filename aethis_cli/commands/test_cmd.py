@@ -32,6 +32,15 @@ def test(
         error_panel(e)
         raise typer.Exit(code=1)
 
+    # Zero test cases → warn and fail. Silent 0/0 pass looks like success and
+    # masks the fact that no assertions ran.
+    if result.get("total", 0) == 0:
+        console.print(
+            "[yellow]No test cases in this project.[/yellow]\n"
+            "[dim]Add at least one scenario to tests/scenarios.yaml before running 'aethis test'.[/dim]"
+        )
+        raise typer.Exit(code=1)
+
     # Save test results
     write_state(cfg.config_path, {"last_test_passed": result["passed"], "last_test_total": result["total"]})
 

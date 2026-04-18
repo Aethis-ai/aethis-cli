@@ -111,6 +111,15 @@ def login(
         console.print(f"[red]{e}[/red]")
         _prompt_manual_key(base_url)
         return
+    except OSError as e:
+        # Headless / no-browser environments (containers, SSH without -X, CI).
+        # Fall through to manual-key paste rather than surfacing a traceback.
+        console.print(
+            f"[yellow]Could not open a browser ({e}). "
+            "Paste your API key manually below.[/yellow]"
+        )
+        _prompt_manual_key(base_url)
+        return
 
     success("Signed in.")
 

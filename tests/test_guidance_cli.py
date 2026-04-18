@@ -29,6 +29,9 @@ def _setup_generate_mocks(mock_router, project_id: str = "proj_1") -> object:
     guidance_route = mock_router.post(f"/api/v1/public/projects/{project_id}/guidance").mock(
         return_value=httpx.Response(201, json={"hint_id": "h1"})
     )
+    mock_router.post(f"/api/v1/public/projects/{project_id}/sources").mock(
+        return_value=httpx.Response(201, json={"uploaded": 1})
+    )
     mock_router.get(f"/api/v1/public/projects/{project_id}").mock(
         return_value=httpx.Response(200, json={"project_id": project_id})
     )
@@ -45,6 +48,7 @@ def test_generate_cmd_string_hints_passed_with_default_process_type(tmp_path, mo
     )
     monkeypatch.setenv("AETHIS_KEY", "ak_test")
     (tmp_path / "sources").mkdir()
+    (tmp_path / "sources" / "policy.md").write_text("# Stub source")
     (tmp_path / "guidance").mkdir()
     (tmp_path / "guidance" / "hints.yaml").write_text(
         "hints:\n  - Plain string hint\n"
@@ -74,6 +78,7 @@ def test_generate_cmd_dict_hints_pass_process_type(tmp_path, monkeypatch):
     )
     monkeypatch.setenv("AETHIS_KEY", "ak_test")
     (tmp_path / "sources").mkdir()
+    (tmp_path / "sources" / "policy.md").write_text("# Stub source")
     (tmp_path / "guidance").mkdir()
     (tmp_path / "guidance" / "hints.yaml").write_text(
         "hints:\n"
