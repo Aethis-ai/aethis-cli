@@ -2,15 +2,16 @@
 name = "aethis-cli"
 dynamic = ["version"]
 description = "CLI for the Aethis developer API — author, test, and publish rule bundles"
+readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "MIT"}
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{name = "Aethis", email = "eng@aethis.ai"}]
 keywords = ["cli", "eligibility", "rules-engine", "compliance", "aethis"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
