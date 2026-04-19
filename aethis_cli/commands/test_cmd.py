@@ -10,7 +10,7 @@ from rich.table import Table
 from aethis_cli.client import AethisClient
 from aethis_cli.config import load_project_config, resolve_api_key, write_state
 from aethis_cli.errors import AethisAPIError
-from aethis_cli.output import console, error_panel, success
+from aethis_cli.output import console, error_panel
 
 
 def test(

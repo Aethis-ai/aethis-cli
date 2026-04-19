@@ -201,7 +201,9 @@ def spacecraft_bundle():
 
     # 1. Create project
     project = client.create_project(
-        "spacecraft-e2e-cli", "spacecraft_crew_cert", "galactic_federation",
+        "spacecraft-e2e-cli",
+        "spacecraft_crew_cert",
+        "galactic_federation",
     )
     pid = project["project_id"]
 
@@ -213,14 +215,11 @@ def spacecraft_bundle():
         client.add_guidance(pid, hint)
 
     # 4. Add golden test cases
-    test_cases = [
-        {"name": name, "field_values": fv, "expected_outcome": outcome}
-        for name, fv, outcome in GOLDEN_CASES
-    ]
+    test_cases = [{"name": name, "field_values": fv, "expected_outcome": outcome} for name, fv, outcome in GOLDEN_CASES]
     client.add_tests(pid, test_cases)
 
     # 5. Trigger generation
-    job = client.generate(pid)
+    client.generate(pid)
 
     # 6. Poll until done
     deadline = time.time() + GENERATION_TIMEOUT
@@ -240,9 +239,7 @@ def spacecraft_bundle():
             }
 
         if job_status == "failed":
-            pytest.fail(
-                f"Generation failed: {job_info.get('error_message', 'unknown')}"
-            )
+            pytest.fail(f"Generation failed: {job_info.get('error_message', 'unknown')}")
 
         time.sleep(POLL_INTERVAL)
 
@@ -290,68 +287,78 @@ class TestSpacecraftDecisions:
 
     def test_full_compliance_eligible(self, spacecraft_bundle):
         client = spacecraft_bundle["client"]
-        result = client.decide(spacecraft_bundle["bundle_id"], {
-            "space.crew.species": "Human",
-            "space.crew.flight_hours": 600,
-            "space.crew.has_pilot_license": True,
-            "space.crew.has_gaa_exam": True,
-            "space.crew.has_approved_provider_cert": True,
-            "space.crew.has_radiation_cert": True,
-            "space.medical.cert_valid": True,
-            "space.crew.age": 35,
-            "space.mission.type": "suborbital",
-            "space.vessel.propulsion_type": "conventional",
-            "space.crew.has_towel": True,
-        })
+        result = client.decide(
+            spacecraft_bundle["bundle_id"],
+            {
+                "space.crew.species": "Human",
+                "space.crew.flight_hours": 600,
+                "space.crew.has_pilot_license": True,
+                "space.crew.has_gaa_exam": True,
+                "space.crew.has_approved_provider_cert": True,
+                "space.crew.has_radiation_cert": True,
+                "space.medical.cert_valid": True,
+                "space.crew.age": 35,
+                "space.mission.type": "suborbital",
+                "space.vessel.propulsion_type": "conventional",
+                "space.crew.has_towel": True,
+            },
+        )
         assert result["decision"] == "eligible", f"Full compliance should be eligible, got {result['decision']}"
 
     def test_no_towel_not_eligible(self, spacecraft_bundle):
         client = spacecraft_bundle["client"]
-        result = client.decide(spacecraft_bundle["bundle_id"], {
-            "space.crew.species": "Human",
-            "space.crew.flight_hours": 600,
-            "space.crew.has_pilot_license": True,
-            "space.crew.has_gaa_exam": True,
-            "space.medical.cert_valid": True,
-            "space.crew.age": 35,
-            "space.mission.type": "suborbital",
-            "space.crew.has_towel": False,
-        })
+        result = client.decide(
+            spacecraft_bundle["bundle_id"],
+            {
+                "space.crew.species": "Human",
+                "space.crew.flight_hours": 600,
+                "space.crew.has_pilot_license": True,
+                "space.crew.has_gaa_exam": True,
+                "space.medical.cert_valid": True,
+                "space.crew.age": 35,
+                "space.mission.type": "suborbital",
+                "space.crew.has_towel": False,
+            },
+        )
         assert result["decision"] == "not_eligible", f"No towel should be not_eligible, got {result['decision']}"
 
     def test_orbital_no_radiation_not_eligible(self, spacecraft_bundle):
         client = spacecraft_bundle["client"]
-        result = client.decide(spacecraft_bundle["bundle_id"], {
-            "space.crew.species": "Human",
-            "space.crew.flight_hours": 600,
-            "space.crew.has_pilot_license": True,
-            "space.crew.has_gaa_exam": True,
-            "space.medical.cert_valid": True,
-            "space.crew.age": 35,
-            "space.mission.type": "orbital",
-            "space.crew.has_radiation_cert": False,
-            "space.crew.has_towel": True,
-        })
+        result = client.decide(
+            spacecraft_bundle["bundle_id"],
+            {
+                "space.crew.species": "Human",
+                "space.crew.flight_hours": 600,
+                "space.crew.has_pilot_license": True,
+                "space.crew.has_gaa_exam": True,
+                "space.medical.cert_valid": True,
+                "space.crew.age": 35,
+                "space.mission.type": "orbital",
+                "space.crew.has_radiation_cert": False,
+                "space.crew.has_towel": True,
+            },
+        )
         assert result["decision"] == "not_eligible", (
             f"Orbital + no radiation cert should be not_eligible, got {result['decision']}"
         )
 
     def test_age_exemption_eligible(self, spacecraft_bundle):
         client = spacecraft_bundle["client"]
-        result = client.decide(spacecraft_bundle["bundle_id"], {
-            "space.crew.species": "Human",
-            "space.crew.age": 65,
-            "space.crew.has_gaa_exam": True,
-            "space.crew.has_approved_provider_cert": True,
-            "space.crew.has_radiation_cert": True,
-            "space.medical.cert_valid": True,
-            "space.mission.type": "suborbital",
-            "space.vessel.propulsion_type": "conventional",
-            "space.crew.has_towel": True,
-        })
-        assert result["decision"] == "eligible", (
-            f"Age exemption (65) should be eligible, got {result['decision']}"
+        result = client.decide(
+            spacecraft_bundle["bundle_id"],
+            {
+                "space.crew.species": "Human",
+                "space.crew.age": 65,
+                "space.crew.has_gaa_exam": True,
+                "space.crew.has_approved_provider_cert": True,
+                "space.crew.has_radiation_cert": True,
+                "space.medical.cert_valid": True,
+                "space.mission.type": "suborbital",
+                "space.vessel.propulsion_type": "conventional",
+                "space.crew.has_towel": True,
+            },
         )
+        assert result["decision"] == "eligible", f"Age exemption (65) should be eligible, got {result['decision']}"
 
 
 # ---------------------------------------------------------------------------
@@ -380,7 +387,6 @@ class TestSpacecraftTestRun:
             status = "PASS" if r["passed"] else "FAIL"
             details.append(f"  {status} [{r['name']}]: expected={r.get('expected')}, actual={r.get('actual')}")
 
-        assert pass_rate >= 0.8, (
-            f"Pass rate {pass_rate:.0%} ({passed}/{total}) below 80% threshold.\n"
-            + "\n".join(details)
+        assert pass_rate >= 0.8, f"Pass rate {pass_rate:.0%} ({passed}/{total}) below 80% threshold.\n" + "\n".join(
+            details
         )

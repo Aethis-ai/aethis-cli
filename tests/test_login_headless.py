@@ -4,16 +4,17 @@ Tests that `aethis login` degrades gracefully on headless systems where
 
 Regression guard for B5 in the public-release readiness review.
 """
+
 from __future__ import annotations
 
 from unittest.mock import patch
 
-import pytest
 from typer.testing import CliRunner
 
 
 def _run(extra_env=None):
     from aethis_cli.main import app
+
     runner = CliRunner()
     env = {"AETHIS_BASE_URL": "http://test.invalid"}
     if extra_env:
@@ -44,8 +45,7 @@ def test_login_handles_oserror_from_webbrowser_without_traceback():
 
     # Manual-key fallback must have been invoked.
     assert prompt_mock.called, (
-        "login should fall through to _prompt_manual_key on OSError, "
-        "not raise the OSError to the user"
+        "login should fall through to _prompt_manual_key on OSError, not raise the OSError to the user"
     )
     # Exit cleanly; no raw Python traceback surfaced.
     assert result.exit_code == 0

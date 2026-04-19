@@ -16,7 +16,9 @@ from aethis_cli.output import console, error_panel
 
 def decide(
     input_json: str = typer.Option(..., "--input", "-i", help="JSON object of field values"),
-    bundle_id: Optional[str] = typer.Option(None, "--bundle-id", "-b", help="Bundle ID (default: from .aethis/state.json)"),
+    bundle_id: Optional[str] = typer.Option(
+        None, "--bundle-id", "-b", help="Bundle ID (default: from .aethis/state.json)"
+    ),
     explain: bool = typer.Option(False, "--explain", "-e", help="Show reasoning for the decision"),
 ) -> None:
     """Evaluate eligibility against a published bundle."""
@@ -28,7 +30,9 @@ def decide(
         state = read_state(cfg.config_path)
         bundle_id = state.get("bundle_id")
         if not bundle_id:
-            console.print("[red]No bundle_id found. Run 'aethis generate' and 'aethis publish' first, or pass --bundle-id.[/red]")
+            console.print(
+                "[red]No bundle_id found. Run 'aethis generate' and 'aethis publish' first, or pass --bundle-id.[/red]"
+            )
             raise typer.Exit(code=1)
 
     try:
@@ -104,7 +108,9 @@ def _print_trace(trace: dict) -> None:
         for req in reqs:
             status = req.get("status", "")
             title = req.get("title") or req.get("id", "")
-            icon = {"satisfied": "[green]\u2713[/green]", "not_satisfied": "[red]\u2717[/red]"}.get(status, "[yellow]?[/yellow]")
+            icon = {"satisfied": "[green]\u2713[/green]", "not_satisfied": "[red]\u2717[/red]"}.get(
+                status, "[yellow]?[/yellow]"
+            )
             console.print(f"  {icon} {title}")
             if req.get("reason"):
                 console.print(f"    {req['reason']}")
@@ -112,7 +118,9 @@ def _print_trace(trace: dict) -> None:
         for req_id, info in reqs.items():
             if isinstance(info, dict):
                 status = info.get("status", "")
-                icon = {"satisfied": "[green]\u2713[/green]", "not_satisfied": "[red]\u2717[/red]"}.get(status, "[yellow]?[/yellow]")
+                icon = {"satisfied": "[green]\u2713[/green]", "not_satisfied": "[red]\u2717[/red]"}.get(
+                    status, "[yellow]?[/yellow]"
+                )
                 console.print(f"  {icon} {req_id}")
                 if info.get("reason"):
                     console.print(f"    {info['reason']}")

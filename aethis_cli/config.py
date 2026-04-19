@@ -94,9 +94,7 @@ def resolve_api_key(config: ProjectConfig) -> str:
         if key:
             return key
 
-    raise ConfigError(
-        f"API key not found. Set ${config.api_key_env} or run 'aethis login'."
-    )
+    raise ConfigError(f"API key not found. Set ${config.api_key_env} or run 'aethis login'.")
 
 
 def resolve_anthropic_key(config: ProjectConfig) -> Optional[str]:

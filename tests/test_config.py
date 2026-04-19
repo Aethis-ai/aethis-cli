@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-from pathlib import Path
 
 from aethis_cli.config import load_project_config, resolve_api_key
 from aethis_cli.errors import ConfigError

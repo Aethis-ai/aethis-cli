@@ -20,13 +20,16 @@ BASE = "http://test.local"
 @respx.mock(base_url=BASE)
 def test_decide_eligible(respx_mock):
     respx_mock.post("/api/v1/public/decide").mock(
-        return_value=httpx.Response(200, json={
-            "decision": "eligible",
-            "bundle_id": "test:123",
-            "bundle_version": "v1",
-            "fields_evaluated": 2,
-            "fields_provided": 2,
-        })
+        return_value=httpx.Response(
+            200,
+            json={
+                "decision": "eligible",
+                "bundle_id": "test:123",
+                "bundle_version": "v1",
+                "fields_evaluated": 2,
+                "fields_provided": 2,
+            },
+        )
     )
     client = AethisClient("ak_live_test", BASE)
     result = client.decide("test:123", {"age": 25})
@@ -44,9 +47,7 @@ def test_decide_sends_api_key_header(respx_mock):
 
 @respx.mock(base_url=BASE)
 def test_decide_401_raises_api_error(respx_mock):
-    respx_mock.post("/api/v1/public/decide").mock(
-        return_value=httpx.Response(401, json={"detail": "Invalid API key"})
-    )
+    respx_mock.post("/api/v1/public/decide").mock(return_value=httpx.Response(401, json={"detail": "Invalid API key"}))
     with pytest.raises(AethisAPIError) as exc_info:
         AethisClient("bad", BASE).decide("b:1", {})
     assert exc_info.value.status_code == 401
@@ -56,10 +57,13 @@ def test_decide_401_raises_api_error(respx_mock):
 @respx.mock(base_url=BASE)
 def test_get_schema(respx_mock):
     respx_mock.get("/api/v1/public/bundles/b:1/schema").mock(
-        return_value=httpx.Response(200, json={
-            "bundle_id": "b:1",
-            "fields": [{"field_id": "age", "field_type": "integer"}],
-        })
+        return_value=httpx.Response(
+            200,
+            json={
+                "bundle_id": "b:1",
+                "fields": [{"field_id": "age", "field_type": "integer"}],
+            },
+        )
     )
     result = AethisClient("ak", BASE).get_schema("b:1")
     assert len(result["fields"]) == 1
@@ -69,10 +73,13 @@ def test_get_schema(respx_mock):
 @respx.mock(base_url=BASE)
 def test_explain(respx_mock):
     respx_mock.get("/api/v1/public/bundles/b:1/explain").mock(
-        return_value=httpx.Response(200, json={
-            "bundle_id": "b:1",
-            "criteria": [{"criterion_id": "c1", "title": "Age check", "rule_text": "age >= 18"}],
-        })
+        return_value=httpx.Response(
+            200,
+            json={
+                "bundle_id": "b:1",
+                "criteria": [{"criterion_id": "c1", "title": "Age check", "rule_text": "age >= 18"}],
+            },
+        )
     )
     result = AethisClient("ak", BASE).explain("b:1")
     assert result["criteria"][0]["title"] == "Age check"
@@ -86,12 +93,15 @@ def test_explain(respx_mock):
 @respx.mock(base_url=BASE)
 def test_create_project(respx_mock):
     respx_mock.post("/api/v1/public/projects/").mock(
-        return_value=httpx.Response(201, json={
-            "project_id": "proj_abc",
-            "name": "test",
-            "section_id": "test_section",
-            "status": "draft",
-        })
+        return_value=httpx.Response(
+            201,
+            json={
+                "project_id": "proj_abc",
+                "name": "test",
+                "section_id": "test_section",
+                "status": "draft",
+            },
+        )
     )
     result = AethisClient("ak", BASE).create_project("test", "test_section")
     assert result["project_id"] == "proj_abc"
@@ -101,10 +111,13 @@ def test_create_project(respx_mock):
 @respx.mock(base_url=BASE)
 def test_list_projects(respx_mock):
     respx_mock.get("/api/v1/public/projects/").mock(
-        return_value=httpx.Response(200, json=[
-            {"project_id": "proj_1", "name": "one"},
-            {"project_id": "proj_2", "name": "two"},
-        ])
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"project_id": "proj_1", "name": "one"},
+                {"project_id": "proj_2", "name": "two"},
+            ],
+        )
     )
     result = AethisClient("ak", BASE).list_projects()
     assert len(result) == 2
@@ -131,13 +144,16 @@ def test_add_guidance(respx_mock):
 @respx.mock(base_url=BASE)
 def test_upload_sources(respx_mock, tmp_path):
     respx_mock.post("/api/v1/public/projects/proj_abc/sources").mock(
-        return_value=httpx.Response(201, json={
-            "uploaded": 2,
-            "sources": [
-                {"source_id": "s1", "filename": "a.txt", "char_count": 10},
-                {"source_id": "s2", "filename": "b.md", "char_count": 20},
-            ],
-        })
+        return_value=httpx.Response(
+            201,
+            json={
+                "uploaded": 2,
+                "sources": [
+                    {"source_id": "s1", "filename": "a.txt", "char_count": 10},
+                    {"source_id": "s2", "filename": "b.md", "char_count": 20},
+                ],
+            },
+        )
     )
     f1 = tmp_path / "a.txt"
     f2 = tmp_path / "b.md"
@@ -174,11 +190,14 @@ def test_generate(respx_mock):
 @respx.mock(base_url=BASE)
 def test_get_status(respx_mock):
     respx_mock.get("/api/v1/public/projects/proj_abc/status").mock(
-        return_value=httpx.Response(200, json={
-            "project_status": "generating",
-            "job": {"job_id": "job_1", "status": "running", "progress_percent": 50},
-            "latest_bundle_id": None,
-        })
+        return_value=httpx.Response(
+            200,
+            json={
+                "project_status": "generating",
+                "job": {"job_id": "job_1", "status": "running", "progress_percent": 50},
+                "latest_bundle_id": None,
+            },
+        )
     )
     result = AethisClient("ak", BASE).get_status("proj_abc")
     assert result["project_status"] == "generating"
@@ -188,12 +207,18 @@ def test_get_status(respx_mock):
 @respx.mock(base_url=BASE)
 def test_run_tests(respx_mock):
     respx_mock.post("/api/v1/public/projects/proj_abc/test-run").mock(
-        return_value=httpx.Response(200, json={
-            "total": 3, "passed": 2, "failed": 1, "errors": 0,
-            "results": [
-                {"tc_id": "tc_1", "name": "ok", "passed": True},
-            ],
-        })
+        return_value=httpx.Response(
+            200,
+            json={
+                "total": 3,
+                "passed": 2,
+                "failed": 1,
+                "errors": 0,
+                "results": [
+                    {"tc_id": "tc_1", "name": "ok", "passed": True},
+                ],
+            },
+        )
     )
     result = AethisClient("ak", BASE).run_tests("proj_abc")
     assert result["passed"] == 2
@@ -203,9 +228,14 @@ def test_run_tests(respx_mock):
 @respx.mock(base_url=BASE)
 def test_publish(respx_mock):
     respx_mock.post("/api/v1/public/projects/proj_abc/publish").mock(
-        return_value=httpx.Response(200, json={
-            "message": "Bundle published", "bundle_id": "b:123", "project_id": "proj_abc",
-        })
+        return_value=httpx.Response(
+            200,
+            json={
+                "message": "Bundle published",
+                "bundle_id": "b:123",
+                "project_id": "proj_abc",
+            },
+        )
     )
     result = AethisClient("ak", BASE).publish("proj_abc")
     assert result["bundle_id"] == "b:123"
@@ -238,9 +268,7 @@ def test_429_raises_api_error(respx_mock):
 
 @respx.mock(base_url=BASE)
 def test_non_json_error_body(respx_mock):
-    respx_mock.post("/api/v1/public/decide").mock(
-        return_value=httpx.Response(500, text="Internal Server Error")
-    )
+    respx_mock.post("/api/v1/public/decide").mock(return_value=httpx.Response(500, text="Internal Server Error"))
     with pytest.raises(AethisAPIError) as exc_info:
         AethisClient("ak", BASE).decide("b:1", {})
     assert exc_info.value.status_code == 500

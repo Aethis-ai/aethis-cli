@@ -36,6 +36,7 @@ def list_bundles(
             raise typer.Exit(code=1)
         import os
         from aethis_cli.config import DEFAULT_BASE_URL, ProjectConfig
+
         base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
         cfg = ProjectConfig(project="", base_url=base_url)
         api_key = resolve_api_key(cfg)
@@ -98,6 +99,7 @@ def archive_bundle(
     except ConfigError:
         import os
         from aethis_cli.config import DEFAULT_BASE_URL, ProjectConfig
+
         base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
         cfg = ProjectConfig(project="", base_url=base_url)
         api_key = resolve_api_key(cfg)

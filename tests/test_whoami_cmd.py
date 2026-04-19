@@ -1,4 +1,5 @@
 """Tests for `aethis whoami`."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
@@ -8,6 +9,7 @@ from typer.testing import CliRunner
 
 def _run(env=None, client_mock=None):
     from aethis_cli.main import app
+
     runner = CliRunner()
     patches = []
     if client_mock is not None:
@@ -68,6 +70,7 @@ def test_whoami_without_authoring_scope_points_to_signup():
 def test_whoami_without_api_key_exits_with_hint():
     # Override the resolver to return (None, base_url)
     from aethis_cli.main import app
+
     runner = CliRunner()
     with patch(
         "aethis_cli.commands.whoami_cmd._resolve_api_key_lax",

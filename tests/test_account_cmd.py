@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import httpx
-import pytest
 from typer.testing import CliRunner
 
 from aethis_cli.main import app
@@ -80,12 +78,6 @@ class TestAccountGenerate:
         result = runner.invoke(app, ["account", "generate"])
         assert result.exit_code == 1
         assert "500" in result.output
-
-    def test_generate_invalid_scope(self):
-        result = runner.invoke(app, ["account", "generate", "--scope", "invalid_scope"])
-        # Should fail before auth since scope validation is first... but _clerk_auth is called first
-        # Actually scope validation happens after auth. Let's mock auth.
-        pass
 
     @patch("aethis_cli.commands.account_cmd._fetch_permissions", return_value=([], set(VALID_SCOPES)))
     @patch("aethis_cli.commands.account_cmd._clerk_auth", return_value=MOCK_ACCESS_TOKEN)

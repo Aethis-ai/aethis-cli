@@ -276,5 +276,3 @@ def revoke(
     else:
         console.print(f"[red]Revoke failed (HTTP {resp.status_code}): {_format_api_error(resp)}[/red]")
         raise typer.Exit(code=1)
-
-

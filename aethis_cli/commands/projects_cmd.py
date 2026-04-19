@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
 
 import typer
 from rich.table import Table
@@ -36,8 +35,10 @@ def list_projects(
         # No aethis.yaml needed for listing — use defaults
         from aethis_cli.config import DEFAULT_BASE_URL, resolve_api_key as _resolve
         import os
+
         base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
         from aethis_cli.config import ProjectConfig
+
         cfg = ProjectConfig(project="", base_url=base_url)
         api_key = _resolve(cfg)
         client = AethisClient(api_key, base_url)
@@ -84,8 +85,10 @@ def show_project(
     except ConfigError:
         from aethis_cli.config import DEFAULT_BASE_URL, resolve_api_key as _resolve
         import os
+
         base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
         from aethis_cli.config import ProjectConfig
+
         cfg = ProjectConfig(project="", base_url=base_url)
         api_key = _resolve(cfg)
         client = AethisClient(api_key, base_url)
@@ -121,8 +124,10 @@ def archive_project(
     except ConfigError:
         from aethis_cli.config import DEFAULT_BASE_URL, resolve_api_key as _resolve
         import os
+
         base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
         from aethis_cli.config import ProjectConfig
+
         cfg = ProjectConfig(project="", base_url=base_url)
         api_key = _resolve(cfg)
         client = AethisClient(api_key, base_url)

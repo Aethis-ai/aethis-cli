@@ -43,10 +43,7 @@ def generate(
     sources_dir = project_dir / "sources"
     if sources_dir.is_dir():
         _resolved = sources_dir.resolve()
-        _source_files = [
-            f for f in sources_dir.rglob("*")
-            if f.is_file() and f.resolve().is_relative_to(_resolved)
-        ]
+        _source_files = [f for f in sources_dir.rglob("*") if f.is_file() and f.resolve().is_relative_to(_resolved)]
     else:
         _source_files = []
     if not _source_files:
@@ -80,8 +77,7 @@ def generate(
         if sources_dir.is_dir():
             resolved_root = sources_dir.resolve()
             source_files = sorted(
-                f for f in sources_dir.rglob("*")
-                if f.is_file() and f.resolve().is_relative_to(resolved_root)
+                f for f in sources_dir.rglob("*") if f.is_file() and f.resolve().is_relative_to(resolved_root)
             )
             if source_files:
                 for batch in _chunks(source_files, 5):

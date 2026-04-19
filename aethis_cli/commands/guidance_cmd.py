@@ -11,7 +11,7 @@ import yaml
 from aethis_cli.client import AethisClient
 from aethis_cli.config import load_project_config, resolve_api_key
 from aethis_cli.errors import AethisAPIError, ConfigError
-from aethis_cli.output import console, error_panel, info, success
+from aethis_cli.output import console, error_panel, success
 
 guidance_app = typer.Typer(help="Manage guidance hints for rule authoring.")
 
@@ -46,9 +46,11 @@ def list_hints(
         return
 
     for h in hints:
-        source_label = {"human": "[green]human[/green]", "agent": "[yellow]agent[/yellow]", "feedback": "[cyan]feedback[/cyan]"}.get(
-            h.get("source", "human"), h.get("source", "")
-        )
+        source_label = {
+            "human": "[green]human[/green]",
+            "agent": "[yellow]agent[/yellow]",
+            "feedback": "[cyan]feedback[/cyan]",
+        }.get(h.get("source", "human"), h.get("source", ""))
         active = "active" if h.get("active", True) else "[dim]inactive[/dim]"
         version = f"v{h.get('version', 1)}"
         console.print(f"  {source_label} {version} {active}")

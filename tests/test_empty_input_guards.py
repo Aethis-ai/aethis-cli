@@ -4,12 +4,12 @@ documents, and that `aethis test` warns on zero test cases.
 
 Regression guards for B7 in the public-release readiness review.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 import yaml
 from typer.testing import CliRunner
 
@@ -29,9 +29,7 @@ def _make_project(tmp_path: Path, *, include_sources: bool, include_tests: bool)
     (project / "tests").mkdir()
 
     (project / "aethis.yaml").write_text(
-        "project: myproj\n"
-        "api_key_env: AETHIS_API_KEY\n"
-        "base_url: http://localhost:8080\n"
+        "project: myproj\napi_key_env: AETHIS_API_KEY\nbase_url: http://localhost:8080\n"
     )
     (project / ".aethis").mkdir()
     (project / ".aethis" / "state.json").write_text('{"project_id": "proj_test"}')
@@ -60,6 +58,7 @@ def test_generate_with_empty_sources_dir_fails_fast(tmp_path, monkeypatch):
 
     with patch("aethis_cli.commands.generate_cmd.AethisClient", return_value=mock_client):
         from aethis_cli.main import app
+
         runner = CliRunner()
         result = runner.invoke(app, ["generate"], catch_exceptions=False)
 
@@ -79,16 +78,20 @@ def test_test_with_zero_test_cases_warns_and_fails(tmp_path, monkeypatch):
     mock_client = MagicMock()
     # If called, it returns the degenerate 0/0 shape.
     mock_client.run_tests.return_value = {
-        "passed": 0, "total": 0, "failed": 0, "errors": 0, "results": [],
+        "passed": 0,
+        "total": 0,
+        "failed": 0,
+        "errors": 0,
+        "results": [],
     }
 
     with patch("aethis_cli.commands.test_cmd.AethisClient", return_value=mock_client):
         from aethis_cli.main import app
+
         runner = CliRunner()
         result = runner.invoke(app, ["test"], catch_exceptions=False)
 
     assert result.exit_code != 0, (
-        f"zero-test-case run should exit non-zero; got exit={result.exit_code}\n"
-        f"output: {result.output}"
+        f"zero-test-case run should exit non-zero; got exit={result.exit_code}\noutput: {result.output}"
     )
     assert "no test cases" in result.output.lower() or "zero" in result.output.lower()

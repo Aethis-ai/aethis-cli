@@ -6,11 +6,8 @@ Tests written FIRST, then implement to make them pass.
 from __future__ import annotations
 
 import json
-import os
-from pathlib import Path
 
 import httpx
-import pytest
 import respx
 import yaml
 
@@ -43,16 +40,12 @@ def _setup_generate_mocks(mock_router, project_id: str = "proj_1") -> object:
 
 def test_generate_cmd_string_hints_passed_with_default_process_type(tmp_path, monkeypatch):
     """Plain-string hints in hints.yaml should be sent with process_type=rule_generation."""
-    (tmp_path / "aethis.yaml").write_text(
-        "project: test\napi_key_env: AETHIS_KEY\nbase_url: https://test.local\n"
-    )
+    (tmp_path / "aethis.yaml").write_text("project: test\napi_key_env: AETHIS_KEY\nbase_url: https://test.local\n")
     monkeypatch.setenv("AETHIS_KEY", "ak_test")
     (tmp_path / "sources").mkdir()
     (tmp_path / "sources" / "policy.md").write_text("# Stub source")
     (tmp_path / "guidance").mkdir()
-    (tmp_path / "guidance" / "hints.yaml").write_text(
-        "hints:\n  - Plain string hint\n"
-    )
+    (tmp_path / "guidance" / "hints.yaml").write_text("hints:\n  - Plain string hint\n")
     (tmp_path / ".aethis").mkdir()
     (tmp_path / ".aethis" / "state.json").write_text(json.dumps({"project_id": "proj_1"}))
     monkeypatch.chdir(tmp_path)
@@ -62,6 +55,7 @@ def test_generate_cmd_string_hints_passed_with_default_process_type(tmp_path, mo
 
         from typer.testing import CliRunner
         from aethis_cli.main import app
+
         runner = CliRunner()
         result = runner.invoke(app, ["generate", "--no-poll"])
         assert result.exit_code == 0, result.output
@@ -73,9 +67,7 @@ def test_generate_cmd_string_hints_passed_with_default_process_type(tmp_path, mo
 
 def test_generate_cmd_dict_hints_pass_process_type(tmp_path, monkeypatch):
     """Dict-format hints in hints.yaml should pass their process_type to add_guidance."""
-    (tmp_path / "aethis.yaml").write_text(
-        "project: test\napi_key_env: AETHIS_KEY\nbase_url: https://test.local\n"
-    )
+    (tmp_path / "aethis.yaml").write_text("project: test\napi_key_env: AETHIS_KEY\nbase_url: https://test.local\n")
     monkeypatch.setenv("AETHIS_KEY", "ak_test")
     (tmp_path / "sources").mkdir()
     (tmp_path / "sources" / "policy.md").write_text("# Stub source")
@@ -96,6 +88,7 @@ def test_generate_cmd_dict_hints_pass_process_type(tmp_path, monkeypatch):
 
         from typer.testing import CliRunner
         from aethis_cli.main import app
+
         runner = CliRunner()
         result = runner.invoke(app, ["generate", "--no-poll"])
         assert result.exit_code == 0, result.output
@@ -120,10 +113,27 @@ def test_generate_cmd_dict_hints_pass_process_type(tmp_path, monkeypatch):
 def test_list_guidance(respx_mock):
     """Client should list guidance hints for a project."""
     respx_mock.get("/api/v1/public/projects/proj_1/guidance").mock(
-        return_value=httpx.Response(200, json=[
-            {"hint_id": "h1", "guidance_text": "Hint 1", "source": "human", "version": 1, "active": True, "weight": 0.5},
-            {"hint_id": "h2", "guidance_text": "Hint 2", "source": "agent", "version": 1, "active": True, "weight": 0.3},
-        ])
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "hint_id": "h1",
+                    "guidance_text": "Hint 1",
+                    "source": "human",
+                    "version": 1,
+                    "active": True,
+                    "weight": 0.5,
+                },
+                {
+                    "hint_id": "h2",
+                    "guidance_text": "Hint 2",
+                    "source": "agent",
+                    "version": 1,
+                    "active": True,
+                    "weight": 0.3,
+                },
+            ],
+        )
     )
     client = AethisClient("ak_live_test", BASE)
     result = client.list_guidance("proj_1")
@@ -136,12 +146,15 @@ def test_list_guidance(respx_mock):
 def test_export_guidance(respx_mock):
     """Client should export guidance as a structured dict for YAML."""
     respx_mock.get("/api/v1/public/projects/proj_1/guidance/export").mock(
-        return_value=httpx.Response(200, json={
-            "hints": [
-                {"text": "Human hint", "source": "human"},
-                {"text": "Agent hint", "source": "agent"},
-            ]
-        })
+        return_value=httpx.Response(
+            200,
+            json={
+                "hints": [
+                    {"text": "Human hint", "source": "human"},
+                    {"text": "Agent hint", "source": "agent"},
+                ]
+            },
+        )
     )
     client = AethisClient("ak_live_test", BASE)
     result = client.export_guidance("proj_1")
@@ -168,11 +181,14 @@ def test_deactivate_guidance(respx_mock):
 def test_update_guidance(respx_mock):
     """Client should update a hint (creates new version)."""
     respx_mock.patch("/api/v1/public/projects/proj_1/guidance/h1").mock(
-        return_value=httpx.Response(200, json={
-            "old_hint_id": "h1",
-            "new_hint_id": "h2",
-            "version": "2",
-        })
+        return_value=httpx.Response(
+            200,
+            json={
+                "old_hint_id": "h1",
+                "new_hint_id": "h2",
+                "version": "2",
+            },
+        )
     )
     client = AethisClient("ak_live_test", BASE)
     result = client.update_guidance("proj_1", "h1", "Updated text")
@@ -192,6 +208,7 @@ def test_add_guidance_with_source(respx_mock):
     # Verify the request body included source
     request = route.calls[0].request
     import json
+
     body = json.loads(request.content)
     assert body["source"] == "agent"
 
@@ -206,6 +223,7 @@ def test_add_guidance_with_process_type(respx_mock):
     client.add_guidance("proj_1", "Extract the applicant's date of birth", process_type="field_extraction")
 
     import json
+
     body = json.loads(route.calls[0].request.content)
     assert body["process_type"] == "field_extraction"
     assert body["guidance_text"] == "Extract the applicant's date of birth"
@@ -221,6 +239,7 @@ def test_add_guidance_default_process_type(respx_mock):
     client.add_guidance("proj_1", "Applicant must be over 18")
 
     import json
+
     body = json.loads(route.calls[0].request.content)
     assert body["process_type"] == "rule_generation"
 
@@ -242,6 +261,7 @@ def test_add_domain_guidance(respx_mock):
     assert result["hint_id"] == "dh1"
 
     import json
+
     body = json.loads(route.calls[0].request.content)
     assert body["guidance_text"] == "Aethis never exercises discretion"
     assert body["process_type"] == "rule_generation"
@@ -258,6 +278,7 @@ def test_add_domain_guidance_no_notes(respx_mock):
     client.add_domain_guidance("uk_citizenship", "Some principle")
 
     import json
+
     body = json.loads(route.calls[0].request.content)
     assert "notes" not in body
 
@@ -266,10 +287,13 @@ def test_add_domain_guidance_no_notes(respx_mock):
 def test_list_domain_guidance(respx_mock):
     """Client should GET domain guidance and return a list."""
     respx_mock.get("/api/v1/public/domains/uk_citizenship/guidance").mock(
-        return_value=httpx.Response(200, json=[
-            {"hint_id": "dh1", "guidance_text": "Principle A", "process_type": "rule_generation"},
-            {"hint_id": "dh2", "guidance_text": "Principle B", "process_type": "field_extraction"},
-        ])
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"hint_id": "dh1", "guidance_text": "Principle A", "process_type": "rule_generation"},
+                {"hint_id": "dh2", "guidance_text": "Principle B", "process_type": "field_extraction"},
+            ],
+        )
     )
     client = AethisClient("ak_live_test", BASE)
     result = client.list_domain_guidance("uk_citizenship")
@@ -284,9 +308,7 @@ def test_list_domain_guidance(respx_mock):
 
 def test_guidance_import_reports_skipped(tmp_path, monkeypatch):
     """guidance import should report N skipped when server returns skipped:true."""
-    (tmp_path / "aethis.yaml").write_text(
-        "project: test\napi_key_env: AETHIS_KEY\nbase_url: https://test.local\n"
-    )
+    (tmp_path / "aethis.yaml").write_text("project: test\napi_key_env: AETHIS_KEY\nbase_url: https://test.local\n")
     monkeypatch.setenv("AETHIS_KEY", "ak_test")
     (tmp_path / ".aethis").mkdir()
     (tmp_path / ".aethis" / "state.json").write_text(json.dumps({"project_id": "proj_skip"}))
@@ -306,6 +328,7 @@ def test_guidance_import_reports_skipped(tmp_path, monkeypatch):
 
         from typer.testing import CliRunner
         from aethis_cli.main import app
+
         runner = CliRunner()
         result = runner.invoke(app, ["guidance", "import", str(hints_file)])
         assert result.exit_code == 0, result.output
@@ -315,9 +338,7 @@ def test_guidance_import_reports_skipped(tmp_path, monkeypatch):
 
 def test_guidance_import_no_skips(tmp_path, monkeypatch):
     """guidance import with no duplicates should not mention skipped."""
-    (tmp_path / "aethis.yaml").write_text(
-        "project: test\napi_key_env: AETHIS_KEY\nbase_url: https://test.local\n"
-    )
+    (tmp_path / "aethis.yaml").write_text("project: test\napi_key_env: AETHIS_KEY\nbase_url: https://test.local\n")
     monkeypatch.setenv("AETHIS_KEY", "ak_test")
     (tmp_path / ".aethis").mkdir()
     (tmp_path / ".aethis" / "state.json").write_text(json.dumps({"project_id": "proj_noskip"}))
@@ -333,10 +354,9 @@ def test_guidance_import_no_skips(tmp_path, monkeypatch):
 
         from typer.testing import CliRunner
         from aethis_cli.main import app
+
         runner = CliRunner()
         result = runner.invoke(app, ["guidance", "import", str(hints_file)])
         assert result.exit_code == 0, result.output
         assert "Imported 1 hint(s)" in result.output
         assert "skipped" not in result.output
-
-

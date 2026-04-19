@@ -96,9 +96,7 @@ class OAuthCallbackServer:
             thread.start()
             return port
         except OSError:
-            raise AuthenticationError(
-                f"Port {port} is already in use. Close the process using it and try again."
-            )
+            raise AuthenticationError(f"Port {port} is already in use. Close the process using it and try again.")
 
     def result(self, timeout: float) -> tuple[Optional[str], Optional[str], Optional[str]]:
         """Wait for the callback and return (code, state, error)."""
@@ -140,15 +138,17 @@ def authenticate_with_clerk(
     port = server.start()
 
     redirect_uri = f"http://127.0.0.1:{port}/callback"
-    authorize_url = f"https://{clerk_domain}/oauth/authorize?" + urlencode({
-        "response_type": "code",
-        "client_id": client_id,
-        "redirect_uri": redirect_uri,
-        "scope": "profile email",
-        "code_challenge": challenge,
-        "code_challenge_method": "S256",
-        "state": state,
-    })
+    authorize_url = f"https://{clerk_domain}/oauth/authorize?" + urlencode(
+        {
+            "response_type": "code",
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "scope": "profile email",
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+            "state": state,
+        }
+    )
 
     try:
         opened = webbrowser.open(authorize_url)
@@ -191,8 +191,7 @@ def authenticate_with_clerk(
 
     if resp.status_code != 200:
         raise AuthenticationError(
-            f"Token exchange failed (HTTP {resp.status_code}). "
-            "Check your Clerk OAuth configuration and try again."
+            f"Token exchange failed (HTTP {resp.status_code}). Check your Clerk OAuth configuration and try again."
         )
 
     token_data = resp.json()

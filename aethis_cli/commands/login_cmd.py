@@ -78,7 +78,9 @@ def _prompt_manual_key(base_url: str) -> None:
 
 def login(
     api_key: Optional[str] = typer.Option(
-        None, "--api-key", "-k",
+        None,
+        "--api-key",
+        "-k",
         help="Paste an existing API key instead of browser sign-in.",
     ),
     timeout: int = typer.Option(120, "--timeout", help="Browser auth timeout in seconds"),
@@ -111,10 +113,7 @@ def login(
     except OSError as e:
         # Headless / no-browser environments (containers, SSH without -X, CI).
         # Fall through to manual-key paste rather than surfacing a traceback.
-        console.print(
-            f"[yellow]Could not open a browser ({e}). "
-            "Paste your API key manually below.[/yellow]"
-        )
+        console.print(f"[yellow]Could not open a browser ({e}). Paste your API key manually below.[/yellow]")
         _prompt_manual_key(base_url)
         return
 
@@ -130,7 +129,14 @@ def login(
             headers={"Authorization": f"Bearer {access_token}"},
             json={
                 "name": "cli-login",
-                "scopes": ["decide", "projects:read", "projects:write", "bundles:read", "bundles:explain", "bundles:write"],
+                "scopes": [
+                    "decide",
+                    "projects:read",
+                    "projects:write",
+                    "bundles:read",
+                    "bundles:explain",
+                    "bundles:write",
+                ],
                 "rate_limit_tier": "free",
             },
             timeout=15.0,

@@ -21,6 +21,7 @@ def _resolve_api_key_lax() -> tuple[str | None, str]:
         return key, base_url
     try:
         import keyring  # type: ignore[import-not-found]
+
         key = keyring.get_password("aethis-cli", "api_key")
         if key:
             return key, base_url
@@ -29,6 +30,7 @@ def _resolve_api_key_lax() -> tuple[str | None, str]:
     # Plaintext credentials file
     from pathlib import Path
     import yaml  # type: ignore[import-untyped]
+
     creds = Path.home() / ".config" / "aethis" / "credentials.yaml"
     if creds.exists():
         try:
@@ -71,10 +73,7 @@ def whoami() -> None:
     if me.get("can_author"):
         console.print("[green]✓ Authoring enabled[/green] — you can create and publish rule bundles.")
     else:
+        console.print("[yellow]✗ Authoring not available[/yellow] — this key can only evaluate bundles.")
         console.print(
-            "[yellow]✗ Authoring not available[/yellow] — this key can only evaluate bundles."
-        )
-        console.print(
-            "[dim]Rule authoring is invite-only private beta. "
-            "Request access at https://aethis.ai/sign-up[/dim]"
+            "[dim]Rule authoring is invite-only private beta. Request access at https://aethis.ai/sign-up[/dim]"
         )

@@ -53,11 +53,15 @@ class AethisClient:
     # -- Decision API --
 
     def decide(self, bundle_id: str, field_values: dict, **opts: Any) -> dict:
-        return self._request("POST", "/api/v1/public/decide", json={
-            "bundle_id": bundle_id,
-            "field_values": field_values,
-            **opts,
-        })
+        return self._request(
+            "POST",
+            "/api/v1/public/decide",
+            json={
+                "bundle_id": bundle_id,
+                "field_values": field_values,
+                **opts,
+            },
+        )
 
     def whoami(self) -> dict:
         """Return metadata for the current API key."""
@@ -75,11 +79,15 @@ class AethisClient:
     # -- Projects API --
 
     def create_project(self, name: str, section_id: str, domain: str = "") -> dict:
-        return self._request("POST", "/api/v1/public/projects/", json={
-            "name": name,
-            "section_id": section_id,
-            "domain": domain,
-        })
+        return self._request(
+            "POST",
+            "/api/v1/public/projects/",
+            json={
+                "name": name,
+                "section_id": section_id,
+                "domain": domain,
+            },
+        )
 
     def list_projects(self, include_archived: bool = False) -> list[dict]:
         params: dict[str, str] = {}
@@ -97,11 +105,15 @@ class AethisClient:
         source: str = "human",
         process_type: str = "rule_generation",
     ) -> dict:
-        return self._request("POST", f"/api/v1/public/projects/{project_id}/guidance", json={
-            "guidance_text": guidance_text,
-            "source": source,
-            "process_type": process_type,
-        })
+        return self._request(
+            "POST",
+            f"/api/v1/public/projects/{project_id}/guidance",
+            json={
+                "guidance_text": guidance_text,
+                "source": source,
+                "process_type": process_type,
+            },
+        )
 
     def list_guidance(self, project_id: str) -> list:
         return self._request("GET", f"/api/v1/public/projects/{project_id}/guidance")
@@ -113,21 +125,26 @@ class AethisClient:
         return self._request("DELETE", f"/api/v1/public/projects/{project_id}/guidance/{hint_id}")
 
     def update_guidance(self, project_id: str, hint_id: str, guidance_text: str) -> dict:
-        return self._request("PATCH", f"/api/v1/public/projects/{project_id}/guidance/{hint_id}", json={
-            "guidance_text": guidance_text,
-        })
+        return self._request(
+            "PATCH",
+            f"/api/v1/public/projects/{project_id}/guidance/{hint_id}",
+            json={
+                "guidance_text": guidance_text,
+            },
+        )
 
     def upload_sources(self, project_id: str, files: list[Path]) -> dict:
-        file_tuples = [
-            ("files", (f.name, f.read_bytes(), "application/octet-stream"))
-            for f in files
-        ]
+        file_tuples = [("files", (f.name, f.read_bytes(), "application/octet-stream")) for f in files]
         return self._request("POST", f"/api/v1/public/projects/{project_id}/sources", files=file_tuples)
 
     def add_tests(self, project_id: str, test_cases: list[dict]) -> dict:
-        return self._request("POST", f"/api/v1/public/projects/{project_id}/tests", json={
-            "test_cases": test_cases,
-        })
+        return self._request(
+            "POST",
+            f"/api/v1/public/projects/{project_id}/tests",
+            json={
+                "test_cases": test_cases,
+            },
+        )
 
     def generate(self, project_id: str) -> dict:
         return self._request("POST", f"/api/v1/public/projects/{project_id}/generate")

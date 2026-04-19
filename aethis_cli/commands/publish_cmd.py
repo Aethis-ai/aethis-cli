@@ -7,7 +7,7 @@ from typing import Optional
 import typer
 
 from aethis_cli.client import AethisClient
-from aethis_cli.config import load_project_config, read_state, resolve_api_key
+from aethis_cli.config import load_project_config, resolve_api_key
 from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel, success
 
@@ -52,9 +52,7 @@ def publish(
     except AethisAPIError as e:
         if not force:
             error_panel(e)
-            console.print(
-                "[yellow]Could not verify tests. Pass --force to publish without verification.[/yellow]"
-            )
+            console.print("[yellow]Could not verify tests. Pass --force to publish without verification.[/yellow]")
             raise typer.Exit(code=1)
         console.print("[yellow]Warning: test run failed but --force was used; publishing anyway.[/yellow]")
     else:
@@ -74,8 +72,7 @@ def publish(
                 )
                 raise typer.Exit(code=1)
             console.print(
-                f"[yellow]Warning: publishing with --force despite {failed} failing, "
-                f"{errors} erroring tests.[/yellow]"
+                f"[yellow]Warning: publishing with --force despite {failed} failing, {errors} erroring tests.[/yellow]"
             )
 
     try:
