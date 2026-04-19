@@ -138,7 +138,6 @@ my-rules/
 ```yaml
 project: my-rules
 api_key_env: AETHIS_API_KEY
-base_url: https://api.aethis.ai
 ```
 
 ### scenarios.yaml
@@ -164,8 +163,6 @@ tests:
 | Variable | Description | Required | Default |
 |----------|-------------|----------|---------|
 | `AETHIS_API_KEY` | Your API key (`ak_live_...`) | Authoring only | — |
-| `AETHIS_BASE_URL` | API base URL | No | `https://api.aethis.ai` |
-| `AETHIS_CLERK_DOMAIN` | Clerk domain override (development only) | No | `clerk.aethis.legal` |
 
 ## Extending with plugins
 

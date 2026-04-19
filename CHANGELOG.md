@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1 (2026-04-19)
+
+### Docs cleanup
+
+- README and [docs.aethis.ai/interfaces/cli](https://docs.aethis.ai/interfaces/cli) no longer document `AETHIS_BASE_URL` or show `base_url:` in the `aethis.yaml` example — public users always hit `https://api.aethis.ai`, and the documented values were just duplicating the default. The env var still works as an override for devs and CI; it's intentionally undocumented.
+- Dropped the `AETHIS_CLERK_DOMAIN` env var from the README (marked "development only" and confusing for public users). The override still works in code.
+
 ## 0.3.0 (2026-04-19)
 
 ### Trim public CLI to the developer API surface
