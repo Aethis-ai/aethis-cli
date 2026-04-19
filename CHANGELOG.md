@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1 (2026-04-19)
+
+### `aethis status` output polish
+
+- Server line now shows just the URL when it's the default (`https://api.aethis.ai`) — the `(default — no override)` suffix was noise in the common case. Overrides (`AETHIS_BASE_URL`, `aethis.yaml`) still show source with a green marker.
+- Identity line now says `✗ API key rejected (run \`aethis login\` to re-authenticate)` when `/me` returns 401/403/404, instead of the raw `✗ 404 from /me (Not Found)` HTTP message. Other HTTP errors keep a contextual message.
+
 ## 0.4.0 (2026-04-19)
 
 This release ships the rich-status and read-only-from-anywhere work that the 0.2.0 notes already described but which hadn't actually been merged into a published release yet. (The code was sitting in a local branch; the prior 0.2.x/0.3.x wheels still had the minimal status command.)

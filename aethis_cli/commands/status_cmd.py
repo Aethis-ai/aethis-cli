@@ -67,13 +67,14 @@ def _print_cli_section() -> None:
 
 def _print_server_section() -> None:
     base_url, source = resolve_base_url_with_source()
+    if source == "default":
+        console.print(f"[bold]Server:[/bold]      {base_url}")
+        return
     source_label = {
         "env": "from AETHIS_BASE_URL env var",
         "yaml": "from aethis.yaml",
-        "default": "default — no override",
     }[source]
-    marker = "[green]●[/green]" if source != "default" else "[dim]○[/dim]"
-    console.print(f"[bold]Server:[/bold]      {marker} {base_url}  [dim]({source_label})[/dim]")
+    console.print(f"[bold]Server:[/bold]      [green]●[/green] {base_url}  [dim]({source_label})[/dim]")
 
 
 def _print_project_section() -> tuple[Optional[object], Optional[str]]:
@@ -117,7 +118,16 @@ def _print_identity_section() -> None:
     try:
         me = client.whoami()
     except AethisAPIError as e:
-        console.print(f"[bold]Identity:[/bold]    [red]✗ {e.status_code} from /me[/red]  [dim]({e.detail})[/dim]")
+        if e.status_code in (401, 403, 404):
+            console.print(
+                "[bold]Identity:[/bold]    [red]✗ API key rejected[/red]  "
+                "[dim](run `aethis login` to re-authenticate)[/dim]"
+            )
+        else:
+            console.print(
+                f"[bold]Identity:[/bold]    [red]✗ could not reach /me (HTTP {e.status_code})[/red]  "
+                f"[dim]({e.detail})[/dim]"
+            )
         return
 
     key_id = me.get("key_id", "?")
