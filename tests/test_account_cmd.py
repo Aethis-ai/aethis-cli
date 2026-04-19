@@ -136,35 +136,6 @@ class TestAccountKeys:
         assert "No API keys" in result.output
 
 
-class TestAccountPermissions:
-    @patch("aethis_cli.commands.account_cmd.httpx.get")
-    def test_permissions_renders_registry_table(self, mock_get):
-        mock_get.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(
-                return_value=[
-                    {
-                        "action": "project.write",
-                        "required_permissions": ["projects:write"],
-                        "description": "Create and mutate projects",
-                    }
-                ]
-            ),
-        )
-        result = runner.invoke(app, ["account", "permissions"])
-        assert result.exit_code == 0
-        assert "project.write" in result.output
-        assert "projects:write" in result.output
-
-    @patch("aethis_cli.commands.account_cmd.httpx.get")
-    def test_permissions_falls_back_when_endpoint_unavailable(self, mock_get):
-        mock_get.return_value = MagicMock(status_code=500, json=MagicMock(return_value={"detail": "error"}))
-        result = runner.invoke(app, ["account", "permissions"])
-        assert result.exit_code == 0
-        assert "fallback" in result.output.lower()
-        assert "decide" in result.output
-
-
 class TestApiErrorFormatting:
     @patch("aethis_cli.commands.account_cmd._fetch_permissions", return_value=([], set(VALID_SCOPES)))
     @patch("aethis_cli.commands.account_cmd.httpx.post")

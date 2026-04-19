@@ -82,12 +82,9 @@ def login(
         help="Paste an existing API key instead of browser sign-in.",
     ),
     timeout: int = typer.Option(120, "--timeout", help="Browser auth timeout in seconds"),
-    base_url: str = typer.Option(
-        os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL),
-        "--base-url", help="API base URL",
-    ),
 ) -> None:
     """Authenticate with Aethis. Opens your browser to sign in and create an API key."""
+    base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
     if api_key:
         if not _validate_key(api_key, base_url):
             console.print("[red]That key was rejected by the API (HTTP 401). Check it and try again.[/red]")

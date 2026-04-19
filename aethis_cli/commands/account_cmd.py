@@ -12,9 +12,7 @@ from aethis_cli.auth import authenticate_with_clerk
 from aethis_cli.commands.login_cmd import _save_to_keyring, _save_to_file
 from aethis_cli.config import DEFAULT_BASE_URL
 from aethis_cli.errors import AuthenticationError
-from aethis_cli.output import console, error_panel, info, success
-
-_BASE_URL = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
+from aethis_cli.output import console, info, success
 
 CLERK_DOMAIN = os.environ.get("AETHIS_CLERK_DOMAIN", "clerk.aethis.legal")
 CLERK_CLIENT_ID = os.environ.get("AETHIS_CLERK_CLIENT_ID", "cwH009p1vPtyy1EG")
@@ -37,6 +35,7 @@ account_app = typer.Typer(
     name="account",
     help="Manage your Aethis account and API keys (browser sign-in).",
     no_args_is_help=True,
+    pretty_exceptions_enable=False,
 )
 
 
@@ -124,11 +123,11 @@ def generate(
     name: str = typer.Option("cli-generated", "--name", "-n", help="Key name"),
     scopes: Optional[List[str]] = typer.Option(None, "--scope", "-s", help="Key scopes (repeatable)"),
     tier: str = typer.Option("free", "--tier", "-t", help="Rate limit tier: free|starter|pro"),
-    base_url: str = typer.Option(_BASE_URL, "--base-url", help="API base URL"),
     no_save: bool = typer.Option(False, "--no-save", help="Print key but don't save"),
     timeout: int = typer.Option(120, "--timeout", help="Browser auth timeout in seconds"),
 ) -> None:
     """Create a new API key by signing in through your browser."""
+    base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
     if scopes is None:
         scopes = list(DEFAULT_SCOPES)
 
@@ -194,10 +193,10 @@ def generate(
 
 @account_app.command()
 def keys(
-    base_url: str = typer.Option(_BASE_URL, "--base-url", help="API base URL"),
     timeout: int = typer.Option(120, "--timeout", help="Browser auth timeout in seconds"),
 ) -> None:
     """List your API keys (requires browser sign-in)."""
+    base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
     access_token = _clerk_auth(timeout)
     success("Authenticated successfully.")
 
@@ -246,11 +245,11 @@ def keys(
 @account_app.command()
 def revoke(
     key_id: str = typer.Argument(..., help="Key ID to revoke (ak_...)"),
-    base_url: str = typer.Option(_BASE_URL, "--base-url", help="API base URL"),
     timeout: int = typer.Option(120, "--timeout", help="Browser auth timeout in seconds"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
 ) -> None:
     """Revoke an API key (requires browser sign-in)."""
+    base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
     if not yes:
         confirmed = typer.confirm(f"Revoke key {key_id}? This cannot be undone")
         if not confirmed:
@@ -279,29 +278,3 @@ def revoke(
         raise typer.Exit(code=1)
 
 
-@account_app.command("permissions")
-def permissions(
-    base_url: str = typer.Option(_BASE_URL, "--base-url", help="API base URL"),
-) -> None:
-    """List canonical API permissions and action mappings."""
-    items, available_permissions = _fetch_permissions(base_url)
-
-    if not items:
-        info("Permission registry endpoint unavailable; showing fallback scope list.")
-        console.print("\n".join(sorted(available_permissions)))
-        return
-
-    from rich.table import Table
-
-    table = Table(title="API Permissions")
-    table.add_column("Action", style="bold")
-    table.add_column("Required permissions")
-    table.add_column("Description")
-
-    for item in items:
-        table.add_row(
-            str(item.get("action", "")),
-            ", ".join(item.get("required_permissions", [])),
-            str(item.get("description", "")),
-        )
-    console.print(table)

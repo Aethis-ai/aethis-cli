@@ -86,7 +86,6 @@ See `examples/spacecraft-crew-rules/README.md` for details.
 | `aethis status` | Check generation job progress |
 | `aethis test` | Run test cases against the latest bundle |
 | `aethis publish [--force]` | Set the latest bundle as active |
-| `aethis source` | Fetch the DSL source for a published bundle |
 
 ### Guidance (project-level)
 
@@ -98,17 +97,6 @@ Project guidance lives in `.aethis/guidance/hints.yaml` and is uploaded by `aeth
 | `aethis guidance export <file>` | Export the current project's hints to YAML |
 | `aethis guidance import <file>` | Import hints from a YAML file |
 | `aethis guidance deactivate <hint_id>` | Deactivate a specific hint |
-
-### Domain guidance
-
-Domain-level hints apply to every project in a given domain.
-
-| Command | Description |
-|---------|-------------|
-| `aethis domain guidance add <domain> "<text>"` | Add a domain-level hint |
-| `aethis domain guidance list <domain>` | List hints for a domain |
-| `aethis domain guidance import <domain> <file>` | Import hints from a YAML file |
-| `aethis domain guidance export <domain> <file>` | Export domain hints to YAML |
 
 ### Projects & bundles
 
@@ -127,7 +115,6 @@ Domain-level hints apply to every project in a given domain.
 | `aethis account generate` | Create an API key via browser sign-in |
 | `aethis account keys` | List your API keys (masked) |
 | `aethis account revoke <key_id>` | Revoke a key |
-| `aethis account permissions` | Show the permissions your current key has |
 | `aethis login` | Paste an existing key |
 
 ## Project structure
@@ -180,9 +167,29 @@ tests:
 | `AETHIS_BASE_URL` | API base URL | No | `https://api.aethis.ai` |
 | `AETHIS_CLERK_DOMAIN` | Clerk domain override (development only) | No | `clerk.aethis.legal` |
 
-## Internal admin workflows
+## Extending with plugins
 
-IAM administration commands have moved to the internal `aethis-admin` tool.
+`aethis-cli` discovers third-party plugins via Python entry points under the `aethis_cli.plugins` group. A plugin is any installed package that exposes a `register(app: typer.Typer) -> None` callable; at startup the CLI calls it with the root Typer app and the plugin attaches extra commands.
+
+Example `pyproject.toml`:
+
+```toml
+[project.entry-points."aethis_cli.plugins"]
+my_plugin = "my_package.plugin:register"
+```
+
+Example `my_package/plugin.py`:
+
+```python
+import typer
+
+def register(app: typer.Typer) -> None:
+    @app.command()
+    def hello() -> None:
+        typer.echo("hello from my plugin")
+```
+
+Staff-only tools (DSL source viewer, IAM registry, domain-guidance management, `--base-url` override) live in the private `aethis-cli-internal` package, installed on request.
 
 ## Development
 
@@ -218,7 +225,7 @@ python3 -c "from datetime import date; print(date(2025,4,13).toordinal())"
 Your API key is missing, expired, or revoked. Run `aethis login` to paste a new one, or `aethis account generate` to create one.
 
 **`403 Forbidden: missing scope`**
-Your key lacks the required scope for the command. `aethis account permissions` shows what your current key can do. Contact support to upgrade scopes.
+Your key lacks the required scope for the command. `aethis whoami` shows what your current key can do. Contact support to upgrade scopes.
 
 ## Benchmarks
 

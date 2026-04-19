@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.3.0 (2026-04-19)
+
+### Trim public CLI to the developer API surface
+
+The public CLI now only ships commands every developer can use against `https://api.aethis.ai`. Privileged and staff-only commands have been removed and will live in a separate internal plugin package.
+
+**Breaking changes:**
+
+- **Removed `aethis source`** — internal-only DSL viewer; moved to the `aethis-cli-internal` plugin.
+- **Removed `aethis account permissions`** — IAM permission registry; internal-only.
+- **Removed the `aethis guidance domain …` group** (and the deprecated `aethis domain guidance …` alias) — domain-level guidance is staff-managed.
+- **Removed the global `--base-url` flag** (plus the per-command `--base-url` on `login`, `account generate`, `account keys`, `account revoke`). The `AETHIS_BASE_URL` env var still overrides the default. The flag had no meaning for the public API target and cluttered `--help`.
+
+**New: third-party plugin support.**
+
+- The CLI now discovers plugins via Python entry points under the `aethis_cli.plugins` group. A plugin exposes one callable `register(app: typer.Typer) -> None` and attaches extra commands to the root app. Plugin load failures print a single warning to stderr and never crash the CLI.
+- The staff-facing `aethis-cli-internal` package uses this hook to re-attach `source`, `domain guidance`, `permissions`, and the `--base-url` flag.
+
+## 0.2.1 (2026-04-19)
+
+### Consolidated guidance command tree
+
+- `aethis domain guidance ...` moved under `aethis guidance domain ...` — the `domain` group exists only to host `guidance`, so having two top-level trees for the same concept was confusing. All four subcommands (`add`, `list`, `import`, `export`) behave identically on the new path.
+- The old `aethis domain guidance ...` path still works as a hidden deprecated alias: invocations continue to succeed and emit a one-line deprecation notice to stderr. It is no longer shown in `aethis --help`. Planned removal in a future release.
+
+## 0.2.0 (2026-04-19)
+
+### `aethis status` — global CLI context
+
+- **New behaviour**: `aethis status` (no args) now prints a one-screen summary of the current CLI context: CLI version, resolved server URL (with source — `--base-url` / env / yaml / default), loaded `aethis.yaml` + project, bundle id from `.aethis/state.json`, and whoami identity (key id, tenant, tier, scopes, `can_author`). Answers "what will the next command hit?" — the usual cause of "why is my project missing?" is talking to the wrong server.
+- **Backward compatible**: `aethis status -p <project_id>` (or invoked from a project dir) still shows generation progress, now appended after the global summary.
+
+### UX improvements for read-only commands
+
+- `aethis explain`, `decide`, `bundles list`, `bundles archive`, `projects list`, `projects show`, and `projects archive` no longer require an `aethis.yaml` in the current directory — they fall back to `AETHIS_BASE_URL` (or the default `https://api.aethis.ai`) when invoked from anywhere.
+- `aethis explain` and `decide` now reject Project IDs (`proj_*`) passed to `-b/--bundle-id` with a one-line hint pointing at the `Bundle` column of `aethis projects list`, instead of silently proceeding to a 404.
+- `aethis --base-url <url>` is now a top-level flag, equivalent to setting `AETHIS_BASE_URL` for one invocation. Lets you hit staging or a self-hosted instance without editing `aethis.yaml`.
+- `aethis projects list` prints a short tip after the table showing how to copy a Bundle value into `aethis explain -b …`.
+- Configuration and authentication errors now render as a single red line via the existing `cli()` handler, not a Rich traceback panel. `pretty_exceptions_enable=False` is set on every Typer app.
+
+### Better `--help`
+
+- Top-level `aethis --help` now shows common flows (status, list, explain, decide), authoring flow, and how to target a different server.
+- `explain`, `decide`, `bundles list`, `projects list`, and `status` all have "Examples:" blocks in their per-command help.
+
 ## 0.1.0 (2026-04-05)
 
 Initial release.
