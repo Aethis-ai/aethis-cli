@@ -15,7 +15,7 @@ jobs:
           fetch-tags: true # …and tags, explicitly (actions/checkout no longer fetches tags by default)
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v8
+        uses: astral-sh/setup-uv@v8.1.0
 
       - name: Set up Python
         run: uv python install 3.12
