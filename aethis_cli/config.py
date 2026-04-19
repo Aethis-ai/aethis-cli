@@ -6,11 +6,14 @@ import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import yaml
 
 from aethis_cli.errors import ConfigError
+
+if TYPE_CHECKING:
+    from aethis_cli.client import AethisClient
 
 DEFAULT_BASE_URL = "https://api.aethis.ai"
 
@@ -37,6 +40,45 @@ class ProjectConfig:
     base_url: str = DEFAULT_BASE_URL
     project_id: Optional[str] = None
     config_path: Path = field(default_factory=lambda: Path.cwd())
+
+
+def resolve_base_url_with_source() -> tuple[str, str]:
+    """Return (base_url, source) where source is 'env', 'yaml', or 'default'.
+
+    Resolution order matches what every read-only command sees:
+      AETHIS_BASE_URL env var > aethis.yaml > DEFAULT_BASE_URL
+    """
+    env = os.environ.get("AETHIS_BASE_URL")
+    if env:
+        return env, "env"
+    try:
+        cfg = load_project_config()
+    except ConfigError:
+        return DEFAULT_BASE_URL, "default"
+    if cfg.base_url == DEFAULT_BASE_URL:
+        return cfg.base_url, "default"
+    return cfg.base_url, "yaml"
+
+
+def load_client_or_fallback() -> tuple["ProjectConfig", "AethisClient"]:
+    """Load project config if available, else fall back to DEFAULT_BASE_URL.
+
+    Used by read-only commands (`explain`, `decide`, `bundles`, `projects`,
+    `whoami`) so they work from any directory. The fallback still resolves
+    the API key from env / keychain / credentials file, so commands that
+    require a key will error on `resolve_api_key` as usual.
+    """
+    from aethis_cli.client import AethisClient
+
+    try:
+        cfg = load_project_config()
+    except ConfigError:
+        base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
+        _validate_base_url(base_url)
+        cfg = ProjectConfig(project="", base_url=base_url)
+
+    api_key = resolve_api_key(cfg)
+    return cfg, AethisClient(api_key, cfg.base_url)
 
 
 def load_project_config(path: Optional[Path] = None) -> ProjectConfig:

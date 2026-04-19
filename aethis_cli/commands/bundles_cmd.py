@@ -7,15 +7,16 @@ from typing import Optional
 import typer
 from rich.table import Table
 
-from aethis_cli.client import AethisClient
-from aethis_cli.config import load_project_config, resolve_api_key
-from aethis_cli.errors import AethisAPIError, ConfigError
+from aethis_cli.commands._id_utils import require_bundle_id
+from aethis_cli.config import load_client_or_fallback
+from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel, success, warn
 
 bundles_app = typer.Typer(
     name="bundles",
     help="List and archive rule bundles.",
     no_args_is_help=True,
+    pretty_exceptions_enable=False,
 )
 
 
@@ -24,27 +25,22 @@ def list_bundles(
     project_id: Optional[str] = typer.Option(None, "--project-id", "-p", help="Project ID"),
     status: Optional[str] = typer.Option(None, "--status", "-s", help="Filter by status (comma-separated)"),
 ) -> None:
-    """List bundles for a project."""
-    try:
-        cfg = load_project_config()
-        api_key = resolve_api_key(cfg)
-        client = AethisClient(api_key, cfg.base_url)
-        pid = project_id or cfg.project_id
-    except ConfigError:
-        if not project_id:
-            console.print("[red]No project context. Pass --project-id or run from a project directory.[/red]")
-            raise typer.Exit(code=1)
-        import os
-        from aethis_cli.config import DEFAULT_BASE_URL, ProjectConfig
+    """List bundles for a project.
 
-        base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
-        cfg = ProjectConfig(project="", base_url=base_url)
-        api_key = resolve_api_key(cfg)
-        client = AethisClient(api_key, base_url)
-        pid = project_id
+    Examples:
+
+        aethis bundles list -p proj_i1HyinBtFJniayUC
+        aethis bundles list -p proj_i1HyinBtFJniayUC -s active,archived
+        aethis bundles list              # uses project_id from .aethis/state.json
+    """
+    cfg, client = load_client_or_fallback()
+    pid = project_id or cfg.project_id
 
     if not pid:
-        console.print("[red]No project_id. Pass --project-id or run 'aethis generate' first.[/red]")
+        console.print(
+            "[red]No project_id.[/red] Pass --project-id or run from a project "
+            "directory where `aethis generate` has created .aethis/state.json."
+        )
         raise typer.Exit(code=1)
 
     try:
@@ -83,27 +79,21 @@ def list_bundles(
 
 @bundles_app.command(name="archive")
 def archive_bundle(
-    bundle_id: str = typer.Argument(..., help="Bundle ID"),
+    bundle_id: str = typer.Argument(
+        ...,
+        help="Bundle ID (e.g. example_bundle:20260408-abc1234). Not a Project ID.",
+    ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
 ) -> None:
     """Archive a bundle (soft-delete, preserves all data)."""
+    require_bundle_id(bundle_id)
+
     if not yes:
         confirmed = typer.confirm(f"Archive bundle {bundle_id}? This cannot be undone")
         if not confirmed:
             raise typer.Abort()
 
-    try:
-        cfg = load_project_config()
-        api_key = resolve_api_key(cfg)
-        client = AethisClient(api_key, cfg.base_url)
-    except ConfigError:
-        import os
-        from aethis_cli.config import DEFAULT_BASE_URL, ProjectConfig
-
-        base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
-        cfg = ProjectConfig(project="", base_url=base_url)
-        api_key = resolve_api_key(cfg)
-        client = AethisClient(api_key, base_url)
+    _cfg, client = load_client_or_fallback()
 
     try:
         result = client.archive_bundle(bundle_id)

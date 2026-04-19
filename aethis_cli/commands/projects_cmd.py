@@ -2,46 +2,34 @@
 
 from __future__ import annotations
 
-
 import typer
 from rich.table import Table
 
-from aethis_cli.client import AethisClient
-from aethis_cli.config import load_project_config, resolve_api_key
-from aethis_cli.errors import AethisAPIError, ConfigError
+from aethis_cli.config import load_client_or_fallback
+from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel, success
 
 projects_app = typer.Typer(
     name="projects",
     help="List, show, and archive authoring projects.",
     no_args_is_help=True,
+    pretty_exceptions_enable=False,
 )
-
-
-def _get_client() -> AethisClient:
-    cfg = load_project_config()
-    api_key = resolve_api_key(cfg)
-    return AethisClient(api_key, cfg.base_url)
 
 
 @projects_app.command(name="list")
 def list_projects(
     include_archived: bool = typer.Option(False, "--include-archived", help="Include archived projects"),
 ) -> None:
-    """List all projects."""
-    try:
-        client = _get_client()
-    except ConfigError:
-        # No aethis.yaml needed for listing — use defaults
-        from aethis_cli.config import DEFAULT_BASE_URL, resolve_api_key as _resolve
-        import os
+    """List all projects.
 
-        base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
-        from aethis_cli.config import ProjectConfig
+    Examples:
 
-        cfg = ProjectConfig(project="", base_url=base_url)
-        api_key = _resolve(cfg)
-        client = AethisClient(api_key, base_url)
+        aethis projects list
+        aethis projects list --include-archived
+        aethis --base-url http://localhost:8080 projects list
+    """
+    _cfg, client = load_client_or_fallback()
 
     try:
         projects = client.list_projects(include_archived=include_archived)
@@ -73,6 +61,10 @@ def list_projects(
         )
 
     console.print(table)
+    console.print(
+        "[dim]Tip: copy a Bundle value and run "
+        "`aethis explain -b <bundle>` or `aethis decide -b <bundle> -i '{...}'`.[/dim]"
+    )
 
 
 @projects_app.command(name="show")
@@ -80,18 +72,7 @@ def show_project(
     project_id: str = typer.Argument(..., help="Project ID (proj_...)"),
 ) -> None:
     """Show project details."""
-    try:
-        client = _get_client()
-    except ConfigError:
-        from aethis_cli.config import DEFAULT_BASE_URL, resolve_api_key as _resolve
-        import os
-
-        base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
-        from aethis_cli.config import ProjectConfig
-
-        cfg = ProjectConfig(project="", base_url=base_url)
-        api_key = _resolve(cfg)
-        client = AethisClient(api_key, base_url)
+    _cfg, client = load_client_or_fallback()
 
     try:
         p = client.get_project(project_id)
@@ -119,18 +100,7 @@ def archive_project(
         if not confirmed:
             raise typer.Abort()
 
-    try:
-        client = _get_client()
-    except ConfigError:
-        from aethis_cli.config import DEFAULT_BASE_URL, resolve_api_key as _resolve
-        import os
-
-        base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
-        from aethis_cli.config import ProjectConfig
-
-        cfg = ProjectConfig(project="", base_url=base_url)
-        api_key = _resolve(cfg)
-        client = AethisClient(api_key, base_url)
+    _cfg, client = load_client_or_fallback()
 
     try:
         result = client.archive_project(project_id)

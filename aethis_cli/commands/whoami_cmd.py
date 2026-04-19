@@ -7,6 +7,7 @@ import typer
 import os
 
 from aethis_cli.client import AethisClient
+from aethis_cli.config import DEFAULT_BASE_URL
 from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel
 
@@ -15,7 +16,7 @@ def _resolve_api_key_lax() -> tuple[str | None, str]:
     """Resolve an API key using the same fallback chain as other commands,
     but don't raise when no key is found — return (None, base_url) instead.
     """
-    base_url = os.environ.get("AETHIS_BASE_URL", "https://api.aethis.ai")
+    base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
     key = os.environ.get("AETHIS_API_KEY")
     if key:
         return key, base_url

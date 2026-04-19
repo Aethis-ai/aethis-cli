@@ -13,7 +13,10 @@ from aethis_cli.config import load_project_config, resolve_api_key
 from aethis_cli.errors import AethisAPIError, ConfigError
 from aethis_cli.output import console, error_panel, success
 
-guidance_app = typer.Typer(help="Manage guidance hints for rule authoring.")
+guidance_app = typer.Typer(
+    help="Manage guidance hints for rule authoring.",
+    pretty_exceptions_enable=False,
+)
 
 
 @guidance_app.command("list")

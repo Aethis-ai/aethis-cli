@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.4.0 (2026-04-19)
+
+This release ships the rich-status and read-only-from-anywhere work that the 0.2.0 notes already described but which hadn't actually been merged into a published release yet. (The code was sitting in a local branch; the prior 0.2.x/0.3.x wheels still had the minimal status command.)
+
+### `aethis status` — context-aware summary
+
+- `aethis status` with no args now prints CLI version, resolved server URL (with source — env / yaml / default), loaded `aethis.yaml`, bundle id from `.aethis/state.json`, and `whoami` identity (key id, tenant, tier, scopes, `can_author`). Helps answer "what will my next command actually hit?" before running it.
+- `aethis status -p <project_id>` (or from inside a project dir) still shows generation progress, appended after the global summary.
+
+### Read-only commands usable from anywhere
+
+- `aethis explain`, `decide`, `bundles list`, `bundles archive`, `projects list`, `projects show`, `projects archive` no longer require an `aethis.yaml` in the current directory — they fall back to `AETHIS_BASE_URL` (or the default `https://api.aethis.ai`).
+- `aethis explain` / `decide` now reject Project IDs (`proj_*`) passed to `-b/--bundle-id` with a one-line hint pointing at the Bundle column of `aethis projects list`, instead of silently 404'ing.
+
+### Internals
+
+- New `resolve_base_url_with_source()` / `load_client_or_fallback()` helpers in `aethis_cli/config.py` that the above commands share.
+- New `aethis_cli/commands/_id_utils.py` + test coverage for bundle-id validation.
+- New tests for `explain`, `status`, and `_id_utils`.
+
 ## 0.3.1 (2026-04-19)
 
 ### Docs cleanup

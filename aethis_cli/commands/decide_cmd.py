@@ -8,8 +8,8 @@ from typing import Optional
 import typer
 from rich.table import Table
 
-from aethis_cli.client import AethisClient
-from aethis_cli.config import load_project_config, read_state, resolve_api_key
+from aethis_cli.commands._id_utils import require_bundle_id
+from aethis_cli.config import load_client_or_fallback, read_state
 from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel
 
@@ -17,23 +17,41 @@ from aethis_cli.output import console, error_panel
 def decide(
     input_json: str = typer.Option(..., "--input", "-i", help="JSON object of field values"),
     bundle_id: Optional[str] = typer.Option(
-        None, "--bundle-id", "-b", help="Bundle ID (default: from .aethis/state.json)"
+        None,
+        "--bundle-id",
+        "-b",
+        help=(
+            "Bundle ID (the 'Bundle' column from `aethis projects list`, "
+            "e.g. example_bundle:20260408-abc1234). Not the `proj_*` Project ID. "
+            "Defaults to .aethis/state.json if omitted."
+        ),
     ),
     explain: bool = typer.Option(False, "--explain", "-e", help="Show reasoning for the decision"),
 ) -> None:
-    """Evaluate eligibility against a published bundle."""
-    cfg = load_project_config()
-    api_key = resolve_api_key(cfg)
-    client = AethisClient(api_key, cfg.base_url)
+    """Evaluate eligibility against a published bundle.
+
+    Examples:
+
+        aethis decide -b my_bundle:20260401-a1b2c3d -i '{"age": 21, "country": "UK"}'
+        aethis decide -b my_bundle:20260401-a1b2c3d -i @inputs.json --explain
+        aethis decide -i '{...}'         # uses bundle from .aethis/state.json
+
+    Input is a JSON object mapping field IDs to values. Use --explain to see the
+    reasoning trace (which rules fired, which group satisfied the decision).
+    """
+    cfg, client = load_client_or_fallback()
 
     if not bundle_id:
         state = read_state(cfg.config_path)
         bundle_id = state.get("bundle_id")
         if not bundle_id:
             console.print(
-                "[red]No bundle_id found. Run 'aethis generate' and 'aethis publish' first, or pass --bundle-id.[/red]"
+                "[red]No bundle_id.[/red] Pass --bundle-id or run from a project "
+                "directory where `aethis generate`/`publish` has been run."
             )
             raise typer.Exit(code=1)
+
+    require_bundle_id(bundle_id)
 
     try:
         field_values = json.loads(input_json)
