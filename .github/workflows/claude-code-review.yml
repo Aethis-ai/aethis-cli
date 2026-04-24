@@ -1,0 +1,49 @@
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+# See Aethis-ai/aethis-workspace/docs/AUTOMATION_PATTERNS.md for the rules this follows.
+# Kill switch: gh variable set CLAUDE_PR_REVIEW_ENABLED=false
+# Master kill switch: gh variable set AI_AUTOMATIONS_ENABLED=false --org Aethis-ai
+
+jobs:
+  claude-review:
+    if: vars.AI_AUTOMATIONS_ENABLED == 'true' && vars.CLAUDE_PR_REVIEW_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code Review
+        id: claude-review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            You are reviewing a pull request on Aethis-ai/aethis-cli — the public developer CLI for the Aethis API (Python 3.12+, Typer, Rich).
+
+            MODE: ${{ vars.CLAUDE_PR_REVIEW_MODE || 'dry-run' }}
+
+            Prioritise these concerns above generic code-quality observations:
+
+            1. **SemVer discipline** — per the repo's public-repo rules, every change to a published package must bump the version AND update CHANGELOG.md in the SAME commit. Patch for UX/bugfix, minor for additive features, major for breaking. Flag missing version bumps.
+            2. **CLI contract** — command names, flag names, and output formats are a public API. Flag any rename, removal, or format change as potentially breaking unless accompanied by a major version bump.
+            3. **User-facing output** — Rich output should degrade gracefully in non-TTY environments; `--json` output should remain machine-parseable and stable.
+            4. **No internal implementation details leaking** — per the workspace rules file, public-repo code uses public terminology only (e.g. "eligibility engine", "rule bundle").
+            5. **Standard** — test coverage, type hints, conventional commits, fail-fast per repo CLAUDE.md.
+
+            Use CLAUDE.md for repo-specific conventions.
+
+            Post your review via `gh pr comment`. If MODE is 'dry-run', prefix the comment with a `[DRY-RUN]` heading and end it with: `_This is a dry-run review — informational only until the workflow is flipped to live._`
+
+          claude_args: '--allowed-tools "Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"'
