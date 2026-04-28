@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.2 (2026-04-28)
+
+Two bug fixes that block the documented quickstart against public bundles.
+
+### Bug fixes
+
+- **`aethis decide -b <slug>` / `explain -b <slug>` / `bundles archive -b <slug>` now accept slugs.** The classifier in `_id_utils.classify_id` previously returned `"unknown"` for slugs (e.g. `aethis/uk-fsm/universal-infant`), and `require_bundle_id` rejected them with `"is not a valid Bundle ID"`. The public API resolves both bundle IDs and slugs on `/decide`, `/schema`, and `/explain`, so the CLI now passes both through. Error message updated to mention slugs and link to `aethis bundles list`.
+- **`aethis fields -b <bundle>` no longer requires an `aethis.yaml`.** It now uses the same `load_client_or_fallback()` helper as `decide`, `explain`, `bundles`, and `projects` — read-only commands work from any directory. Previously this command errored out with `"No aethis.yaml found"` even when called with a concrete bundle reference.
+
 ## 0.4.1 (2026-04-19)
 
 ### `aethis status` output polish

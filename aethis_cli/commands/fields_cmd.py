@@ -7,8 +7,7 @@ from typing import Optional
 import typer
 from rich.table import Table
 
-from aethis_cli.client import AethisClient
-from aethis_cli.config import load_project_config, read_state, resolve_api_key
+from aethis_cli.config import load_client_or_fallback, read_state
 from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel
 
@@ -17,9 +16,7 @@ def fields(
     bundle_id: Optional[str] = typer.Option(None, "--bundle-id", "-b"),
 ) -> None:
     """Show the input fields expected by a bundle."""
-    cfg = load_project_config()
-    api_key = resolve_api_key(cfg)
-    client = AethisClient(api_key, cfg.base_url)
+    cfg, client = load_client_or_fallback()
 
     if not bundle_id:
         state = read_state(cfg.config_path)
