@@ -40,9 +40,8 @@ aethis explain -b <bundle_id>
 Rule authoring is **invite-only private beta**. Decision tools (`aethis decide`, `aethis fields`, `aethis explain`) work immediately with no sign-up — this section is for approved beta tenants. [Request access →](https://aethis.ai/sign-up)
 
 ```bash
-# 1. Authenticate (creates a key via browser sign-in)
-aethis account generate
-# Or paste an existing key: aethis login
+# 1. Sign in (creates and stores an API key via browser)
+aethis login
 
 # 2. Initialise a project
 mkdir my-rules && cd my-rules
@@ -67,7 +66,7 @@ A complete, runnable example is included in `examples/spacecraft-crew-rules/`:
 
 ```bash
 cp -r examples/spacecraft-crew-rules my-first-rules && cd my-first-rules
-aethis account generate
+aethis login
 aethis generate --poll
 aethis test
 aethis decide -i '{"space.crew.species": "Human", "space.crew.age": 35, "space.crew.flight_hours": 600, "space.crew.has_pilot_license": true, "space.crew.has_gaa_exam": true, "space.medical.cert_valid": true, "space.mission.type": "suborbital", "space.crew.has_towel": true}'
@@ -120,10 +119,10 @@ Project guidance lives in `.aethis/guidance/hints.yaml` and is uploaded by `aeth
 
 | Command | Description |
 |---------|-------------|
-| `aethis account generate` | Create an API key via browser sign-in |
+| `aethis login` | Sign in and store an API key locally (first-time setup) |
+| `aethis account generate` | Mint an additional API key (rotation, multi-machine, scoped access) |
 | `aethis account keys` | List your API keys (masked) |
 | `aethis account revoke <key_id>` | Revoke a key |
-| `aethis login` | Paste an existing key |
 
 ## Project structure
 
