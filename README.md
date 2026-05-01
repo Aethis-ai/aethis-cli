@@ -9,6 +9,14 @@ CLI for the [Aethis](https://aethis.ai) developer API — evaluate eligibility, 
 ## Install
 
 ```bash
+# Recommended — isolated, no venv juggling:
+uv tool install aethis-cli
+
+# Or, with pipx:
+pipx install aethis-cli
+
+# Or in a venv:
+python -m venv .venv && source .venv/bin/activate
 pip install aethis-cli
 ```
 
