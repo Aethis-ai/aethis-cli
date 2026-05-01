@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.3 (2026-05-01)
+
+- Docs: README install section now leads with `uv tool install aethis-cli` (recommended) and `pipx install aethis-cli`, with `pip install` in a venv as the third option. Pairs with [Aethis-ai/docs#12](https://github.com/Aethis-ai/docs/pull/12). Closes [#14](https://github.com/Aethis-ai/aethis-cli/issues/14).
+
 ## 0.4.2 (2026-04-28)
 
 Two bug fixes that block the documented quickstart against public bundles.
