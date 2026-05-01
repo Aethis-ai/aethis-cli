@@ -14,6 +14,7 @@ from aethis_cli.output import console
 from aethis_cli.commands.account_cmd import account_app
 from aethis_cli.commands.bundles_cmd import bundles_app
 from aethis_cli.commands.guidance_cmd import guidance_app
+from aethis_cli.commands.mcp_cmd import mcp_app
 from aethis_cli.commands.projects_cmd import projects_app
 from aethis_cli.commands.init_cmd import init
 from aethis_cli.commands.login_cmd import login
@@ -91,6 +92,7 @@ def main(
 app.add_typer(account_app, name="account")
 app.add_typer(bundles_app, name="bundles")
 app.add_typer(guidance_app, name="guidance")
+app.add_typer(mcp_app, name="mcp")
 app.add_typer(projects_app, name="projects")
 app.command()(init)
 app.command()(login)
