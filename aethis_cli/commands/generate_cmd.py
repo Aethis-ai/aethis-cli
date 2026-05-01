@@ -11,7 +11,13 @@ import yaml
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 
 from aethis_cli.client import AethisClient
-from aethis_cli.config import load_project_config, resolve_anthropic_key, resolve_api_key, write_state
+from aethis_cli.config import (
+    load_project_config,
+    make_authed_client,
+    resolve_anthropic_key,
+    resolve_api_key,
+    write_state,
+)
 from aethis_cli.errors import AethisAPIError, ConfigError
 from aethis_cli.output import console, error_panel, info, success
 
@@ -35,7 +41,7 @@ def generate(
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(code=1)
 
-    client = AethisClient(api_key, cfg.base_url, anthropic_key=anthropic_key)
+    client = make_authed_client(api_key, cfg.base_url, anthropic_key=anthropic_key)
     project_dir = cfg.config_path
 
     # Fail-fast on empty sources: generation without any source documents wastes

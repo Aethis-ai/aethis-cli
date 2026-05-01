@@ -18,3 +18,12 @@ class ConfigError(Exception):
 
 class AuthenticationError(Exception):
     """Raised when browser-based OAuth authentication fails."""
+
+
+class AuthRequired(Exception):
+    """Raised when an authenticated call is attempted without a usable API key.
+
+    Distinguishes "no credentials available, can't even try" from "credentials
+    were rejected by the server" (which is ``AuthenticationError`` /
+    ``AethisAPIError(status_code=401)``).
+    """

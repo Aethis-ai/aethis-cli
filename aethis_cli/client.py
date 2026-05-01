@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import httpx
 
 from aethis_cli.errors import AethisAPIError
+
+# Callback signature for the lazy-auth refresh hook. Receives ``force_browser``
+# (always True at the call site — we know the cached key just failed) and
+# returns a fresh API key, or raises :class:`AuthRequired` to abort cleanly.
+KeyRefreshCallback = Callable[..., str]
 
 
 class AethisClient:
@@ -18,6 +23,7 @@ class AethisClient:
         api_key: str,
         base_url: str = "https://api.aethis.ai",
         anthropic_key: Optional[str] = None,
+        on_auth_required: Optional[KeyRefreshCallback] = None,
     ) -> None:
         headers: dict[str, str] = {"X-API-Key": api_key}
         if anthropic_key:
@@ -28,6 +34,10 @@ class AethisClient:
             timeout=60.0,
             verify=True,
         )
+        # Hook called once when the server returns 401. If it returns a new
+        # key the request is retried exactly once with the refreshed header;
+        # a second 401 surfaces the original error so we never loop.
+        self._on_auth_required = on_auth_required
 
     def close(self) -> None:
         self._client.close()
@@ -40,15 +50,31 @@ class AethisClient:
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         resp = self._client.request(method, path, **kwargs)
+        if resp.status_code == 401 and self._on_auth_required is not None:
+            # Single retry. Disable the hook for the retry to bound recursion
+            # at one extra round-trip even if the hook's caller plumbs the
+            # wrong key back in. ``AuthRequired`` (no TTY, ``--no-prompt``,
+            # user declined) and other refresh-flow exceptions propagate so
+            # the CLI wrapper can render a clean one-liner instead of being
+            # masked by the original 401.
+            refresh = self._on_auth_required
+            self._on_auth_required = None
+            new_key = refresh(force_browser=True)
+            self._client.headers["X-API-Key"] = new_key
+            resp = self._client.request(method, path, **kwargs)
         if resp.status_code >= 400:
-            try:
-                detail = resp.json().get("detail", resp.text)
-            except (ValueError, KeyError):
-                detail = resp.text or f"HTTP {resp.status_code}"
-            raise AethisAPIError(resp.status_code, detail)
+            self._raise_for_status(resp)
         if resp.status_code == 204:
             return {}
         return resp.json()
+
+    @staticmethod
+    def _raise_for_status(resp: httpx.Response) -> None:
+        try:
+            detail = resp.json().get("detail", resp.text)
+        except (ValueError, KeyError):
+            detail = resp.text or f"HTTP {resp.status_code}"
+        raise AethisAPIError(resp.status_code, detail)
 
     # -- Decision API --
 

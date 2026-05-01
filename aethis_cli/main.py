@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from importlib.metadata import entry_points
 from typing import Optional
@@ -9,7 +10,8 @@ from typing import Optional
 import typer
 
 from aethis_cli._version import __version__
-from aethis_cli.errors import AethisAPIError, AuthenticationError, ConfigError
+from aethis_cli.auth_helpers import RUNTIME
+from aethis_cli.errors import AethisAPIError, AuthenticationError, AuthRequired, ConfigError
 from aethis_cli.output import console
 from aethis_cli.commands.account_cmd import account_app
 from aethis_cli.commands.bundles_cmd import bundles_app
@@ -85,8 +87,37 @@ def main(
     version: Optional[bool] = typer.Option(
         None, "--version", "-V", callback=_version_callback, is_eager=True, help="Show version and exit."
     ),
+    no_prompt: bool = typer.Option(
+        False,
+        "--no-prompt",
+        help="Never prompt for browser sign-in; fail fast if no API key is cached. Useful for scripts/CI.",
+    ),
+    api_key: Optional[str] = typer.Option(
+        None,
+        "--api-key",
+        help="Use this API key for the duration of the command (overrides env / keychain / credentials).",
+    ),
+    base_url: Optional[str] = typer.Option(
+        None,
+        "--base-url",
+        help="Override the API base URL (defaults to AETHIS_BASE_URL or https://api.aethis.ai).",
+    ),
 ) -> None:
     """CLI for the Aethis developer API — author, test, and publish rule bundles."""
+    # Stash root-level flags on the lazy-auth runtime so commands and the
+    # HTTP client can consult them without each accepting these flags
+    # individually. Env vars still win over absent flags so existing scripts
+    # keep working.
+    RUNTIME.no_prompt = no_prompt
+    RUNTIME.api_key_override = api_key
+    RUNTIME.base_url_override = base_url
+    if base_url:
+        # Make AETHIS_BASE_URL the single source of truth for downstream
+        # code paths (config.resolve_base_url_with_source, status, login)
+        # that read the env var directly.
+        os.environ["AETHIS_BASE_URL"] = base_url
+    if api_key:
+        os.environ["AETHIS_API_KEY"] = api_key
 
 
 app.add_typer(account_app, name="account")
@@ -135,6 +166,11 @@ def cli() -> None:
         app()
     except ConfigError as e:
         console.print(f"[red]Error:[/red] {e}")
+        raise SystemExit(1)
+    except AuthRequired:
+        # Lazy-auth helper already printed the user-facing line before raising
+        # (so CliRunner-style tests / direct app() callers see it too). Just
+        # exit cleanly here.
         raise SystemExit(1)
     except AuthenticationError as e:
         console.print(f"[red]Auth error:[/red] {e}")

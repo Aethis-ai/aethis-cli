@@ -66,9 +66,7 @@ def test_fields_works_without_aethis_yaml_using_bundle_id(tmp_path, monkeypatch)
         )
 
     assert result.exit_code == 0, result.output
-    client.get_schema.assert_called_once_with(
-        "spacecraft-crew-certification:20260407-933531f7"
-    )
+    client.get_schema.assert_called_once_with("spacecraft-crew-certification:20260407-933531f7")
 
 
 def test_fields_missing_bundle_id_gives_one_line_error(tmp_path, monkeypatch):

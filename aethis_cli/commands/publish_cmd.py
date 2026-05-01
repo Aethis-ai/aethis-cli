@@ -6,8 +6,7 @@ from typing import Optional
 
 import typer
 
-from aethis_cli.client import AethisClient
-from aethis_cli.config import load_project_config, resolve_api_key
+from aethis_cli.config import load_project_config, make_authed_client, resolve_api_key
 from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel, success
 
@@ -39,7 +38,7 @@ def publish(
     """
     cfg = load_project_config()
     api_key = resolve_api_key(cfg)
-    client = AethisClient(api_key, cfg.base_url)
+    client = make_authed_client(api_key, cfg.base_url)
 
     pid = project_id or cfg.project_id
     if not pid:
