@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.0 (2026-05-01)
+
+- New: `aethis init` first-run wizard. With no args, prompts for the project name (default = current directory name); a positional `aethis init <name>` keeps working unchanged. If no API key is cached, triggers the same OAuth flow as `aethis login` *before* any filesystem writes — Ctrl-C during browser sign-in no longer leaves a half-scaffolded project on disk. After scaffolding, prints the next-step ladder (`aethis sections discover` → `fields discover` → `generate --poll`) so new users have a clear path forward. New `--no-prompt` flag for scripted use; with that flag, missing required values fail fast and missing auth surfaces a clean `AuthRequired` error instead of opening a browser. 10 new tests covering prompted, non-prompted, no-auth + interactive, no-auth + `--no-prompt`, and name-validation paths. Closes [#15](https://github.com/Aethis-ai/aethis-cli/issues/15).
+
 ## 0.6.0 (2026-05-01)
 
 - New: lazy auth. Authenticated commands (`aethis projects list`, `generate`, `publish`, etc.) now detect missing credentials or 401 responses and offer an inline browser sign-in prompt: `"No API key. Open browser to sign in? [Y/n]"`. On accept, the same OAuth flow as `aethis login` runs, the key is cached, and the original command retries — exactly once, no infinite loops. Non-TTY stdin/stdout (CI, pipes) and the new `--no-prompt` global flag skip the prompt and surface a clean `AuthRequired` error. `--api-key <key>` still bypasses the helper entirely. New helper module `aethis_cli/auth_helpers.py`; the OAuth flow inside `commands/login_cmd.py` was factored into a reusable `run_browser_login()`. 17 new tests in `tests/test_lazy_auth.py`. Closes [#12](https://github.com/Aethis-ai/aethis-cli/issues/12).
