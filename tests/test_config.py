@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from aethis_cli.config import load_project_config, resolve_api_key
-from aethis_cli.errors import ConfigError
+from aethis_cli.errors import AuthRequired, ConfigError
 
 
 def test_load_config_from_cwd(tmp_project, monkeypatch):
@@ -66,10 +66,16 @@ def test_resolve_api_key_from_credentials_file(tmp_project, tmp_path, monkeypatc
 
 
 def test_resolve_api_key_missing_raises(tmp_project, tmp_path, monkeypatch):
+    """No cached key + non-TTY (pytest) ⇒ AuthRequired with a remediation hint.
+
+    Previously this raised ConfigError. The lazy-auth helper now decides the
+    exception based on environment: AuthRequired in non-interactive contexts
+    so callers can tell "no key" apart from "config is broken".
+    """
     monkeypatch.chdir(tmp_project)
     monkeypatch.delenv("AETHIS_API_KEY", raising=False)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "empty_config"))
-    with pytest.raises(ConfigError, match="API key"):
+    with pytest.raises(AuthRequired, match="API key"):
         cfg = load_project_config()
         resolve_api_key(cfg)
 

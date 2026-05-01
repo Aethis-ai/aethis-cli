@@ -56,7 +56,7 @@ def test_publish_without_force_refuses_when_tests_failing(base_patches):
     }
     mock_client.publish = MagicMock()
 
-    base_patches.enter_context(patch("aethis_cli.commands.publish_cmd.AethisClient", return_value=mock_client))
+    base_patches.enter_context(patch("aethis_cli.commands.publish_cmd.make_authed_client", return_value=mock_client))
 
     from aethis_cli.main import app
 
@@ -80,7 +80,7 @@ def test_publish_with_force_bypasses_failing_tests(base_patches):
     }
     mock_client.publish.return_value = {"bundle_id": "test:abc", "version": "v2"}
 
-    base_patches.enter_context(patch("aethis_cli.commands.publish_cmd.AethisClient", return_value=mock_client))
+    base_patches.enter_context(patch("aethis_cli.commands.publish_cmd.make_authed_client", return_value=mock_client))
 
     from aethis_cli.main import app
 
@@ -104,7 +104,7 @@ def test_publish_passing_tests_publishes_without_force(base_patches):
     }
     mock_client.publish.return_value = {"bundle_id": "test:abc", "version": "v1"}
 
-    base_patches.enter_context(patch("aethis_cli.commands.publish_cmd.AethisClient", return_value=mock_client))
+    base_patches.enter_context(patch("aethis_cli.commands.publish_cmd.make_authed_client", return_value=mock_client))
 
     from aethis_cli.main import app
 

@@ -60,25 +60,48 @@ def resolve_base_url_with_source() -> tuple[str, str]:
     return cfg.base_url, "yaml"
 
 
+def make_authed_client(
+    api_key: str,
+    base_url: str,
+    *,
+    anthropic_key: Optional[str] = None,
+) -> "AethisClient":
+    """Build an :class:`AethisClient` wired with the lazy-auth refresh hook.
+
+    Use this in place of constructing ``AethisClient`` directly so a 401 from
+    the server transparently triggers the inline browser sign-in flow once
+    before failing.
+    """
+    from aethis_cli.auth_helpers import require_auth_or_login_inline
+    from aethis_cli.client import AethisClient
+
+    def _refresh(force_browser: bool = True) -> str:
+        return require_auth_or_login_inline(base_url, force_browser=force_browser)
+
+    return AethisClient(api_key, base_url, anthropic_key=anthropic_key, on_auth_required=_refresh)
+
+
 def load_client_or_fallback() -> tuple["ProjectConfig", "AethisClient"]:
     """Load project config if available, else fall back to DEFAULT_BASE_URL.
 
     Used by read-only commands (`explain`, `decide`, `bundles`, `projects`,
-    `whoami`) so they work from any directory. The fallback still resolves
-    the API key from env / keychain / credentials file, so commands that
-    require a key will error on `resolve_api_key` as usual.
+    `whoami`) so they work from any directory. Authentication is lazy: if no
+    API key is cached the client is built with a key-refresh hook that runs
+    the inline browser login on the first 401. This lets a fresh user run
+    ``aethis projects list`` and complete sign-in without backing out to
+    ``aethis login`` and re-running.
     """
-    from aethis_cli.client import AethisClient
+    from aethis_cli.auth_helpers import RUNTIME, require_auth_or_login_inline
 
     try:
         cfg = load_project_config()
     except ConfigError:
-        base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
+        base_url = RUNTIME.base_url_override or os.environ.get("AETHIS_BASE_URL") or DEFAULT_BASE_URL
         _validate_base_url(base_url)
         cfg = ProjectConfig(project="", base_url=base_url)
 
-    api_key = resolve_api_key(cfg)
-    return cfg, AethisClient(api_key, cfg.base_url)
+    api_key = require_auth_or_login_inline(cfg.base_url)
+    return cfg, make_authed_client(api_key, cfg.base_url)
 
 
 def load_project_config(path: Optional[Path] = None) -> ProjectConfig:
@@ -113,7 +136,14 @@ def load_project_config(path: Optional[Path] = None) -> ProjectConfig:
 
 
 def resolve_api_key(config: ProjectConfig) -> str:
-    """Resolve API key: env var → OS keychain → credentials file."""
+    """Resolve API key: env var → OS keychain → credentials file.
+
+    When no cached key is found we delegate to the lazy-auth helper, which
+    will offer an inline browser sign-in on a TTY or raise ``AuthRequired``
+    on non-interactive shells / ``--no-prompt``. The historical contract of
+    "raise on missing key" is preserved — ``AuthRequired`` is a separate
+    exception that bubbles to ``cli()`` and exits with a clear message.
+    """
     key = os.environ.get(config.api_key_env)
     if key:
         return key
@@ -136,7 +166,11 @@ def resolve_api_key(config: ProjectConfig) -> str:
         if key:
             return key
 
-    raise ConfigError(f"API key not found. Set ${config.api_key_env} or run 'aethis login'.")
+    # Nothing cached: defer to the lazy-auth helper for inline browser sign-in
+    # (or AuthRequired on CI / --no-prompt).
+    from aethis_cli.auth_helpers import require_auth_or_login_inline
+
+    return require_auth_or_login_inline(config.base_url)
 
 
 def resolve_anthropic_key(config: ProjectConfig) -> Optional[str]:

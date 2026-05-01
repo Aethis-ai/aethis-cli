@@ -8,8 +8,7 @@ from typing import Optional
 import typer
 import yaml
 
-from aethis_cli.client import AethisClient
-from aethis_cli.config import load_project_config, resolve_api_key
+from aethis_cli.config import load_project_config, make_authed_client, resolve_api_key
 from aethis_cli.errors import AethisAPIError, ConfigError
 from aethis_cli.output import console, error_panel, success
 
@@ -31,7 +30,7 @@ def list_hints(
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(code=1)
 
-    client = AethisClient(api_key, cfg.base_url)
+    client = make_authed_client(api_key, cfg.base_url)
 
     pid = project_id or cfg.project_id
     if not pid:
@@ -74,7 +73,7 @@ def export_hints(
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(code=1)
 
-    client = AethisClient(api_key, cfg.base_url)
+    client = make_authed_client(api_key, cfg.base_url)
 
     pid = project_id or cfg.project_id
     if not pid:
@@ -109,7 +108,7 @@ def deactivate_hint(
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(code=1)
 
-    client = AethisClient(api_key, cfg.base_url)
+    client = make_authed_client(api_key, cfg.base_url)
 
     pid = project_id or cfg.project_id
     if not pid:
@@ -148,7 +147,7 @@ def import_hints(
         console.print("[dim]No hints found in file.[/dim]")
         return
 
-    client = AethisClient(api_key, cfg.base_url)
+    client = make_authed_client(api_key, cfg.base_url)
 
     pid = project_id or cfg.project_id
     if not pid:

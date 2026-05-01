@@ -56,7 +56,7 @@ def test_generate_with_empty_sources_dir_fails_fast(tmp_path, monkeypatch):
     mock_client.upload_sources = MagicMock()
     mock_client.generate = MagicMock()
 
-    with patch("aethis_cli.commands.generate_cmd.AethisClient", return_value=mock_client):
+    with patch("aethis_cli.commands.generate_cmd.make_authed_client", return_value=mock_client):
         from aethis_cli.main import app
 
         runner = CliRunner()
@@ -85,7 +85,7 @@ def test_test_with_zero_test_cases_warns_and_fails(tmp_path, monkeypatch):
         "results": [],
     }
 
-    with patch("aethis_cli.commands.test_cmd.AethisClient", return_value=mock_client):
+    with patch("aethis_cli.commands.test_cmd.make_authed_client", return_value=mock_client):
         from aethis_cli.main import app
 
         runner = CliRunner()
