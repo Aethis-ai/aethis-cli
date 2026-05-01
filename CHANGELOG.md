@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.0 (2026-05-01)
+
+- New: `aethis mcp install --target <client>` writes the MCP server entry into your editor's config in one shot. Supports `claude-code` (project-level `.mcp.json`), `cursor` (`~/.cursor/mcp.json`), `claude-desktop` (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, `~/.config/Claude/...` on Linux), `windsurf` (`~/.codeium/windsurf/mcp_config.json`), and `--target all` for everything at once. Idempotent, preserves any other configured MCP servers. `aethis mcp uninstall --target <client>` reverses the install. Closes [#16](https://github.com/Aethis-ai/aethis-cli/issues/16).
+
 ## 0.4.4 (2026-05-01)
 
 - UX: `aethis login --help` now reads "Sign in and store an API key locally. First-time setup — this is all you need." `aethis account generate --help` clarifies it's for *additional* keys (rotation, multi-machine, scoped access). After successful `aethis login`, a tip line points at `aethis status` / `aethis account keys`. README quickstart collapses any "first login then generate" sequence into a single `aethis login` step. No behaviour change. Closes [#13](https://github.com/Aethis-ai/aethis-cli/issues/13).

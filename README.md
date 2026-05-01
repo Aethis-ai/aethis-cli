@@ -124,6 +124,33 @@ Project guidance lives in `.aethis/guidance/hints.yaml` and is uploaded by `aeth
 | `aethis account keys` | List your API keys (masked) |
 | `aethis account revoke <key_id>` | Revoke a key |
 
+## MCP one-liner
+
+Wire up the [Aethis MCP server](https://github.com/Aethis-ai/aethis-mcp) in your AI editor without hand-editing JSON. Picks up the API key cached by `aethis login`, drops a canonical `aethis` server entry into the right config file, and preserves any other MCP servers you already have.
+
+```bash
+# One editor at a time
+aethis mcp install --target cursor
+aethis mcp install --target claude-code      # writes ./.mcp.json (project-local)
+aethis mcp install --target claude-desktop
+aethis mcp install --target windsurf
+
+# Or all four at once
+aethis mcp install --target all
+
+# Reverse it (only removes the `aethis` entry, leaves others alone)
+aethis mcp uninstall --target cursor
+```
+
+The command is idempotent — re-run it after `aethis login` rotates your key and the entry updates in place. Restart your editor to pick up the change.
+
+| Target | Config path |
+|--------|-------------|
+| `claude-code` | `<cwd>/.mcp.json` (project-scoped) |
+| `cursor` | `~/.cursor/mcp.json` |
+| `claude-desktop` | macOS: `~/Library/Application Support/Claude/claude_desktop_config.json` · Linux: `~/.config/Claude/claude_desktop_config.json` |
+| `windsurf` | `~/.codeium/windsurf/mcp_config.json` |
+
 ## Project structure
 
 After `aethis init`, your project looks like:
