@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.0 (2026-05-01)
+
+- New: lazy auth. Authenticated commands (`aethis projects list`, `generate`, `publish`, etc.) now detect missing credentials or 401 responses and offer an inline browser sign-in prompt: `"No API key. Open browser to sign in? [Y/n]"`. On accept, the same OAuth flow as `aethis login` runs, the key is cached, and the original command retries — exactly once, no infinite loops. Non-TTY stdin/stdout (CI, pipes) and the new `--no-prompt` global flag skip the prompt and surface a clean `AuthRequired` error. `--api-key <key>` still bypasses the helper entirely. New helper module `aethis_cli/auth_helpers.py`; the OAuth flow inside `commands/login_cmd.py` was factored into a reusable `run_browser_login()`. 17 new tests in `tests/test_lazy_auth.py`. Closes [#12](https://github.com/Aethis-ai/aethis-cli/issues/12).
+
 ## 0.5.0 (2026-05-01)
 
 - New: `aethis mcp install --target <client>` writes the MCP server entry into your editor's config in one shot. Supports `claude-code` (project-level `.mcp.json`), `cursor` (`~/.cursor/mcp.json`), `claude-desktop` (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, `~/.config/Claude/...` on Linux), `windsurf` (`~/.codeium/windsurf/mcp_config.json`), and `--target all` for everything at once. Idempotent, preserves any other configured MCP servers. `aethis mcp uninstall --target <client>` reverses the install. Closes [#16](https://github.com/Aethis-ai/aethis-cli/issues/16).
