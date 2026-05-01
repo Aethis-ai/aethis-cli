@@ -126,7 +126,7 @@ def generate(
     no_save: bool = typer.Option(False, "--no-save", help="Print key but don't save"),
     timeout: int = typer.Option(120, "--timeout", help="Browser auth timeout in seconds"),
 ) -> None:
-    """Create a new API key by signing in through your browser."""
+    """Mint an additional API key (for rotation, multi-machine, or scoped access). For first-time setup use `aethis login` instead."""
     base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
     if scopes is None:
         scopes = list(DEFAULT_SCOPES)

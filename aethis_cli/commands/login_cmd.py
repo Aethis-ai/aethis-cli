@@ -85,7 +85,7 @@ def login(
     ),
     timeout: int = typer.Option(120, "--timeout", help="Browser auth timeout in seconds"),
 ) -> None:
-    """Authenticate with Aethis. Opens your browser to sign in and create an API key."""
+    """Sign in and store an API key locally. First-time setup — this is all you need."""
     base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
     if api_key:
         if not _validate_key(api_key, base_url):
@@ -162,3 +162,4 @@ def login(
 
     _save_key(full_key)
     success("Ready to use. Try: aethis status")
+    info("Tip: run `aethis status` to verify, or `aethis account keys` to see all your keys.")
