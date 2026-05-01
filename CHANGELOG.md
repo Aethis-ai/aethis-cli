@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.4 (2026-05-01)
+
+- UX: `aethis login --help` now reads "Sign in and store an API key locally. First-time setup — this is all you need." `aethis account generate --help` clarifies it's for *additional* keys (rotation, multi-machine, scoped access). After successful `aethis login`, a tip line points at `aethis status` / `aethis account keys`. README quickstart collapses any "first login then generate" sequence into a single `aethis login` step. No behaviour change. Closes [#13](https://github.com/Aethis-ai/aethis-cli/issues/13).
+
 ## 0.4.3 (2026-05-01)
 
 - Docs: README install section now leads with `uv tool install aethis-cli` (recommended) and `pipx install aethis-cli`, with `pip install` in a venv as the third option. Pairs with [Aethis-ai/docs#12](https://github.com/Aethis-ai/docs/pull/12). Closes [#14](https://github.com/Aethis-ai/aethis-cli/issues/14).
