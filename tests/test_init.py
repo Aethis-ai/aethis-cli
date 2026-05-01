@@ -73,6 +73,22 @@ def test_init_gitignore_includes_aethis_dir(tmp_path, monkeypatch):
     assert ".aethis/" in gitignore
 
 
+def test_init_creates_state_dir(tmp_path, monkeypatch):
+    """`.aethis/state.json` should exist after init so downstream commands
+    that call `write_state()` / `read_state()` don't have to special-case
+    a missing directory. project_id is set later by `aethis generate`."""
+    import json
+
+    monkeypatch.chdir(tmp_path)
+    with _patch_auth_present():
+        result = runner.invoke(app, ["init", "stateful-proj"])
+    assert result.exit_code == 0, result.output
+    state_file = tmp_path / "stateful-proj" / ".aethis" / "state.json"
+    assert state_file.exists()
+    # Empty placeholder — generate_cmd populates project_id later.
+    assert json.loads(state_file.read_text()) == {}
+
+
 # --- next-step ladder ------------------------------------------------------
 
 

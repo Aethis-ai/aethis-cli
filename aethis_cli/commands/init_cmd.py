@@ -8,7 +8,7 @@ from typing import Optional
 
 import typer
 
-from aethis_cli.config import ProjectConfig, resolve_api_key
+from aethis_cli.config import ProjectConfig, resolve_api_key, write_state
 from aethis_cli.errors import ConfigError
 from aethis_cli.output import console, info, success
 
@@ -128,6 +128,11 @@ def init(
     (proj / "tests").mkdir()
     (proj / "tests" / "scenarios.yaml").write_text(SCENARIOS_YAML_TEMPLATE)
     (proj / ".gitignore").write_text(GITIGNORE)
+
+    # Pre-create .aethis/state.json so downstream commands can assume it
+    # exists. The project_id stays unset until `aethis generate` actually
+    # creates the project on the server (see generate_cmd).
+    write_state(proj, {})
 
     # 4. Print the next-step ladder. Always shown (prompted or not).
     _print_next_steps(name)
