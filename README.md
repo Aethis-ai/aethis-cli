@@ -35,30 +35,65 @@ aethis fields -b <bundle_id>
 aethis explain -b <bundle_id>
 ```
 
+## Authentication
+
+Decision tools (`decide`, `fields`, `explain`) call public endpoints and never need a key. **Authoring tools** (`generate`, `publish`, `projects list`, etc.) need an API key — and the CLI manages that for you.
+
+There are three ways the key can arrive:
+
+**1. Explicit sign-in** (the canonical first-time setup):
+
+```bash
+aethis login
+```
+
+Opens your browser, completes Clerk OAuth, mints a fresh `ak_live_...` key, and stores it at `~/.config/aethis/credentials`. One-time per machine.
+
+**2. Lazy auth** (the default — since v0.6.0):
+
+If you skip step 1 and run an authenticated command directly, you'll get an inline prompt:
+
+```
+$ aethis init
+No API key found. Open browser to sign in? [Y/n]
+```
+
+Hit enter, the browser flow runs, the command resumes. Same effect as `aethis login` followed by your original command, in one step.
+
+**3. CI / scripts** — `--no-prompt`:
+
+For any non-interactive context (`stdin` not a TTY, CI runners, piped commands) the CLI auto-skips the prompt and exits with a clear `AuthRequired` error. To force this behaviour even on a TTY:
+
+```bash
+aethis --no-prompt projects list
+```
+
+Pass `--api-key <ak_live_...>` to bypass the cache entirely (useful when you want to test a key without committing to it).
+
+Manage existing keys with `aethis account keys` (list, masked) and `aethis account revoke <key_id>` (revoke). `aethis account generate` mints an *additional* key — for rotation, multi-machine setups, or scoped access. For first-time setup just use `aethis login`.
+
 ## Author your own rules
 
 Rule authoring is **invite-only private beta**. Decision tools (`aethis decide`, `aethis fields`, `aethis explain`) work immediately with no sign-up — this section is for approved beta tenants. [Request access →](https://aethis.ai/sign-up)
 
 ```bash
-# 1. Sign in (creates and stores an API key via browser)
-aethis login
-
-# 2. Initialise a project
-mkdir my-rules && cd my-rules
+# 1. Initialise a project (no-arg form prompts for a name; auto-runs `aethis login` if needed)
 aethis init
 
-# 3. Add source documents and guidance
+# 2. Add source documents and guidance
 #    (put PDFs/text in .aethis/sources/, hints in .aethis/guidance/hints.yaml)
 
-# 4. Generate a rule bundle
+# 3. Generate a rule bundle
 aethis generate
 
-# 5. Run test cases
+# 4. Run test cases
 aethis test
 
-# 6. Publish the bundle
+# 5. Publish the bundle
 aethis publish
 ```
+
+`aethis init` runs as a wizard: prompts for a project name (default = current directory), runs sign-in if you're not authed yet, scaffolds `.aethis/`, and prints the next-step ladder. Pass `--no-prompt` for scripted use (it'll fail fast on missing values rather than prompt).
 
 ## Try the example
 
@@ -196,7 +231,9 @@ tests:
 
 | Variable | Description | Required | Default |
 |----------|-------------|----------|---------|
-| `AETHIS_API_KEY` | Your API key (`ak_live_...`) | Authoring only | — |
+| `AETHIS_API_KEY` | Your API key (`ak_live_...`). Bypasses the cached credential. | Authoring only | — |
+| `AETHIS_BASE_URL` | Override the API host (staff/dev use; staging or self-hosted). | No | `https://api.aethis.ai` |
+| `ANTHROPIC_API_KEY` | Forwarded per-request to the generation endpoint when running `aethis generate`. Never stored server-side. | Authoring only | — |
 
 ## Extending with plugins
 
@@ -253,7 +290,7 @@ python3 -c "from datetime import date; print(date(2025,4,13).toordinal())"
 ```
 
 **`Auth error: …`**
-Your API key is missing, expired, or revoked. Run `aethis login` to paste a new one, or `aethis account generate` to create one.
+Your API key is missing, expired, or revoked. Run `aethis login` to mint a new one. (As of v0.6.0 the CLI prompts for sign-in inline when an authenticated command runs without a key; use `--no-prompt` to suppress that in CI.)
 
 **`403 Forbidden: missing scope`**
 Your key lacks the required scope for the command. `aethis whoami` shows what your current key can do. Contact support to upgrade scopes.

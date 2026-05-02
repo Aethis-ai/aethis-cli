@@ -31,7 +31,7 @@ Decision group (no key needed against public bundles):
 
 Project / authoring group (requires `projects:write`):
 
-- `aethis init <name>` — scaffold `.aethis/` + `aethis.yaml`
+- `aethis init` (or `aethis init <name>`) — first-run wizard: prompts for a name, runs `aethis login` if not authed, scaffolds `.aethis/` + `aethis.yaml`. As of v0.7.0 this runs auth *before* any filesystem writes so a Ctrl-C during the browser flow doesn't leave a half-scaffolded project.
 - `aethis sections discover --file <path>` — phase 1
 - `aethis fields discover --section <id>` / `aethis fields set` — phase 2
 - `aethis generate --poll` + `aethis test` + `aethis refine --hint ...` — phase 3 TDD loop
@@ -39,10 +39,21 @@ Project / authoring group (requires `projects:write`):
 
 Account:
 
-- `aethis login` / `aethis logout` / `aethis status`
-- `aethis account generate` — mint a new key via Clerk
+- `aethis login` / `aethis logout` / `aethis status` — `login` is the canonical first-time setup; mints + caches the key in one step.
+- `aethis account generate` — mint an *additional* key (rotation, multi-machine, scoped access). For first-time setup use `aethis login`.
+- `aethis account keys` / `aethis account revoke <key_id>`
 
-Global flags: `--base-url` and `--api-key` override the environment variables.
+MCP wiring (added v0.5.0):
+
+- `aethis mcp install --target <claude-code|cursor|claude-desktop|windsurf|all>` — writes the MCP server entry into the user's editor config. Idempotent, preserves any other configured servers.
+- `aethis mcp uninstall --target <client>` — reverses the install (removes only the `aethis` entry).
+- This is the documented install path; the [aethis-mcp](../aethis-mcp/) README's "Manual install" tabs are the fallback for users without `aethis-cli`.
+
+Global flags:
+
+- `--api-key <key>` — overrides the cached credential and the lazy-auth helper (one-shot).
+- `--no-prompt` — suppresses lazy-auth's "Open browser to sign in?" prompt (CI / scripts). Combined with no cached key, authenticated commands fail fast with a clean `AuthRequired` error.
+- `AETHIS_BASE_URL` env var — staff/dev override for the API host (staging or self-hosted). Not exposed as a CLI flag in the public build.
 
 ## Architecture
 
@@ -57,6 +68,7 @@ Global flags: `--base-url` and `--api-key` override the environment variables.
 - **Decision endpoints return `undetermined`, not an error, when fields are missing.** The shell exit code is still 0; parse the JSON decision field rather than relying on the exit code for eligibility-vs-incomplete distinctions.
 - **Slug namespace `aethis/*` is reserved.** External tenants will get HTTP 403 with `reason_code: reserved_namespace` if they try `--slug aethis/foo`. Internal use only.
 - **`aethis publish` runs tests server-side as a gate.** A green local `aethis test` can still be rejected at publish if the last generation's tests haven't been re-run after edits.
+- **Lazy auth is the default** (since v0.6.0). Authenticated commands without a cached key prompt the user inline ("Open browser to sign in? [Y/n]") and retry exactly once on success. The OAuth flow lives in [aethis_cli/commands/login_cmd.py](aethis_cli/commands/login_cmd.py) (`run_browser_login()`); the lazy-auth glue is in [aethis_cli/auth_helpers.py](aethis_cli/auth_helpers.py). When extending, reuse `require_auth_or_login_inline()` instead of re-implementing the prompt; honour `--no-prompt` and the `AethisClient.on_auth_required` hook so 401-refresh-and-retry stays consistent.
 
 ## See also
 
