@@ -64,7 +64,7 @@ def test_whoami_without_authoring_scope_points_to_signup():
     result = _run(client_mock=client)
     assert result.exit_code == 0, result.output
     assert "Authoring not available" in result.output
-    assert "aethis.ai/sign-up" in result.output
+    assert "aethis.ai/developer-access" in result.output
 
 
 def test_whoami_without_api_key_exits_with_hint():

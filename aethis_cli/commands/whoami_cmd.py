@@ -76,5 +76,5 @@ def whoami() -> None:
     else:
         console.print("[yellow]✗ Authoring not available[/yellow] — this key can only evaluate bundles.")
         console.print(
-            "[dim]Rule authoring is invite-only private beta. Request access at https://aethis.ai/sign-up[/dim]"
+            "[dim]Rule authoring is invite-only private beta. Request access at https://aethis.ai/developer-access[/dim]"
         )
