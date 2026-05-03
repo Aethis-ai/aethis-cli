@@ -74,7 +74,7 @@ Manage existing keys with `aethis account keys` (list, masked) and `aethis accou
 
 ## Author your own rules
 
-Rule authoring is **invite-only private beta**. Decision tools (`aethis decide`, `aethis fields`, `aethis explain`) work immediately with no sign-up — this section is for approved beta tenants. [Request access →](https://aethis.ai/sign-up)
+Rule authoring is **invite-only private beta**. Decision tools (`aethis decide`, `aethis fields`, `aethis explain`) work immediately with no sign-up — this section is for approved beta tenants. [Request access →](https://aethis.ai/developer-access)
 
 ```bash
 # 1. Initialise a project (no-arg form prompts for a name; auto-runs `aethis login` if needed)

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.2 (2026-05-03)
+
+- Docs: replaced the stale `aethis.ai/sign-up` request-access link with `aethis.ai/developer-access` in the README "Author your own rules" section and in the `aethis whoami` hint shown when the active key has no authoring scope. After the Clerk cutover, `/sign-up` serves the Clerk SignUp form for invitees rather than the Notion request-access form, so external "Request access" pointers were broken. No code path changes.
+
 ## 0.7.1 (2026-05-01)
 
 - Docs: README gains a dedicated **Authentication** section explaining the three modes (`aethis login` for explicit setup, lazy auth for inline mid-command sign-in, `--no-prompt` for CI). Authoring quickstart leads with `aethis init` (the v0.7.0 wizard prompts for a name and runs sign-in itself, so `aethis login` as a separate step is no longer needed). Environment-variable table expanded to cover `AETHIS_BASE_URL` and `ANTHROPIC_API_KEY`. Troubleshooting entry for `Auth error` now mentions the lazy-auth prompt and `--no-prompt`. CLAUDE.md updated to document the `aethis mcp install` path, lazy-auth helper, and `--no-prompt` flag for future agents working on the CLI. No behaviour change.
