@@ -191,8 +191,7 @@ class TestClerkConfig:
         # patch, the CLI hits the live API for permissions and (until
         # aethis-core 0.10.0 deploys) gets back the legacy bundles:* names,
         # which makes scope validation fail before reaching the Clerk check.
-        with patch.object(mod, "_fetch_permissions",
-                          return_value=([], set(mod.VALID_SCOPES))):
+        with patch.object(mod, "_fetch_permissions", return_value=([], set(mod.VALID_SCOPES))):
             result = runner.invoke(reloaded_app, ["account", "generate"])
 
         assert result.exit_code == 1
