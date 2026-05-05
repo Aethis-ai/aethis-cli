@@ -23,11 +23,11 @@ uv run aethis login              # browser OAuth → stores ak_live_... at ~/.co
 
 ## Command taxonomy
 
-Decision group (no key needed against public bundles):
+Decision group (no key needed against public rulesets):
 
-- `aethis decide -b <bundle|slug> -i '{...}'`
-- `aethis fields -b <bundle|slug>`
-- `aethis explain -b <bundle|slug>`
+- `aethis decide -b <ruleset|slug> -i '{...}'`
+- `aethis fields -b <ruleset|slug>`
+- `aethis explain -b <ruleset|slug>`
 
 Project / authoring group (requires `projects:write`):
 
@@ -35,7 +35,7 @@ Project / authoring group (requires `projects:write`):
 - `aethis sections discover --file <path>` — phase 1
 - `aethis fields discover --section <id>` / `aethis fields set` — phase 2
 - `aethis generate --poll` + `aethis test` + `aethis refine --hint ...` — phase 3 TDD loop
-- `aethis publish [--slug my-team/my-bundle]`
+- `aethis publish [--slug my-team/my-ruleset]`
 
 Account:
 

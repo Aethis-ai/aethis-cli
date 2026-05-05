@@ -43,8 +43,8 @@ def test_fields_works_without_aethis_yaml_using_slug(tmp_path, monkeypatch):
     client.get_schema.assert_called_once_with("aethis/uk-fsm/universal-infant")
 
 
-def test_fields_works_without_aethis_yaml_using_bundle_id(tmp_path, monkeypatch):
-    """Bundle IDs work the same as slugs from outside a project."""
+def test_fields_works_without_aethis_yaml_using_ruleset_id(tmp_path, monkeypatch):
+    """Ruleset IDs work the same as slugs from outside a project."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
     monkeypatch.delenv("AETHIS_BASE_URL", raising=False)
@@ -69,8 +69,8 @@ def test_fields_works_without_aethis_yaml_using_bundle_id(tmp_path, monkeypatch)
     client.get_schema.assert_called_once_with("spacecraft-crew-certification:20260407-933531f7")
 
 
-def test_fields_missing_bundle_id_gives_one_line_error(tmp_path, monkeypatch):
-    """No --bundle-id and no state.json → one-line error, not a traceback."""
+def test_fields_missing_ruleset_id_gives_one_line_error(tmp_path, monkeypatch):
+    """No --ruleset-id and no state.json → one-line error, not a traceback."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
 
@@ -85,6 +85,6 @@ def test_fields_missing_bundle_id_gives_one_line_error(tmp_path, monkeypatch):
         result = runner.invoke(app, ["fields"], catch_exceptions=False)
 
     assert result.exit_code == 1
-    assert "No bundle_id" in result.output
+    assert "No ruleset_id" in result.output
     assert "Traceback" not in result.output
     client.get_schema.assert_not_called()

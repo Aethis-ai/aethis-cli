@@ -14,7 +14,7 @@ from aethis_cli.auth_helpers import RUNTIME
 from aethis_cli.errors import AethisAPIError, AuthenticationError, AuthRequired, ConfigError
 from aethis_cli.output import console
 from aethis_cli.commands.account_cmd import account_app
-from aethis_cli.commands.bundles_cmd import bundles_app
+from aethis_cli.commands.rulesets_cmd import rulesets_app
 from aethis_cli.commands.guidance_cmd import guidance_app
 from aethis_cli.commands.mcp_cmd import mcp_app
 from aethis_cli.commands.projects_cmd import projects_app
@@ -51,14 +51,14 @@ def _version_callback(value: bool) -> None:
 
 
 _APP_HELP = """
-Author, test, and publish rule bundles via the Aethis developer API.
+Author, test, and publish rulesets via the Aethis developer API.
 
 Common flows:
 
     aethis status                       # what server / key / project am I on?
-    aethis projects list                # see all projects + latest bundles
-    aethis explain -b <bundle>          # human-readable rules for a bundle
-    aethis decide -b <bundle> -i '{"age": 21}'   # evaluate eligibility
+    aethis projects list                # see all projects + latest rulesets
+    aethis explain -b <ruleset>          # human-readable rules for a ruleset
+    aethis decide -b <ruleset> -i '{"age": 21}'   # evaluate eligibility
 
 Authoring (invite-only beta):
 
@@ -103,7 +103,7 @@ def main(
         help="Override the API base URL (defaults to AETHIS_BASE_URL or https://api.aethis.ai).",
     ),
 ) -> None:
-    """CLI for the Aethis developer API — author, test, and publish rule bundles."""
+    """CLI for the Aethis developer API — author, test, and publish rulesets."""
     # Stash root-level flags on the lazy-auth runtime so commands and the
     # HTTP client can consult them without each accepting these flags
     # individually. Env vars still win over absent flags so existing scripts
@@ -121,7 +121,7 @@ def main(
 
 
 app.add_typer(account_app, name="account")
-app.add_typer(bundles_app, name="bundles")
+app.add_typer(rulesets_app, name="rulesets")
 app.add_typer(guidance_app, name="guidance")
 app.add_typer(mcp_app, name="mcp")
 app.add_typer(projects_app, name="projects")

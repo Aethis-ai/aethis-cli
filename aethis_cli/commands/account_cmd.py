@@ -19,9 +19,9 @@ CLERK_CLIENT_ID = os.environ.get("AETHIS_CLERK_CLIENT_ID", "cwH009p1vPtyy1EG")
 
 VALID_SCOPES = {
     "decide",
-    "bundles:read",
-    "bundles:explain",
-    "bundles:write",
+    "rulesets:read",
+    "rulesets:explain",
+    "rulesets:write",
     "keys:manage",
     "projects:read",
     "projects:write",
@@ -29,7 +29,7 @@ VALID_SCOPES = {
     "rulebooks:write",
 }
 VALID_TIERS = {"free", "starter", "pro"}
-DEFAULT_SCOPES = ["decide", "projects:read", "projects:write", "bundles:read", "bundles:explain", "bundles:write"]
+DEFAULT_SCOPES = ["decide", "projects:read", "projects:write", "rulesets:read", "rulesets:explain", "rulesets:write"]
 
 account_app = typer.Typer(
     name="account",

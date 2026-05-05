@@ -72,9 +72,9 @@ def whoami() -> None:
     scopes_str = ", ".join(sorted(scopes)) if scopes else "(none)"
     console.print(f"[bold]Scopes:[/bold]      {scopes_str}")
     if me.get("can_author"):
-        console.print("[green]✓ Authoring enabled[/green] — you can create and publish rule bundles.")
+        console.print("[green]✓ Authoring enabled[/green] — you can create and publish rulesets.")
     else:
-        console.print("[yellow]✗ Authoring not available[/yellow] — this key can only evaluate bundles.")
+        console.print("[yellow]✗ Authoring not available[/yellow] — this key can only evaluate rulesets.")
         console.print(
             "[dim]Rule authoring is invite-only private beta. Request access at https://aethis.ai/developer-access[/dim]"
         )

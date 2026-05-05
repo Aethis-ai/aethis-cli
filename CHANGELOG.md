@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.0 (2026-05-05)
+
+- **Breaking**: renamed the public *bundle* concept to *ruleset* throughout the CLI to match the `aethis-core 0.10.0` API contract. The compiled rule artefact is now called a **ruleset** everywhere — in command names, in flag names, in JSON keys, and in prose. Specifically:
+  - `aethis bundles list/archive` → `aethis rulesets list/archive`
+  - `--bundle-id` flag → `--ruleset-id`
+  - `client.list_bundles()` / `archive_bundle()` / `get_bundle_schema()` / `explain_bundle()` / `get_bundle_source()` / `set_bundle_visibility()` SDK methods → `*_ruleset`
+  - JSON keys `bundle_id` / `latest_bundle_id` / `bundle_version` / `bundle_refs` → `ruleset_id` etc.
+  - Default scope strings `bundles:read/explain/write` → `rulesets:*` (validated against the engine's permission registry)
+- This release **requires aethis-core 0.10.0 or newer**. Older engines return `bundles:*` scopes and the CLI will reject them as invalid. Pin to `aethis-cli==0.7.2` if you need to keep working against an older engine until you can deploy.
+
 ## 0.7.2 (2026-05-03)
 
 - Docs: replaced the stale `aethis.ai/sign-up` request-access link with `aethis.ai/developer-access` in the README "Author your own rules" section and in the `aethis whoami` hint shown when the active key has no authoring scope. After the Clerk cutover, `/sign-up` serves the Clerk SignUp form for invitees rather than the Notion request-access form, so external "Request access" pointers were broken. No code path changes.

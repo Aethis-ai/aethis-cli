@@ -8,7 +8,7 @@ from typing import Optional
 import typer
 from rich.table import Table
 
-from aethis_cli.commands._id_utils import require_bundle_id
+from aethis_cli.commands._id_utils import require_ruleset_id
 from aethis_cli.config import load_client_or_fallback, read_state
 from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel
@@ -16,42 +16,42 @@ from aethis_cli.output import console, error_panel
 
 def decide(
     input_json: str = typer.Option(..., "--input", "-i", help="JSON object of field values"),
-    bundle_id: Optional[str] = typer.Option(
+    ruleset_id: Optional[str] = typer.Option(
         None,
-        "--bundle-id",
+        "--ruleset-id",
         "-b",
         help=(
-            "Bundle ID (the 'Bundle' column from `aethis projects list`, "
-            "e.g. example_bundle:20260408-abc1234). Not the `proj_*` Project ID. "
+            "Ruleset ID (the 'Ruleset' column from `aethis projects list`, "
+            "e.g. example_ruleset:20260408-abc1234). Not the `proj_*` Project ID. "
             "Defaults to .aethis/state.json if omitted."
         ),
     ),
     explain: bool = typer.Option(False, "--explain", "-e", help="Show reasoning for the decision"),
 ) -> None:
-    """Evaluate eligibility against a published bundle.
+    """Evaluate eligibility against a published ruleset.
 
     Examples:
 
-        aethis decide -b my_bundle:20260401-a1b2c3d -i '{"age": 21, "country": "UK"}'
-        aethis decide -b my_bundle:20260401-a1b2c3d -i @inputs.json --explain
-        aethis decide -i '{...}'         # uses bundle from .aethis/state.json
+        aethis decide -b my_ruleset:20260401-a1b2c3d -i '{"age": 21, "country": "UK"}'
+        aethis decide -b my_ruleset:20260401-a1b2c3d -i @inputs.json --explain
+        aethis decide -i '{...}'         # uses ruleset from .aethis/state.json
 
     Input is a JSON object mapping field IDs to values. Use --explain to see the
     reasoning trace (which rules fired, which group satisfied the decision).
     """
     cfg, client = load_client_or_fallback()
 
-    if not bundle_id:
+    if not ruleset_id:
         state = read_state(cfg.config_path)
-        bundle_id = state.get("bundle_id")
-        if not bundle_id:
+        ruleset_id = state.get("ruleset_id")
+        if not ruleset_id:
             console.print(
-                "[red]No bundle_id.[/red] Pass --bundle-id or run from a project "
+                "[red]No ruleset_id.[/red] Pass --ruleset-id or run from a project "
                 "directory where `aethis generate`/`publish` has been run."
             )
             raise typer.Exit(code=1)
 
-    require_bundle_id(bundle_id)
+    require_ruleset_id(ruleset_id)
 
     try:
         field_values = json.loads(input_json)
@@ -69,7 +69,7 @@ def decide(
         opts["include_explanation"] = True
 
     try:
-        result = client.decide(bundle_id, field_values, **opts)
+        result = client.decide(ruleset_id, field_values, **opts)
     except AethisAPIError as e:
         error_panel(e)
         raise typer.Exit(code=1)
@@ -77,7 +77,7 @@ def decide(
     decision = result["decision"]
     color = {"eligible": "green", "not_eligible": "red"}.get(decision, "yellow")
     console.print(f"\nDecision: [bold {color}]{decision}[/bold {color}]")
-    console.print(f"Bundle:   {result.get('bundle_id')}")
+    console.print(f"Ruleset:   {result.get('ruleset_id')}")
     console.print(f"Fields:   {result.get('fields_provided')}/{result.get('fields_evaluated')} provided")
     if result.get("missing_fields"):
         console.print(f"Missing:  {', '.join(result['missing_fields'])}")

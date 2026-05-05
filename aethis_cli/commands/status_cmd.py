@@ -23,7 +23,7 @@ STATUS_HELP = """
 Show the current CLI context: version, server, identity, and project.
 
 Answers "what will the next command hit?" — useful for diagnosing missing
-projects or bundles (usually you're pointed at the wrong base URL).
+projects or rulesets (usually you're pointed at the wrong base URL).
 
 With --project-id (or from a project directory), also shows generation
 progress for that project.
@@ -47,14 +47,14 @@ def status(
     """Show CLI context and optional project generation progress."""
     _print_cli_section()
     _print_server_section()
-    cfg, state_bundle = _print_project_section()
+    cfg, state_ruleset = _print_project_section()
     _print_identity_section()
 
     pid = project_id or (cfg.project_id if cfg else None)
     if pid:
         _print_generation_section(pid)
-    elif state_bundle:
-        # Don't hit the API if we only have a bundle_id and no project context
+    elif state_ruleset:
+        # Don't hit the API if we only have a ruleset_id and no project context
         pass
 
 
@@ -78,7 +78,7 @@ def _print_server_section() -> None:
 
 
 def _print_project_section() -> tuple[Optional[object], Optional[str]]:
-    """Print project/config context. Returns (cfg, state_bundle_id)."""
+    """Print project/config context. Returns (cfg, state_ruleset_id)."""
     try:
         cfg = load_project_config()
     except ConfigError:
@@ -91,10 +91,10 @@ def _print_project_section() -> tuple[Optional[object], Optional[str]]:
         console.print(f"[bold]Project ID:[/bold]  {cfg.project_id}")
 
     state = read_state(cfg.config_path)
-    bundle_id = state.get("bundle_id")
-    if bundle_id:
-        console.print(f"[bold]Bundle:[/bold]      {bundle_id}  [dim](from .aethis/state.json)[/dim]")
-    return cfg, bundle_id
+    ruleset_id = state.get("ruleset_id")
+    if ruleset_id:
+        console.print(f"[bold]Ruleset:[/bold]      {ruleset_id}  [dim](from .aethis/state.json)[/dim]")
+    return cfg, ruleset_id
 
 
 def _print_identity_section() -> None:
@@ -169,9 +169,9 @@ def _print_generation_section(project_id: str) -> None:
         console.print(f"  Job:     {job.get('status')} ({job.get('progress_percent', 0)}%)")
         if job.get("error_message"):
             console.print(f"  Error:   [red]{job['error_message']}[/red]")
-    bid = result.get("latest_bundle_id")
+    bid = result.get("latest_ruleset_id")
     if bid:
-        console.print(f"  Bundle:  {bid}")
+        console.print(f"  Ruleset:  {bid}")
 
 
 def _resolve_key_silent() -> Optional[str]:
