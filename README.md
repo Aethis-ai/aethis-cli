@@ -30,6 +30,8 @@ pip install aethis-cli
 
 ## Quick start
 
+> **Authoring is in private beta.** Decision tools (`decide`, `fields`, `explain`) are public — no key required. Authoring tools (rule generation, test refinement, publishing) require an invite. Request access at [aethis.ai/developer-access](https://aethis.ai/developer-access).
+
 No sign-up needed. Decision tools work immediately.
 
 ```bash
@@ -46,6 +48,8 @@ aethis explain -b <ruleset_id>
 ## Authentication
 
 Decision tools (`decide`, `fields`, `explain`) call public endpoints and never need a key. **Authoring tools** (`generate`, `publish`, `projects list`, etc.) need an API key — and the CLI manages that for you.
+
+Authoring is in private beta — `aethis login` will only complete for invited developers. Request access at [aethis.ai/developer-access](https://aethis.ai/developer-access).
 
 There are three ways the key can arrive:
 
@@ -80,7 +84,7 @@ Pass `--api-key <ak_live_...>` to bypass the cache entirely (useful when you wan
 
 Manage existing keys with `aethis account keys` (list, masked) and `aethis account revoke <key_id>` (revoke). `aethis account generate` mints an *additional* key — for rotation, multi-machine setups, or scoped access. For first-time setup just use `aethis login`.
 
-## Author your own rules
+## Author your own rules (private beta)
 
 Rule authoring is **invite-only private beta**. Decision tools (`aethis decide`, `aethis fields`, `aethis explain`) work immediately with no sign-up — this section is for approved beta tenants. [Request access →](https://aethis.ai/developer-access)
 

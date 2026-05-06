@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.2 (2026-05-06)
+
+- docs: add private-beta callout for authoring tools (decision tools remain public, no key required)
+- docs: clarify in Authentication that aethis login requires an invite during the beta
+
 ## 0.8.1 (2026-05-06)
 
 - docs: align README with positioning bible — add Why Aethis section, solution framing, TDD methodology beat
