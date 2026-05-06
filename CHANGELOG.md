@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.3 (2026-05-06)
+
+- docs: remove Why Aethis section — package README is a reference surface (per aethis.os/positioning/surface-types.md); install / quick start / authentication is the right lead, not a problem statement
+
 ## 0.8.2 (2026-05-06)
 
 - docs: add private-beta callout for authoring tools (decision tools remain public, no key required)
