@@ -186,6 +186,13 @@ class TestClerkConfig:
         # Re-import app since the module was reloaded
         from aethis_cli.main import app as reloaded_app
 
-        result = runner.invoke(reloaded_app, ["account", "generate"])
+        # Patch _fetch_permissions AFTER reload — the reload resets module
+        # globals, so any patch applied via decorator is lost. Without the
+        # patch, the CLI hits the live API for permissions and (until
+        # aethis-core 0.10.0 deploys) gets back the legacy bundles:* names,
+        # which makes scope validation fail before reaching the Clerk check.
+        with patch.object(mod, "_fetch_permissions", return_value=([], set(mod.VALID_SCOPES))):
+            result = runner.invoke(reloaded_app, ["account", "generate"])
+
         assert result.exit_code == 1
         assert "AETHIS_CLERK_CLIENT_ID" in result.output

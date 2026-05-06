@@ -84,7 +84,7 @@ def make_authed_client(
 def load_client_or_fallback() -> tuple["ProjectConfig", "AethisClient"]:
     """Load project config if available, else fall back to DEFAULT_BASE_URL.
 
-    Used by read-only commands (`explain`, `decide`, `bundles`, `projects`,
+    Used by read-only commands (`explain`, `decide`, `rulesets`, `projects`,
     `whoami`) so they work from any directory. Authentication is lazy: if no
     API key is cached the client is built with a key-refresh hook that runs
     the inline browser login on the first 401. This lets a fresh user run

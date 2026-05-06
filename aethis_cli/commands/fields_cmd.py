@@ -1,4 +1,4 @@
-"""aethis fields — show field schema for a bundle."""
+"""aethis fields — show field schema for a ruleset."""
 
 from __future__ import annotations
 
@@ -13,25 +13,25 @@ from aethis_cli.output import console, error_panel
 
 
 def fields(
-    bundle_id: Optional[str] = typer.Option(None, "--bundle-id", "-b"),
+    ruleset_id: Optional[str] = typer.Option(None, "--ruleset-id", "-b"),
 ) -> None:
-    """Show the input fields expected by a bundle."""
+    """Show the input fields expected by a ruleset."""
     cfg, client = load_client_or_fallback()
 
-    if not bundle_id:
+    if not ruleset_id:
         state = read_state(cfg.config_path)
-        bundle_id = state.get("bundle_id")
-        if not bundle_id:
-            console.print("[red]No bundle_id. Run 'aethis generate' first or pass --bundle-id.[/red]")
+        ruleset_id = state.get("ruleset_id")
+        if not ruleset_id:
+            console.print("[red]No ruleset_id. Run 'aethis generate' first or pass --ruleset-id.[/red]")
             raise typer.Exit(code=1)
 
     try:
-        result = client.get_schema(bundle_id)
+        result = client.get_schema(ruleset_id)
     except AethisAPIError as e:
         error_panel(e)
         raise typer.Exit(code=1)
 
-    table = Table(title=f"Fields — {bundle_id}")
+    table = Table(title=f"Fields — {ruleset_id}")
     table.add_column("Field ID", style="cyan")
     table.add_column("Type")
     table.add_column("Description")

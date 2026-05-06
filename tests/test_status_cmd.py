@@ -66,7 +66,7 @@ def test_status_with_api_key_shows_identity(tmp_path, monkeypatch):
         "key_id": "ak_abc123",
         "tenant_id": "tenant_x",
         "rate_limit_tier": "pro",
-        "scopes": ["decide", "bundles:read"],
+        "scopes": ["decide", "rulesets:read"],
         "can_author": False,
     }
 
@@ -118,7 +118,7 @@ def test_status_with_project_id_shows_generation_progress(tmp_project, monkeypat
     fake_gen = {
         "project_status": "ready",
         "job": {"status": "completed", "progress_percent": 100},
-        "latest_bundle_id": "test:20260419-abc1234",
+        "latest_ruleset_id": "test:20260419-abc1234",
     }
 
     with (

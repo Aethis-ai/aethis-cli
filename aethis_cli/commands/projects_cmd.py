@@ -45,7 +45,7 @@ def list_projects(
     table.add_column("Project ID", style="cyan")
     table.add_column("Name")
     table.add_column("Status")
-    table.add_column("Bundle")
+    table.add_column("Ruleset")
     table.add_column("Created")
 
     for p in projects:
@@ -55,15 +55,15 @@ def list_projects(
             p["project_id"],
             p["name"],
             status,
-            p.get("latest_bundle_id") or "",
+            p.get("latest_ruleset_id") or "",
             p.get("created_at", "")[:10] if p.get("created_at") else "",
             style=style,
         )
 
     console.print(table)
     console.print(
-        "[dim]Tip: copy a Bundle value and run "
-        "`aethis explain -b <bundle>` or `aethis decide -b <bundle> -i '{...}'`.[/dim]"
+        "[dim]Tip: copy a Ruleset value and run "
+        "`aethis explain -b <ruleset>` or `aethis decide -b <ruleset> -i '{...}'`.[/dim]"
     )
 
 
@@ -83,7 +83,7 @@ def show_project(
     console.print(f"[bold]{p['name']}[/bold] ({p['project_id']})")
     console.print(f"  Section:  {p.get('section_id', '')}")
     console.print(f"  Status:   {p['status']}")
-    console.print(f"  Bundle:   {p.get('latest_bundle_id') or 'none'}")
+    console.print(f"  Ruleset:   {p.get('latest_ruleset_id') or 'none'}")
     console.print(f"  Tests:    {p.get('test_case_count', 0)}")
     console.print(f"  Created:  {p.get('created_at', '')[:19]}")
     console.print(f"  Updated:  {p.get('updated_at', '')[:19]}")

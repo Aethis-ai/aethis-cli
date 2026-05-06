@@ -57,8 +57,8 @@ def test_explain_works_without_aethis_yaml(tmp_path, monkeypatch):
     client.explain.assert_called_once_with("example:20260408-abc1234")
 
 
-def test_explain_missing_bundle_id_gives_one_line_error(tmp_path, monkeypatch):
-    """No --bundle-id and no state.json → one-line error, not a traceback."""
+def test_explain_missing_ruleset_id_gives_one_line_error(tmp_path, monkeypatch):
+    """No --ruleset-id and no state.json → one-line error, not a traceback."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
 
@@ -73,7 +73,7 @@ def test_explain_missing_bundle_id_gives_one_line_error(tmp_path, monkeypatch):
         result = runner.invoke(app, ["explain"], catch_exceptions=False)
 
     assert result.exit_code == 1
-    assert "No bundle_id" in result.output
+    assert "No ruleset_id" in result.output
     assert "Traceback" not in result.output
     client.explain.assert_not_called()
 

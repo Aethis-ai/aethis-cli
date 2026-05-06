@@ -1,4 +1,4 @@
-"""aethis publish — activate a generated bundle."""
+"""aethis publish — activate a generated ruleset."""
 
 from __future__ import annotations
 
@@ -22,19 +22,19 @@ def publish(
         None,
         "--slug",
         help=(
-            "Optional stable human-readable alias for this bundle, e.g. "
+            "Optional stable human-readable alias for this ruleset, e.g. "
             "'acme/insurance/car'. Survives regeneration — callers can hit "
-            "the slug from /decide and always get the current active bundle. "
+            "the slug from /decide and always get the current active ruleset. "
             "Format: lowercase ASCII segments separated by '/'. The 'aethis/*' "
-            "namespace is reserved for official bundles."
+            "namespace is reserved for official rulesets."
         ),
     ),
 ) -> None:
-    """Publish the latest generated bundle (make it active for /decide).
+    """Publish the latest generated ruleset (make it active for /decide).
 
     Runs the project's test suite first and refuses to publish if any test
     fails or errors. Use --force to override (for example, when you're
-    publishing an intentionally draft bundle).
+    publishing an intentionally draft ruleset).
     """
     cfg = load_project_config()
     api_key = resolve_api_key(cfg)
@@ -80,7 +80,7 @@ def publish(
         error_panel(e)
         raise typer.Exit(code=1)
 
-    msg = f"Published bundle {result.get('bundle_id')}"
+    msg = f"Published ruleset {result.get('ruleset_id')}"
     if result.get("slug"):
         msg += f" — slug: {result['slug']}"
     success(msg)

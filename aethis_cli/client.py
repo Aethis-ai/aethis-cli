@@ -78,12 +78,12 @@ class AethisClient:
 
     # -- Decision API --
 
-    def decide(self, bundle_id: str, field_values: dict, **opts: Any) -> dict:
+    def decide(self, ruleset_id: str, field_values: dict, **opts: Any) -> dict:
         return self._request(
             "POST",
             "/api/v1/public/decide",
             json={
-                "bundle_id": bundle_id,
+                "ruleset_id": ruleset_id,
                 "field_values": field_values,
                 **opts,
             },
@@ -93,14 +93,14 @@ class AethisClient:
         """Return metadata for the current API key."""
         return self._request("GET", "/api/v1/public/me")
 
-    def get_schema(self, bundle_id: str) -> dict:
-        return self._request("GET", f"/api/v1/public/bundles/{bundle_id}/schema")
+    def get_schema(self, ruleset_id: str) -> dict:
+        return self._request("GET", f"/api/v1/public/rulesets/{ruleset_id}/schema")
 
-    def explain(self, bundle_id: str) -> dict:
-        return self._request("GET", f"/api/v1/public/bundles/{bundle_id}/explain")
+    def explain(self, ruleset_id: str) -> dict:
+        return self._request("GET", f"/api/v1/public/rulesets/{ruleset_id}/explain")
 
-    def get_source(self, bundle_id: str) -> dict:
-        return self._request("GET", f"/api/v1/public/bundles/{bundle_id}/source")
+    def get_source(self, ruleset_id: str) -> dict:
+        return self._request("GET", f"/api/v1/public/rulesets/{ruleset_id}/source")
 
     # -- Projects API --
 
@@ -194,17 +194,17 @@ class AethisClient:
             **kwargs,
         )
 
-    def list_bundles(self, project_id: str, status: str | None = None) -> list[dict]:
+    def list_rulesets(self, project_id: str, status: str | None = None) -> list[dict]:
         params: dict[str, str] = {}
         if status:
             params["status"] = status
-        return self._request("GET", f"/api/v1/public/projects/{project_id}/bundles", params=params)
+        return self._request("GET", f"/api/v1/public/projects/{project_id}/rulesets", params=params)
 
     def archive_project(self, project_id: str) -> dict:
         return self._request("POST", f"/api/v1/public/projects/{project_id}/archive")
 
-    def archive_bundle(self, bundle_id: str) -> dict:
-        return self._request("POST", f"/api/v1/public/bundles/{bundle_id}/archive")
+    def archive_ruleset(self, ruleset_id: str) -> dict:
+        return self._request("POST", f"/api/v1/public/rulesets/{ruleset_id}/archive")
 
     # -- Domain guidance API --
 

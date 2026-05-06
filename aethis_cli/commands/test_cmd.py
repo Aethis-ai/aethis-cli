@@ -1,4 +1,4 @@
-"""aethis test — run golden test cases against the generated bundle."""
+"""aethis test — run golden test cases against the generated ruleset."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from aethis_cli.output import console, error_panel
 def test(
     project_id: Optional[str] = typer.Option(None, "--project-id", "-p"),
 ) -> None:
-    """Run golden test cases against the latest generated bundle."""
+    """Run golden test cases against the latest generated ruleset."""
     cfg = load_project_config()
     api_key = resolve_api_key(cfg)
     client = make_authed_client(api_key, cfg.base_url)

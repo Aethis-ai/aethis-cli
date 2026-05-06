@@ -32,7 +32,7 @@ def generate(
     poll: bool = typer.Option(True, "--poll/--no-poll", help="Poll until generation completes"),
     timeout: int = typer.Option(600, "--timeout", "-t", help="Polling timeout in seconds"),
 ) -> None:
-    """Upload sources + guidance, trigger bundle generation, and poll until done."""
+    """Upload sources + guidance, trigger ruleset generation, and poll until done."""
     try:
         cfg = load_project_config()
         api_key = resolve_api_key(cfg)
@@ -166,7 +166,7 @@ def _poll_until_done(client: AethisClient, pid: str, project_dir: Path, timeout:
         BarColumn(),
         console=console,
     ) as progress:
-        task = progress.add_task("Generating bundle...", total=100)
+        task = progress.add_task("Generating ruleset...", total=100)
         while time.monotonic() < deadline:
             result = client.get_status(pid)
             job = result.get("job") or {}
@@ -176,15 +176,15 @@ def _poll_until_done(client: AethisClient, pid: str, project_dir: Path, timeout:
 
             if job_status == "success":
                 progress.update(task, completed=100)
-                bundle_id = result.get("latest_bundle_id")
-                write_state(project_dir, {"bundle_id": bundle_id})
+                ruleset_id = result.get("latest_ruleset_id")
+                write_state(project_dir, {"ruleset_id": ruleset_id})
                 console.print()
-                # Auto-publish so the bundle is immediately usable
+                # Auto-publish so the ruleset is immediately usable
                 try:
                     client.publish(pid)
-                    success(f"Done! Bundle published: {bundle_id}")
+                    success(f"Done! Ruleset published: {ruleset_id}")
                 except AethisAPIError:
-                    success(f"Done! Bundle: {bundle_id} (run 'aethis publish' to activate)")
+                    success(f"Done! Ruleset: {ruleset_id} (run 'aethis publish' to activate)")
                 return
 
             if job_status == "failed":

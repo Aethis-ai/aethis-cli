@@ -192,8 +192,8 @@ def _make_client() -> tuple[AethisClient, str]:
 
 
 @pytest.fixture(scope="module")
-def spacecraft_bundle():
-    """Run the full generate pipeline once, return project/bundle state."""
+def spacecraft_ruleset():
+    """Run the full generate pipeline once, return project/ruleset state."""
     client, base_url = _make_client()
 
     if not SPACECRAFT_POLICY_PATH.exists():
@@ -229,12 +229,12 @@ def spacecraft_bundle():
         job_status = job_info.get("status", "unknown")
 
         if job_status == "success":
-            bundle_id = status.get("latest_bundle_id")
-            # 7. Publish bundle (sets status="active" so /schema, /decide, /test-run work)
+            ruleset_id = status.get("latest_ruleset_id")
+            # 7. Publish ruleset (sets status="active" so /schema, /decide, /test-run work)
             client.publish(pid)
             return {
                 "project_id": pid,
-                "bundle_id": bundle_id,
+                "ruleset_id": ruleset_id,
                 "client": client,
             }
 
@@ -254,20 +254,20 @@ def spacecraft_bundle():
 class TestSpacecraftGeneration:
     """Verify the generation pipeline completes and produces valid output."""
 
-    def test_bundle_id_exists(self, spacecraft_bundle):
-        assert spacecraft_bundle["bundle_id"], "No bundle_id returned after generation"
+    def test_ruleset_id_exists(self, spacecraft_ruleset):
+        assert spacecraft_ruleset["ruleset_id"], "No ruleset_id returned after generation"
 
-    def test_schema_has_sufficient_fields(self, spacecraft_bundle):
-        """Generated bundle must have ≥5 input fields."""
-        client = spacecraft_bundle["client"]
-        schema = client.get_schema(spacecraft_bundle["bundle_id"])
+    def test_schema_has_sufficient_fields(self, spacecraft_ruleset):
+        """Generated ruleset must have ≥5 input fields."""
+        client = spacecraft_ruleset["client"]
+        schema = client.get_schema(spacecraft_ruleset["ruleset_id"])
         fields = schema.get("fields", [])
         assert len(fields) >= 5, f"Expected ≥5 fields, got {len(fields)}: {[f['field_id'] for f in fields]}"
 
-    def test_schema_field_types(self, spacecraft_bundle):
+    def test_schema_field_types(self, spacecraft_ruleset):
         """Verify field types include bool, int, and enum."""
-        client = spacecraft_bundle["client"]
-        schema = client.get_schema(spacecraft_bundle["bundle_id"])
+        client = spacecraft_ruleset["client"]
+        schema = client.get_schema(spacecraft_ruleset["ruleset_id"])
         types = {f["field_type"].lower() for f in schema.get("fields", [])}
         assert "bool" in types, f"Expected bool fields, got types: {types}"
 
@@ -280,15 +280,15 @@ class TestSpacecraftGeneration:
 class TestSpacecraftDecisions:
     """Verify known outcomes via the /decide endpoint."""
 
-    def test_vogon_not_eligible(self, spacecraft_bundle):
-        client = spacecraft_bundle["client"]
-        result = client.decide(spacecraft_bundle["bundle_id"], {"space.crew.species": "Vogon"})
+    def test_vogon_not_eligible(self, spacecraft_ruleset):
+        client = spacecraft_ruleset["client"]
+        result = client.decide(spacecraft_ruleset["ruleset_id"], {"space.crew.species": "Vogon"})
         assert result["decision"] == "not_eligible", f"Vogon should be not_eligible, got {result['decision']}"
 
-    def test_full_compliance_eligible(self, spacecraft_bundle):
-        client = spacecraft_bundle["client"]
+    def test_full_compliance_eligible(self, spacecraft_ruleset):
+        client = spacecraft_ruleset["client"]
         result = client.decide(
-            spacecraft_bundle["bundle_id"],
+            spacecraft_ruleset["ruleset_id"],
             {
                 "space.crew.species": "Human",
                 "space.crew.flight_hours": 600,
@@ -305,10 +305,10 @@ class TestSpacecraftDecisions:
         )
         assert result["decision"] == "eligible", f"Full compliance should be eligible, got {result['decision']}"
 
-    def test_no_towel_not_eligible(self, spacecraft_bundle):
-        client = spacecraft_bundle["client"]
+    def test_no_towel_not_eligible(self, spacecraft_ruleset):
+        client = spacecraft_ruleset["client"]
         result = client.decide(
-            spacecraft_bundle["bundle_id"],
+            spacecraft_ruleset["ruleset_id"],
             {
                 "space.crew.species": "Human",
                 "space.crew.flight_hours": 600,
@@ -322,10 +322,10 @@ class TestSpacecraftDecisions:
         )
         assert result["decision"] == "not_eligible", f"No towel should be not_eligible, got {result['decision']}"
 
-    def test_orbital_no_radiation_not_eligible(self, spacecraft_bundle):
-        client = spacecraft_bundle["client"]
+    def test_orbital_no_radiation_not_eligible(self, spacecraft_ruleset):
+        client = spacecraft_ruleset["client"]
         result = client.decide(
-            spacecraft_bundle["bundle_id"],
+            spacecraft_ruleset["ruleset_id"],
             {
                 "space.crew.species": "Human",
                 "space.crew.flight_hours": 600,
@@ -342,10 +342,10 @@ class TestSpacecraftDecisions:
             f"Orbital + no radiation cert should be not_eligible, got {result['decision']}"
         )
 
-    def test_age_exemption_eligible(self, spacecraft_bundle):
-        client = spacecraft_bundle["client"]
+    def test_age_exemption_eligible(self, spacecraft_ruleset):
+        client = spacecraft_ruleset["client"]
         result = client.decide(
-            spacecraft_bundle["bundle_id"],
+            spacecraft_ruleset["ruleset_id"],
             {
                 "space.crew.species": "Human",
                 "space.crew.age": 65,
@@ -369,15 +369,15 @@ class TestSpacecraftDecisions:
 class TestSpacecraftTestRun:
     """Verify the /test-run endpoint returns acceptable pass rate."""
 
-    def test_run_returns_results(self, spacecraft_bundle):
-        client = spacecraft_bundle["client"]
-        result = client.run_tests(spacecraft_bundle["project_id"])
+    def test_run_returns_results(self, spacecraft_ruleset):
+        client = spacecraft_ruleset["client"]
+        result = client.run_tests(spacecraft_ruleset["project_id"])
         assert result["total"] >= 5, f"Expected ≥5 test cases, got {result['total']}"
 
-    def test_pass_rate_at_least_80_percent(self, spacecraft_bundle):
+    def test_pass_rate_at_least_80_percent(self, spacecraft_ruleset):
         """Binding assertion: ≥80% of golden cases must pass via /test-run."""
-        client = spacecraft_bundle["client"]
-        result = client.run_tests(spacecraft_bundle["project_id"])
+        client = spacecraft_ruleset["client"]
+        result = client.run_tests(spacecraft_ruleset["project_id"])
         total = result["total"]
         passed = result["passed"]
         pass_rate = passed / total if total > 0 else 0

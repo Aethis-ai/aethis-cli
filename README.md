@@ -4,7 +4,7 @@
 [![Docs](https://img.shields.io/badge/docs-docs.aethis.ai-blue)](https://docs.aethis.ai)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-CLI for the [Aethis](https://aethis.ai) developer API — evaluate eligibility, author rule bundles, and publish from the terminal.
+CLI for the [Aethis](https://aethis.ai) developer API — evaluate eligibility, author rulesets, and publish from the terminal.
 
 ## Install
 
@@ -25,14 +25,14 @@ pip install aethis-cli
 No sign-up needed. Decision tools work immediately.
 
 ```bash
-# Evaluate eligibility against a published bundle
-aethis decide -b <bundle_id> -i '{"space.crew.age": 35, "space.medical.cert_valid": true}'
+# Evaluate eligibility against a published ruleset
+aethis decide -b <ruleset_id> -i '{"space.crew.age": 35, "space.medical.cert_valid": true}'
 
-# Inspect the input fields a bundle expects
-aethis fields -b <bundle_id>
+# Inspect the input fields a ruleset expects
+aethis fields -b <ruleset_id>
 
 # Get human-readable rule descriptions
-aethis explain -b <bundle_id>
+aethis explain -b <ruleset_id>
 ```
 
 ## Authentication
@@ -83,13 +83,13 @@ aethis init
 # 2. Add source documents and guidance
 #    (put PDFs/text in .aethis/sources/, hints in .aethis/guidance/hints.yaml)
 
-# 3. Generate a rule bundle
+# 3. Generate a rule ruleset
 aethis generate
 
 # 4. Run test cases
 aethis test
 
-# 5. Publish the bundle
+# 5. Publish the ruleset
 aethis publish
 ```
 
@@ -115,9 +115,9 @@ See `examples/spacecraft-crew-rules/README.md` for details.
 
 | Command | Description |
 |---------|-------------|
-| `aethis decide -b <bundle_id> -i '<json>'` | Evaluate eligibility. Add `--explain` for trace output. |
-| `aethis fields -b <bundle_id>` | Show input fields the bundle expects |
-| `aethis explain -b <bundle_id>` | Human-readable rule descriptions |
+| `aethis decide -b <ruleset_id> -i '<json>'` | Evaluate eligibility. Add `--explain` for trace output. |
+| `aethis fields -b <ruleset_id>` | Show input fields the ruleset expects |
+| `aethis explain -b <ruleset_id>` | Human-readable rule descriptions |
 
 ### Authoring
 
@@ -126,8 +126,8 @@ See `examples/spacecraft-crew-rules/README.md` for details.
 | `aethis init` | Initialise a new project in the current directory |
 | `aethis generate [--poll]` | Upload sources + guidance, trigger generation |
 | `aethis status` | Check generation job progress |
-| `aethis test` | Run test cases against the latest bundle |
-| `aethis publish [--force]` | Set the latest bundle as active |
+| `aethis test` | Run test cases against the latest ruleset |
+| `aethis publish [--force]` | Set the latest ruleset as active |
 
 ### Guidance (project-level)
 
@@ -140,15 +140,15 @@ Project guidance lives in `.aethis/guidance/hints.yaml` and is uploaded by `aeth
 | `aethis guidance import <file>` | Import hints from a YAML file |
 | `aethis guidance deactivate <hint_id>` | Deactivate a specific hint |
 
-### Projects & bundles
+### Projects & rulesets
 
 | Command | Description |
 |---------|-------------|
 | `aethis projects list` | List your projects |
 | `aethis projects show <project_id>` | Show project details |
 | `aethis projects archive <project_id>` | Archive a project |
-| `aethis bundles list` | List published bundles |
-| `aethis bundles archive <bundle_id>` | Archive a bundle |
+| `aethis rulesets list` | List published rulesets |
+| `aethis rulesets archive <ruleset_id>` | Archive a ruleset |
 
 ### Account
 
@@ -194,7 +194,7 @@ After `aethis init`, your project looks like:
 my-rules/
   .aethis/
     aethis.yaml          # project config
-    state.json           # tracked IDs (project, bundle, job)
+    state.json           # tracked IDs (project, ruleset, job)
     sources/             # PDF/text source documents
     guidance/
       hints.yaml         # guidance hints for the code synthesizer
@@ -278,10 +278,10 @@ aethis --install-completion bash   # or zsh, fish, powershell
 ## Troubleshooting
 
 **`aethis generate` times out but server continues**
-The server finishes even if your client disconnects. Wait 10–15 min, then run `aethis bundles list` — if the bundle appeared, run `aethis test` and `aethis publish`. Do not re-trigger generation; that creates a duplicate run.
+The server finishes even if your client disconnects. Wait 10–15 min, then run `aethis rulesets list` — if the ruleset appeared, run `aethis test` and `aethis publish`. Do not re-trigger generation; that creates a duplicate run.
 
 **`aethis publish` fails with "tests are failing"**
-`publish` refuses a bundle with failing tests. Fix with guidance + regenerate, or pass `--force` (not recommended for production).
+`publish` refuses a ruleset with failing tests. Fix with guidance + regenerate, or pass `--force` (not recommended for production).
 
 **422 Validation error on `aethis decide`**
 `DATE` fields must be passed as **integer ordinals**, not ISO strings. `2025-04-13` → `739354`:

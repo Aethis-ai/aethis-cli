@@ -24,8 +24,8 @@ def test_decide_eligible(respx_mock):
             200,
             json={
                 "decision": "eligible",
-                "bundle_id": "test:123",
-                "bundle_version": "v1",
+                "ruleset_id": "test:123",
+                "ruleset_version": "v1",
                 "fields_evaluated": 2,
                 "fields_provided": 2,
             },
@@ -56,11 +56,11 @@ def test_decide_401_raises_api_error(respx_mock):
 
 @respx.mock(base_url=BASE)
 def test_get_schema(respx_mock):
-    respx_mock.get("/api/v1/public/bundles/b:1/schema").mock(
+    respx_mock.get("/api/v1/public/rulesets/b:1/schema").mock(
         return_value=httpx.Response(
             200,
             json={
-                "bundle_id": "b:1",
+                "ruleset_id": "b:1",
                 "fields": [{"field_id": "age", "field_type": "integer"}],
             },
         )
@@ -72,11 +72,11 @@ def test_get_schema(respx_mock):
 
 @respx.mock(base_url=BASE)
 def test_explain(respx_mock):
-    respx_mock.get("/api/v1/public/bundles/b:1/explain").mock(
+    respx_mock.get("/api/v1/public/rulesets/b:1/explain").mock(
         return_value=httpx.Response(
             200,
             json={
-                "bundle_id": "b:1",
+                "ruleset_id": "b:1",
                 "criteria": [{"criterion_id": "c1", "title": "Age check", "rule_text": "age >= 18"}],
             },
         )
@@ -195,7 +195,7 @@ def test_get_status(respx_mock):
             json={
                 "project_status": "generating",
                 "job": {"job_id": "job_1", "status": "running", "progress_percent": 50},
-                "latest_bundle_id": None,
+                "latest_ruleset_id": None,
             },
         )
     )
@@ -231,14 +231,14 @@ def test_publish(respx_mock):
         return_value=httpx.Response(
             200,
             json={
-                "message": "Bundle published",
-                "bundle_id": "b:123",
+                "message": "Ruleset published",
+                "ruleset_id": "b:123",
                 "project_id": "proj_abc",
             },
         )
     )
     result = AethisClient("ak", BASE).publish("proj_abc")
-    assert result["bundle_id"] == "b:123"
+    assert result["ruleset_id"] == "b:123"
 
 
 # ============================================================================
