@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.8.3 (2026-05-06)
+
+- docs: remove Why Aethis section — package README is a reference surface (per aethis.os/positioning/surface-types.md); install / quick start / authentication is the right lead, not a problem statement
+
+## 0.8.2 (2026-05-06)
+
+- docs: add private-beta callout for authoring tools (decision tools remain public, no key required)
+- docs: clarify in Authentication that aethis login requires an invite during the beta
+
+## 0.8.1 (2026-05-06)
+
+- docs: align README with positioning bible — add Why Aethis section, solution framing, TDD methodology beat
+- docs: add aethis-bible: markers to derived copy blocks
+- fix: replace deprecated "rule bundle" terminology with "ruleset" in pyproject.toml description
+
 ## 0.8.0 (2026-05-05)
 
 - **Breaking**: renamed the public *bundle* concept to *ruleset* throughout the CLI to match the `aethis-core 0.10.0` API contract. The compiled rule artefact is now called a **ruleset** everywhere — in command names, in flag names, in JSON keys, and in prose. Specifically:
