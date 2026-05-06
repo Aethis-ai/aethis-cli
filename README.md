@@ -6,6 +6,14 @@
 
 CLI for the [Aethis](https://aethis.ai) developer API — evaluate eligibility, author rulesets, and publish from the terminal.
 
+## Why Aethis
+
+<!-- aethis-bible: public-messaging.md#3-the-problem-one-paragraph -->
+Language models interpret rules well. They do not execute them reliably. The failure mode is silent: high confidence, wrong answer, no trace. In high-stakes decisions — eligibility, compliance, claims, screening — that is not a model-tuning problem. It is a category mismatch. Probabilistic systems cannot guarantee reproducible, auditable outcomes against written rules.
+
+<!-- aethis-bible: public-messaging.md#4-the-solution-one-paragraph -->
+AI builds it. A constraint solver runs it. Subject matter experts write the tests. Language models generate the rules that pass them.
+
 ## Install
 
 ```bash
@@ -75,6 +83,9 @@ Manage existing keys with `aethis account keys` (list, masked) and `aethis accou
 ## Author your own rules
 
 Rule authoring is **invite-only private beta**. Decision tools (`aethis decide`, `aethis fields`, `aethis explain`) work immediately with no sign-up — this section is for approved beta tenants. [Request access →](https://aethis.ai/developer-access)
+
+<!-- aethis-bible: public-messaging.md#5-how-rule-authoring-works -->
+The authoring workflow follows a four-stage loop: discover, synthesise, test, publish. A ruleset cannot be published with failing tests.
 
 ```bash
 # 1. Initialise a project (no-arg form prompts for a name; auto-runs `aethis login` if needed)

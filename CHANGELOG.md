@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.1 (2026-05-06)
+
+- docs: align README with positioning bible — add Why Aethis section, solution framing, TDD methodology beat
+- docs: add aethis-bible: markers to derived copy blocks
+- fix: replace deprecated "rule bundle" terminology with "ruleset" in pyproject.toml description
+
 ## 0.8.0 (2026-05-05)
 
 - **Breaking**: renamed the public *bundle* concept to *ruleset* throughout the CLI to match the `aethis-core 0.10.0` API contract. The compiled rule artefact is now called a **ruleset** everywhere — in command names, in flag names, in JSON keys, and in prose. Specifically:
