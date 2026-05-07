@@ -113,3 +113,75 @@ def test_publish_passing_tests_publishes_without_force(base_patches):
 
     assert result.exit_code == 0, result.output
     mock_client.publish.assert_called_once()
+    # No --force on the wire either: server-side gate runs.
+    _, call_kwargs = mock_client.publish.call_args
+    assert call_kwargs.get("force_unsafe", False) is False
+
+
+def test_publish_force_threads_force_unsafe_to_server(base_patches):
+    """publish --force must pass force_unsafe=True so the server-side gate (aethis-core 0.11+) is also bypassed.
+
+    Without this, --force only bypassed the CLI's local gate while a direct
+    curl would have been refused by the server — and worse, prior to 0.11
+    the server didn't gate at all, so --force hid a real failure mode.
+    """
+    mock_client = MagicMock()
+    mock_client.run_tests.return_value = {
+        "passed": 2, "total": 5, "failed": 3, "errors": 0, "results": [],
+    }
+    mock_client.publish.return_value = {"ruleset_id": "test:abc", "version": "v2"}
+
+    base_patches.enter_context(patch("aethis_cli.commands.publish_cmd.make_authed_client", return_value=mock_client))
+
+    from aethis_cli.main import app
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["publish", "--force"], catch_exceptions=False)
+
+    assert result.exit_code == 0, result.output
+    mock_client.publish.assert_called_once()
+    _, call_kwargs = mock_client.publish.call_args
+    assert call_kwargs.get("force_unsafe") is True, (
+        "publish --force must pass force_unsafe=True to the client, "
+        f"got call_kwargs={call_kwargs}"
+    )
+
+
+def test_client_publish_includes_force_unsafe_in_body_when_set():
+    """AethisClient.publish(force_unsafe=True) puts the field on the wire."""
+    from aethis_cli.client import AethisClient
+
+    captured: dict = {}
+
+    class _StubClient(AethisClient):
+        def _request(self, method, path, **kw):
+            captured["method"] = method
+            captured["path"] = path
+            captured["kwargs"] = kw
+            return {"ok": True}
+
+    client = _StubClient(base_url="http://test.invalid", api_key="ak_test")
+    client.publish("proj_x", slug="foo/bar", force_unsafe=True)
+
+    assert captured["kwargs"]["json"]["force_unsafe"] is True
+    assert captured["kwargs"]["json"]["slug"] == "foo/bar"
+
+
+def test_client_publish_omits_force_unsafe_when_default():
+    """force_unsafe defaults to False and is omitted from the body to keep the wire payload minimal and old-engine compatible."""
+    from aethis_cli.client import AethisClient
+
+    captured: dict = {}
+
+    class _StubClient(AethisClient):
+        def _request(self, method, path, **kw):
+            captured["method"] = method
+            captured["path"] = path
+            captured["kwargs"] = kw
+            return {"ok": True}
+
+    client = _StubClient(base_url="http://test.invalid", api_key="ak_test")
+    client.publish("proj_x")
+
+    # No body => no kwargs at all
+    assert "json" not in captured["kwargs"], captured

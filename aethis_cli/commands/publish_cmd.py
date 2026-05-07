@@ -75,7 +75,11 @@ def publish(
             )
 
     try:
-        result = client.publish(pid, slug=slug)
+        # Thread --force to the server-side TDD gate (aethis-core 0.11+).
+        # Older engines ignore the field; newer ones refuse a publish over
+        # failing tests unless force_unsafe=True is explicit, in which case
+        # they record a publish_force_bypass audit event.
+        result = client.publish(pid, slug=slug, force_unsafe=force)
     except AethisAPIError as e:
         error_panel(e)
         raise typer.Exit(code=1)
