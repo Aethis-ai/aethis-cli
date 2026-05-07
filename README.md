@@ -170,6 +170,8 @@ Project guidance lives in `.aethis/guidance/hints.yaml` and is uploaded by `aeth
 
 Wire up the [Aethis MCP server](https://github.com/Aethis-ai/aethis-mcp) in your AI editor without hand-editing JSON. Picks up the API key cached by `aethis login`, drops a canonical `aethis` server entry into the right config file, and preserves any other MCP servers you already have.
 
+> Onboarding an AI coding agent end-to-end? See [docs.aethis.ai/agents/onboarding](https://docs.aethis.ai/agents/onboarding) — install + verify + auth + workflow patterns in one page.
+
 ```bash
 # One editor at a time
 aethis mcp install --target cursor
