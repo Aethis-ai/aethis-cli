@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.4 (2026-05-07)
+
+- docs: link to docs.aethis.ai/agents/onboarding from MCP one-liner section
+
 ## 0.8.3 (2026-05-06)
 
 - docs: remove Why Aethis section — package README is a reference surface (per aethis.os/positioning/surface-types.md); install / quick start / authentication is the right lead, not a problem statement
