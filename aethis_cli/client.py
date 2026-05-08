@@ -181,10 +181,21 @@ class AethisClient:
     def run_tests(self, project_id: str) -> dict:
         return self._request("POST", f"/api/v1/public/projects/{project_id}/test-run")
 
-    def publish(self, project_id: str, *, slug: str | None = None) -> dict:
+    def publish(
+        self,
+        project_id: str,
+        *,
+        slug: str | None = None,
+        force_unsafe: bool = False,
+    ) -> dict:
         body: dict = {}
         if slug is not None:
             body["slug"] = slug
+        if force_unsafe:
+            # Tell the server-side TDD gate (aethis-core 0.11+) to refuse a
+            # publish when stored test cases fail; force_unsafe=True records
+            # an audit event and proceeds. Older engines ignore the field.
+            body["force_unsafe"] = True
         kwargs: dict = {}
         if body:
             kwargs["json"] = body

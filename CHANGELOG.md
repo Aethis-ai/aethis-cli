@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.9.0 (2026-05-08)
+
+- feat(publish): thread `--force` through to the server-side TDD gate
+  introduced in `aethis-core` 0.11.0. `client.publish()` gains a
+  `force_unsafe: bool = False` keyword; `aethis publish --force` now
+  passes `force_unsafe: true` in the request body so the server-side
+  gate is bypassed (and a `publish_force_bypass` audit event is
+  recorded). Older engines ignore the field — no breakage. Without
+  `--force`, the new gate refuses publishing over a failing test
+  suite even when the CLI's own test gate is bypassed (e.g. by a
+  direct curl that doesn't use the CLI). Closes the cli/server
+  asymmetry that nearly shipped a 10/11 ruleset to a canonical
+  `aethis/*` slug on 2026-05-07.
+
 ## 0.8.4 (2026-05-07)
 
 - docs: link to docs.aethis.ai/agents/onboarding from MCP one-liner section
