@@ -9,7 +9,7 @@ import httpx
 import typer
 
 from aethis_cli.auth import authenticate_with_clerk
-from aethis_cli.commands.login_cmd import _save_to_keyring, _save_to_file
+from aethis_cli.commands.login_cmd import save_api_key
 from aethis_cli.config import DEFAULT_BASE_URL
 from aethis_cli.errors import AuthenticationError
 from aethis_cli.output import console, info, success
@@ -184,11 +184,7 @@ def generate(
     if no_save:
         info("--no-save specified. Key not saved to credential store.")
     else:
-        if _save_to_keyring(full_key):
-            success("API key saved to system keychain.")
-        else:
-            _save_to_file(full_key)
-            success("API key saved to credentials file.")
+        save_api_key(full_key)
 
 
 @account_app.command()

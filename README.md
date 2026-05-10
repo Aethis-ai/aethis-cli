@@ -27,14 +27,17 @@ pip install aethis-cli
 No sign-up needed. Decision tools work immediately.
 
 ```bash
-# Evaluate eligibility against a published ruleset
-aethis decide -b <ruleset_id> -i '{"space.crew.age": 35, "space.medical.cert_valid": true}'
+# Browse the public showcase catalogue — no API key required
+aethis rulesets list
 
 # Inspect the input fields a ruleset expects
-aethis fields -b <ruleset_id>
+aethis fields -b <slug-or-ruleset_id>
 
 # Get human-readable rule descriptions
-aethis explain -b <ruleset_id>
+aethis explain -b <slug-or-ruleset_id>
+
+# Evaluate eligibility against a published ruleset
+aethis decide -b <slug-or-ruleset_id> -i '{"some.field": 35, "other.field": true}'
 ```
 
 ## Authentication
@@ -122,9 +125,11 @@ See `examples/spacecraft-crew-rules/README.md` for details.
 
 | Command | Description |
 |---------|-------------|
-| `aethis decide -b <ruleset_id> -i '<json>'` | Evaluate eligibility. Add `--explain` for trace output. |
-| `aethis fields -b <ruleset_id>` | Show input fields the ruleset expects |
-| `aethis explain -b <ruleset_id>` | Human-readable rule descriptions |
+| `aethis rulesets list` | Browse the public showcase catalogue (auto-falls through when no project context) |
+| `aethis rulesets list --public` | Same, explicit form |
+| `aethis decide -b <slug-or-ruleset_id> -i '<json>'` | Evaluate eligibility. Add `--explain` for trace output. |
+| `aethis fields -b <slug-or-ruleset_id>` | Show input fields the ruleset expects |
+| `aethis explain -b <slug-or-ruleset_id>` | Human-readable rule descriptions |
 
 ### Authoring
 
@@ -162,9 +167,50 @@ Project guidance lives in `.aethis/guidance/hints.yaml` and is uploaded by `aeth
 | Command | Description |
 |---------|-------------|
 | `aethis login` | Sign in and store an API key locally (first-time setup) |
+| `aethis login --profile <name>` | Sign in into a named profile slot (keeps `default` untouched) |
 | `aethis account generate` | Mint an additional API key (rotation, multi-machine, scoped access) |
 | `aethis account keys` | List your API keys (masked) |
 | `aethis account revoke <key_id>` | Revoke a key |
+
+### Profiles
+
+Multiple credential profiles let you keep separate personas — say, an admin
+key plus a "fresh signup" perspective — and switch between them without
+re-authenticating. The reserved profile name `anonymous` forces unsigned
+mode (no `X-API-Key` header sent), so you can verify exactly what an
+unauthenticated user would see.
+
+```bash
+# Create profiles (or use `aethis login --profile <name>` for OAuth)
+aethis profile add admin --api-key ak_live_…
+aethis profile add new-dev --api-key ak_test_…
+
+# See them, with `*` next to the active one
+aethis profile list
+
+# Switch the sticky default
+aethis profile use new-dev
+
+# One-off override (doesn't change the sticky default)
+aethis --profile admin rulesets list
+aethis --profile anonymous rulesets list   # forces public-mode
+
+# Delete one
+aethis profile remove new-dev
+```
+
+Profile selection order: `--profile` flag > `AETHIS_PROFILE` env > the
+sticky `active_profile` field in `~/.config/aethis/credentials` >
+`default`. The `AETHIS_API_KEY` env var still takes precedence over all
+profile machinery — set it to short-circuit the cache for one
+invocation.
+
+| Command | Description |
+|---------|-------------|
+| `aethis profile list` | Show all profiles + which one is active |
+| `aethis profile use <name>` | Set the sticky default profile |
+| `aethis profile add <name> [--api-key …]` | Create or update a named profile |
+| `aethis profile remove <name>` | Delete a profile |
 
 ## MCP one-liner
 
@@ -240,7 +286,8 @@ tests:
 
 | Variable | Description | Required | Default |
 |----------|-------------|----------|---------|
-| `AETHIS_API_KEY` | Your API key (`ak_live_...`). Bypasses the cached credential. | Authoring only | — |
+| `AETHIS_API_KEY` | Your API key (`ak_live_...`). Bypasses the cached credential and any profile machinery. | Authoring only | — |
+| `AETHIS_PROFILE` | Select a named credential profile (overrides the sticky default; see `aethis profile`). | No | `default` |
 | `AETHIS_BASE_URL` | Override the API host (staff/dev use; staging or self-hosted). | No | `https://api.aethis.ai` |
 | `ANTHROPIC_API_KEY` | Forwarded per-request to the generation endpoint when running `aethis generate`. Never stored server-side. | Authoring only | — |
 

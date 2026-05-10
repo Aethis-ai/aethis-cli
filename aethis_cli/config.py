@@ -16,6 +16,8 @@ if TYPE_CHECKING:
     from aethis_cli.client import AethisClient
 
 DEFAULT_BASE_URL = "https://api.aethis.ai"
+DEFAULT_PROFILE = "default"
+ANONYMOUS_PROFILE = "anonymous"
 
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "host.docker.internal"}
 
@@ -43,21 +45,24 @@ class ProjectConfig:
 
 
 def resolve_base_url_with_source() -> tuple[str, str]:
-    """Return (base_url, source) where source is 'env', 'yaml', or 'default'.
+    """Return (base_url, source) where source is 'env', 'yaml', 'profile', or 'default'.
 
     Resolution order matches what every read-only command sees:
-      AETHIS_BASE_URL env var > aethis.yaml > DEFAULT_BASE_URL
+      AETHIS_BASE_URL env var > aethis.yaml > active profile > DEFAULT_BASE_URL
     """
     env = os.environ.get("AETHIS_BASE_URL")
     if env:
         return env, "env"
     try:
         cfg = load_project_config()
+        if cfg.base_url != DEFAULT_BASE_URL:
+            return cfg.base_url, "yaml"
     except ConfigError:
-        return DEFAULT_BASE_URL, "default"
-    if cfg.base_url == DEFAULT_BASE_URL:
-        return cfg.base_url, "default"
-    return cfg.base_url, "yaml"
+        pass
+    profile = get_profile(active_profile_name())
+    if profile.get("base_url"):
+        return profile["base_url"], "profile"
+    return DEFAULT_BASE_URL, "default"
 
 
 def make_authed_client(
@@ -90,15 +95,24 @@ def load_client_or_fallback() -> tuple["ProjectConfig", "AethisClient"]:
     the inline browser login on the first 401. This lets a fresh user run
     ``aethis projects list`` and complete sign-in without backing out to
     ``aethis login`` and re-running.
+
+    When the active profile is ``anonymous`` the function returns an unsigned
+    client immediately — no lazy-auth, no browser prompt.
     """
-    from aethis_cli.auth_helpers import RUNTIME, require_auth_or_login_inline
+    from aethis_cli.auth_helpers import RUNTIME, is_anonymous_active, require_auth_or_login_inline
+    from aethis_cli.client import make_anonymous_client
 
     try:
         cfg = load_project_config()
     except ConfigError:
-        base_url = RUNTIME.base_url_override or os.environ.get("AETHIS_BASE_URL") or DEFAULT_BASE_URL
+        base_url, _ = resolve_base_url_with_source()
+        if RUNTIME.base_url_override:
+            base_url = RUNTIME.base_url_override
         _validate_base_url(base_url)
         cfg = ProjectConfig(project="", base_url=base_url)
+
+    if is_anonymous_active():
+        return cfg, make_anonymous_client(cfg.base_url)
 
     api_key = require_auth_or_login_inline(cfg.base_url)
     return cfg, make_authed_client(api_key, cfg.base_url)
@@ -136,39 +150,30 @@ def load_project_config(path: Optional[Path] = None) -> ProjectConfig:
 
 
 def resolve_api_key(config: ProjectConfig) -> str:
-    """Resolve API key: env var → OS keychain → credentials file.
+    """Resolve API key: env var → active profile → keychain (default only) → lazy-auth.
 
-    When no cached key is found we delegate to the lazy-auth helper, which
-    will offer an inline browser sign-in on a TTY or raise ``AuthRequired``
-    on non-interactive shells / ``--no-prompt``. The historical contract of
-    "raise on missing key" is preserved — ``AuthRequired`` is a separate
-    exception that bubbles to ``cli()`` and exits with a clear message.
+    See :func:`aethis_cli.auth_helpers._resolve_cached_key` for the resolution
+    chain. When no cached key is found we delegate to the lazy-auth helper,
+    which will offer an inline browser sign-in on a TTY or raise
+    ``AuthRequired`` on non-interactive shells / ``--no-prompt``.
     """
-    key = os.environ.get(config.api_key_env)
-    if key:
-        return key
+    from aethis_cli.auth_helpers import _resolve_cached_key, require_auth_or_login_inline
 
-    # Try OS keychain (if keyring is installed)
-    try:
-        import keyring
+    cached = _resolve_cached_key()
+    if cached:
+        # Honour the project's ``api_key_env`` override only when set to the
+        # non-default name — the standard ``AETHIS_API_KEY`` path is already
+        # covered by ``_resolve_cached_key``.
+        if config.api_key_env != "AETHIS_API_KEY":
+            override = os.environ.get(config.api_key_env)
+            if override:
+                return override
+        return cached
 
-        key = keyring.get_password("aethis-cli", "api_key")
-        if key:
-            return key
-    except Exception:
-        pass
-
-    # Fall back to plaintext credentials file
-    creds_path = credentials_path()
-    if creds_path.exists():
-        raw = yaml.safe_load(creds_path.read_text()) or {}
-        key = raw.get("api_key")
-        if key:
-            return key
-
-    # Nothing cached: defer to the lazy-auth helper for inline browser sign-in
-    # (or AuthRequired on CI / --no-prompt).
-    from aethis_cli.auth_helpers import require_auth_or_login_inline
+    if config.api_key_env != "AETHIS_API_KEY":
+        override = os.environ.get(config.api_key_env)
+        if override:
+            return override
 
     return require_auth_or_login_inline(config.base_url)
 
@@ -223,3 +228,135 @@ def credentials_path() -> Path:
     if xdg:
         return Path(xdg) / "aethis" / "credentials"
     return Path.home() / ".config" / "aethis" / "credentials"
+
+
+# -- Profiles -----------------------------------------------------------------
+#
+# The credentials file at ``credentials_path()`` stores one or more named
+# profiles. The structure is::
+#
+#     active_profile: default
+#     profiles:
+#       default:
+#         api_key: ak_live_...
+#         base_url: https://api.aethis.ai
+#       new-dev:
+#         api_key: ak_test_...
+#       anonymous: {}
+#
+# The reserved name ``anonymous`` is recognised even when not present in the
+# file: selecting it yields no API key (and the client runs in unsigned mode).
+#
+# Backwards compatibility: legacy single-key files of the shape
+# ``{api_key: ...}`` are read as if they declared ``profiles.default.api_key``.
+# The first save after a legacy read upgrades the file to the new format.
+
+
+def _normalize_credentials(raw: object) -> dict:
+    """Coerce a raw YAML payload into ``{active_profile, profiles}``.
+
+    Handles three shapes:
+    * Legacy single-key ``{api_key: ...}`` → treated as the default profile.
+    * New multi-profile ``{active_profile, profiles: {...}}`` → returned as-is
+      with missing fields filled in.
+    * Anything else (None, malformed) → empty multi-profile skeleton.
+    """
+    if not isinstance(raw, dict):
+        return {"active_profile": DEFAULT_PROFILE, "profiles": {}}
+
+    if "profiles" in raw and isinstance(raw["profiles"], dict):
+        active = raw.get("active_profile") or DEFAULT_PROFILE
+        return {"active_profile": str(active), "profiles": dict(raw["profiles"])}
+
+    # Legacy: bare api_key (and maybe base_url) at the top level.
+    legacy_default: dict = {}
+    if "api_key" in raw and raw["api_key"]:
+        legacy_default["api_key"] = raw["api_key"]
+    if "base_url" in raw and raw["base_url"]:
+        legacy_default["base_url"] = raw["base_url"]
+    profiles = {DEFAULT_PROFILE: legacy_default} if legacy_default else {}
+    return {"active_profile": DEFAULT_PROFILE, "profiles": profiles}
+
+
+def load_credentials() -> dict:
+    """Read the credentials file and return a normalised ``{active_profile, profiles}``.
+
+    Returns the empty skeleton if the file is missing or unreadable.
+    """
+    path = credentials_path()
+    if not path.exists():
+        return {"active_profile": DEFAULT_PROFILE, "profiles": {}}
+    try:
+        raw = yaml.safe_load(path.read_text())
+    except yaml.YAMLError:
+        return {"active_profile": DEFAULT_PROFILE, "profiles": {}}
+    return _normalize_credentials(raw)
+
+
+def save_credentials(data: dict) -> None:
+    """Atomically write the credentials file with mode 0600."""
+    path = credentials_path()
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(yaml.dump(data, sort_keys=False))
+
+
+def active_profile_name() -> str:
+    """Return the name of the active profile.
+
+    Resolution order: ``--profile`` flag > ``AETHIS_PROFILE`` env >
+    ``active_profile`` field in credentials > ``"default"``.
+    """
+    from aethis_cli.auth_helpers import RUNTIME
+
+    if RUNTIME.profile_override:
+        return RUNTIME.profile_override
+    env = os.environ.get("AETHIS_PROFILE")
+    if env:
+        return env
+    return load_credentials().get("active_profile") or DEFAULT_PROFILE
+
+
+def get_profile(name: str) -> dict:
+    """Return the profile dict for ``name`` (or empty dict if not present)."""
+    creds = load_credentials()
+    return dict(creds["profiles"].get(name, {}))
+
+
+def set_profile(name: str, *, api_key: Optional[str] = None, base_url: Optional[str] = None) -> None:
+    """Create or update a named profile in the credentials file.
+
+    Only fields passed as non-None are written; existing fields are preserved.
+    """
+    if name == ANONYMOUS_PROFILE:
+        raise ConfigError(
+            f"Profile name '{ANONYMOUS_PROFILE}' is reserved — selecting it always "
+            "uses no API key. Pick a different name."
+        )
+    creds = load_credentials()
+    profile = dict(creds["profiles"].get(name, {}))
+    if api_key is not None:
+        profile["api_key"] = api_key
+    if base_url is not None:
+        profile["base_url"] = base_url
+    creds["profiles"][name] = profile
+    save_credentials(creds)
+
+
+def remove_profile(name: str) -> None:
+    """Delete a profile. Raises ``ConfigError`` if it doesn't exist."""
+    creds = load_credentials()
+    if name not in creds["profiles"]:
+        raise ConfigError(f"Profile '{name}' does not exist.")
+    del creds["profiles"][name]
+    if creds.get("active_profile") == name:
+        creds["active_profile"] = DEFAULT_PROFILE
+    save_credentials(creds)
+
+
+def set_active_profile(name: str) -> None:
+    """Set the sticky default profile name."""
+    creds = load_credentials()
+    creds["active_profile"] = name
+    save_credentials(creds)

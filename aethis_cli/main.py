@@ -17,6 +17,7 @@ from aethis_cli.commands.account_cmd import account_app
 from aethis_cli.commands.rulesets_cmd import rulesets_app
 from aethis_cli.commands.guidance_cmd import guidance_app
 from aethis_cli.commands.mcp_cmd import mcp_app
+from aethis_cli.commands.profile_cmd import profile_app
 from aethis_cli.commands.projects_cmd import projects_app
 from aethis_cli.commands.init_cmd import init
 from aethis_cli.commands.login_cmd import login
@@ -102,6 +103,15 @@ def main(
         "--base-url",
         help="Override the API base URL (defaults to AETHIS_BASE_URL or https://api.aethis.ai).",
     ),
+    profile: Optional[str] = typer.Option(
+        None,
+        "--profile",
+        help=(
+            "Use a named credential profile for this command (overrides "
+            "AETHIS_PROFILE and the sticky default). Pass 'anonymous' to force "
+            "unsigned mode. Manage with `aethis profile`."
+        ),
+    ),
 ) -> None:
     """CLI for the Aethis developer API — author, test, and publish rulesets."""
     # Stash root-level flags on the lazy-auth runtime so commands and the
@@ -111,6 +121,7 @@ def main(
     RUNTIME.no_prompt = no_prompt
     RUNTIME.api_key_override = api_key
     RUNTIME.base_url_override = base_url
+    RUNTIME.profile_override = profile
     if base_url:
         # Make AETHIS_BASE_URL the single source of truth for downstream
         # code paths (config.resolve_base_url_with_source, status, login)
@@ -124,6 +135,7 @@ app.add_typer(account_app, name="account")
 app.add_typer(rulesets_app, name="rulesets")
 app.add_typer(guidance_app, name="guidance")
 app.add_typer(mcp_app, name="mcp")
+app.add_typer(profile_app, name="profile")
 app.add_typer(projects_app, name="projects")
 app.command()(init)
 app.command()(login)

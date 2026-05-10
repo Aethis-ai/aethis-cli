@@ -6,9 +6,16 @@ import os
 from typing import Optional
 
 import typer
-import yaml
 
-from aethis_cli.config import DEFAULT_BASE_URL, credentials_path
+from aethis_cli.config import (
+    ANONYMOUS_PROFILE,
+    DEFAULT_BASE_URL,
+    DEFAULT_PROFILE,
+    active_profile_name,
+    credentials_path,
+    set_profile,
+)
+from aethis_cli.errors import ConfigError
 from aethis_cli.output import console, info, success
 
 _KEYRING_SERVICE = "aethis-cli"
@@ -26,38 +33,44 @@ def _save_to_keyring(api_key: str) -> bool:
         return False
 
 
-def _save_to_file(api_key: str) -> None:
-    """Fallback: store key in ~/.config/aethis/credentials (0600)."""
-    creds = credentials_path()
-    creds.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    # Atomic create with correct permissions — avoids TOCTOU race
-    fd = os.open(str(creds), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        f.write(yaml.dump({"api_key": api_key}))
-
-
-def save_api_key(api_key: str, *, announce: bool = True) -> None:
-    """Save API key to the best available credential store.
+def save_api_key(api_key: str, *, profile: Optional[str] = None, announce: bool = True) -> None:
+    """Save API key to the best available credential store for ``profile``.
 
     Public helper so the lazy-auth flow can persist a freshly minted key
     without going through the typer command. ``announce`` controls whether
     the success line is printed (the inline-login path prints its own).
+
+    Resolution:
+    * ``profile=None`` → use the currently active profile.
+    * Default profile → try OS keychain first (legacy single-key location);
+      fall back to the credentials file's ``profiles.default`` slot.
+    * Any other profile → write directly to the credentials file.
+    * Reserved ``anonymous`` profile → refuse.
     """
-    if _save_to_keyring(api_key):
+    target = profile or active_profile_name()
+    if target == ANONYMOUS_PROFILE:
+        raise ConfigError(
+            f"Cannot save a key to the reserved '{ANONYMOUS_PROFILE}' profile. "
+            "Pick a different profile name with --profile."
+        )
+
+    if target == DEFAULT_PROFILE and _save_to_keyring(api_key):
         if announce:
-            success("API key saved to system keychain.")
-    else:
-        _save_to_file(api_key)
-        if announce:
+            success("API key saved to system keychain (profile: default).")
+        return
+
+    set_profile(target, api_key=api_key)
+    if announce:
+        if target == DEFAULT_PROFILE:
             info("keyring not available — key saved to file (install 'keyring' for OS keychain)")
-            success(f"API key saved to {credentials_path()}")
+        success(f"API key saved to {credentials_path()} (profile: {target}).")
 
 
 # Backwards-compatible alias used internally by this module.
 _save_key = save_api_key
 
 
-def run_browser_login(base_url: str, timeout: int = 120) -> Optional[str]:
+def run_browser_login(base_url: str, timeout: int = 120, *, profile: Optional[str] = None) -> Optional[str]:
     """Run the full browser OAuth + key-mint flow and return the new API key.
 
     On success, persists the key to the keychain/credentials file and returns
@@ -124,7 +137,7 @@ def run_browser_login(base_url: str, timeout: int = 120) -> Optional[str]:
         console.print("[yellow]Unexpected API response.[/yellow]")
         return None
 
-    save_api_key(full_key)
+    save_api_key(full_key, profile=profile)
     return full_key
 
 
@@ -143,7 +156,7 @@ def _validate_key(api_key: str, base_url: str) -> bool:
         return True  # Network error — don't block save, let commands fail with context
 
 
-def _prompt_manual_key(base_url: str) -> None:
+def _prompt_manual_key(base_url: str, *, profile: Optional[str] = None) -> None:
     """Fall back to manual key entry."""
     console.print()
     console.print("Paste an API key from https://aethis.legal/dashboard/api-keys")
@@ -155,7 +168,7 @@ def _prompt_manual_key(base_url: str) -> None:
     if not _validate_key(api_key, base_url):
         console.print("[red]That key was rejected by the API (HTTP 401). Check it and try again.[/red]")
         raise typer.Exit(code=1)
-    _save_key(api_key)
+    _save_key(api_key, profile=profile)
 
 
 def login(
@@ -166,21 +179,35 @@ def login(
         help="Paste an existing API key instead of browser sign-in.",
     ),
     timeout: int = typer.Option(120, "--timeout", help="Browser auth timeout in seconds"),
+    profile: Optional[str] = typer.Option(
+        None,
+        "--profile",
+        help=(
+            "Save the new key into a named profile slot instead of the active one. "
+            "Useful for keeping admin and dev personas side-by-side."
+        ),
+    ),
 ) -> None:
     """Sign in and store an API key locally. First-time setup — this is all you need."""
+    if profile == ANONYMOUS_PROFILE:
+        console.print(
+            f"[red]Cannot log in to the reserved '{ANONYMOUS_PROFILE}' profile — it always means 'use no key'.[/red]"
+        )
+        raise typer.Exit(code=1)
+
     base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
     if api_key:
         if not _validate_key(api_key, base_url):
             console.print("[red]That key was rejected by the API (HTTP 401). Check it and try again.[/red]")
             raise typer.Exit(code=1)
-        _save_key(api_key)
+        _save_key(api_key, profile=profile)
         return
 
-    full_key = run_browser_login(base_url, timeout=timeout)
+    full_key = run_browser_login(base_url, timeout=timeout, profile=profile)
     if full_key is None:
         # Browser flow failed at some step — fall through to manual paste so
         # the user can still complete login on a headless box.
-        _prompt_manual_key(base_url)
+        _prompt_manual_key(base_url, profile=profile)
         return
 
     success("Ready to use. Try: aethis status")

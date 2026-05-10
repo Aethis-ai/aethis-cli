@@ -37,6 +37,7 @@ class RuntimeOptions:
     no_prompt: bool = False
     api_key_override: Optional[str] = None
     base_url_override: Optional[str] = None
+    profile_override: Optional[str] = None
 
 
 # Module-level singleton; ``main.cli`` populates it before dispatching.
@@ -56,46 +57,77 @@ def _is_interactive() -> bool:
 
 
 def _resolve_cached_key() -> Optional[str]:
-    """Return the cached key without raising. Mirrors ``resolve_api_key``'s
-    fallback chain (env > keychain > credentials file) but never errors out.
+    """Return the cached key for the active profile, or None if none is found.
+
+    Resolution order:
+
+    1. ``AETHIS_API_KEY`` env — always wins (back-compat with single-key
+       scripts; matches the precedent that direct env overrides beat any
+       profile machinery).
+    2. The active profile's ``api_key`` field in ``~/.config/aethis/credentials``.
+    3. For the ``default`` profile only: the OS keychain (legacy single-key
+       storage location).
+    4. Legacy ``.yaml``-suffixed credentials file (older builds).
     """
     key = os.environ.get("AETHIS_API_KEY")
     if key:
         return key
 
-    try:
-        import keyring  # type: ignore[import-not-found]
+    from aethis_cli.config import (
+        ANONYMOUS_PROFILE,
+        DEFAULT_PROFILE,
+        active_profile_name,
+        get_profile,
+    )
 
-        key = keyring.get_password("aethis-cli", "api_key")
-        if key:
-            return key
-    except Exception:
-        pass
+    profile_name = active_profile_name()
+    if profile_name == ANONYMOUS_PROFILE:
+        return None
 
-    from pathlib import Path
+    profile = get_profile(profile_name)
+    if profile.get("api_key"):
+        return profile["api_key"]
 
-    import yaml  # type: ignore[import-untyped]
-
-    from aethis_cli.config import credentials_path
-
-    creds = credentials_path()
-    if creds.exists():
+    # Keychain only stores the default profile's key. Other profiles are
+    # file-only — keep the keychain interface single-tenant to stay
+    # backwards-compatible with pre-profile installs.
+    if profile_name == DEFAULT_PROFILE:
         try:
-            raw = yaml.safe_load(creds.read_text()) or {}
-            cached = raw.get("api_key")
+            import keyring  # type: ignore[import-not-found]
+
+            cached = keyring.get_password("aethis-cli", "api_key")
             if cached:
                 return cached
         except Exception:
             pass
-    # Older builds wrote a `.yaml` extension; honour that too.
-    legacy = Path(str(creds) + ".yaml")
-    if legacy.exists():
-        try:
-            raw = yaml.safe_load(legacy.read_text()) or {}
-            return raw.get("api_key")
-        except Exception:
-            pass
+
+        from pathlib import Path
+
+        import yaml  # type: ignore[import-untyped]
+
+        from aethis_cli.config import credentials_path
+
+        legacy = Path(str(credentials_path()) + ".yaml")
+        if legacy.exists():
+            try:
+                raw = yaml.safe_load(legacy.read_text()) or {}
+                return raw.get("api_key")
+            except Exception:
+                pass
     return None
+
+
+def is_anonymous_active() -> bool:
+    """Return True when the active profile is the reserved ``anonymous`` slot.
+
+    Callers that build an authenticated client should use this to short-circuit
+    to ``make_anonymous_client`` instead, so an admin who runs
+    ``aethis --profile anonymous rulesets list`` doesn't accidentally fall
+    through to the inline browser sign-in flow.
+    """
+    from aethis_cli.config import ANONYMOUS_PROFILE, active_profile_name
+
+    return active_profile_name() == ANONYMOUS_PROFILE
 
 
 def _prompt_yes_no(message: str, default: bool = True) -> bool:
@@ -139,6 +171,18 @@ def require_auth_or_login_inline(
     """
     if RUNTIME.api_key_override:
         return RUNTIME.api_key_override
+
+    if is_anonymous_active():
+        # ``--profile anonymous`` is an explicit "use no key" — surface that
+        # decision instead of silently falling into the browser flow.
+        message = (
+            "Active profile is 'anonymous' — this command requires an API key. "
+            "Switch profiles with `aethis profile use <name>` or pass --profile <name>."
+        )
+        from aethis_cli.output import console
+
+        console.print(f"[red]Auth required:[/red] {message}")
+        raise AuthRequired(message)
 
     if not force_browser:
         cached = _resolve_cached_key()

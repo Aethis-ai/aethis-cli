@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.10.0 (2026-05-10)
+
+- feat(rulesets): `aethis rulesets list --public` lists the cross-tenant
+  public showcase catalogue (no auth required). When run with no
+  `--project-id` and no project context, falls through to the public
+  catalogue automatically with a one-line hint — so a fresh signup
+  sees something the moment they install the CLI instead of an empty
+  list. Combine with `aethis fields -b <slug>` /
+  `aethis explain -b <slug>` / `aethis decide -b <slug>` to fully
+  exercise a ruleset without an API key.
+- feat(profiles): named credential profiles with both per-invocation
+  flag (`aethis --profile new-dev …`) and sticky default
+  (`aethis profile use new-dev`). Manage with `aethis profile
+  list/use/add/remove`. Reserved profile name `anonymous` forces
+  unsigned mode — handy for testing what a fresh signup sees without
+  losing your admin key. `aethis login --profile <name>` writes into
+  the named slot. Credentials file format upgraded to
+  `{active_profile, profiles: {...}}`; legacy single-key files are
+  read transparently and rewritten to the new shape on next save.
+- feat(client): `AethisClient(unsigned=True)` and
+  `make_anonymous_client()` helper for paths that must hit the
+  anonymous surface without accidentally sending a cached key.
+- feat(client): `client.list_public_rulesets(limit, offset)` wrapping
+  `GET /api/v1/public/rulesets`.
+
 ## 0.9.0 (2026-05-08)
 
 - feat(publish): thread `--force` through to the server-side TDD gate
