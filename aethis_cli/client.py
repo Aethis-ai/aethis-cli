@@ -20,12 +20,18 @@ class AethisClient:
 
     def __init__(
         self,
-        api_key: str,
+        api_key: Optional[str] = None,
         base_url: str = "https://api.aethis.ai",
         anthropic_key: Optional[str] = None,
         on_auth_required: Optional[KeyRefreshCallback] = None,
+        *,
+        unsigned: bool = False,
     ) -> None:
-        headers: dict[str, str] = {"X-API-Key": api_key}
+        # ``unsigned=True`` skips the X-API-Key header so anonymous endpoints
+        # (e.g. the public ruleset catalogue) can be hit from the same client.
+        headers: dict[str, str] = {}
+        if api_key and not unsigned:
+            headers["X-API-Key"] = api_key
         if anthropic_key:
             headers["X-Anthropic-Key"] = anthropic_key
         self._client = httpx.Client(
@@ -36,8 +42,9 @@ class AethisClient:
         )
         # Hook called once when the server returns 401. If it returns a new
         # key the request is retried exactly once with the refreshed header;
-        # a second 401 surfaces the original error so we never loop.
-        self._on_auth_required = on_auth_required
+        # a second 401 surfaces the original error so we never loop. Disabled
+        # for unsigned clients — there's no key to refresh.
+        self._on_auth_required = None if unsigned else on_auth_required
 
     def close(self) -> None:
         self._client.close()
@@ -211,6 +218,19 @@ class AethisClient:
             params["status"] = status
         return self._request("GET", f"/api/v1/public/projects/{project_id}/rulesets", params=params)
 
+    def list_public_rulesets(self, limit: int = 20, offset: int = 0) -> list[dict]:
+        """List published rulesets visible to anonymous callers.
+
+        Hits the cross-tenant catalogue (``visibility="public"`` only). Works
+        whether the client was constructed with ``unsigned=True`` or with a
+        valid key — the server filters on visibility either way.
+        """
+        return self._request(
+            "GET",
+            "/api/v1/public/rulesets",
+            params={"limit": str(limit), "offset": str(offset)},
+        )
+
     def archive_project(self, project_id: str) -> dict:
         return self._request("POST", f"/api/v1/public/projects/{project_id}/archive")
 
@@ -233,3 +253,14 @@ class AethisClient:
 
     def list_domain_guidance(self, domain: str) -> list:
         return self._request("GET", f"/api/v1/public/domains/{domain}/guidance")
+
+
+def make_anonymous_client(base_url: str = "https://api.aethis.ai") -> AethisClient:
+    """Construct a key-less client for anonymous endpoints (public catalogue, decide).
+
+    Skips the ``X-API-Key`` header and disables the 401-refresh hook. Use this
+    in command paths that explicitly target the public surface so an admin's
+    cached key doesn't accidentally promote anonymous calls to authenticated
+    ones (which would leak their tenant's rulesets into the response).
+    """
+    return AethisClient(api_key=None, base_url=base_url, unsigned=True)

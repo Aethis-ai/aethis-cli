@@ -7,8 +7,9 @@ from typing import Optional
 import typer
 from rich.table import Table
 
+from aethis_cli.client import make_anonymous_client
 from aethis_cli.commands._id_utils import require_ruleset_id
-from aethis_cli.config import load_client_or_fallback
+from aethis_cli.config import load_client_or_fallback, resolve_base_url_with_source
 from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel, success, warn
 
@@ -20,28 +21,93 @@ rulesets_app = typer.Typer(
 )
 
 
+def _print_public_table(rulesets: list[dict]) -> None:
+    table = Table(title="Public showcase rulesets")
+    table.add_column("Slug", style="cyan")
+    table.add_column("Ruleset ID", style="dim")
+    table.add_column("Description")
+    table.add_column("Fields", justify="right")
+    table.add_column("Rules", justify="right")
+
+    for r in rulesets:
+        table.add_row(
+            r.get("slug") or "[dim]—[/dim]",
+            r.get("ruleset_id", ""),
+            r.get("description", "") or "[dim]—[/dim]",
+            str(r.get("field_count", 0)),
+            str(r.get("rule_count", 0)),
+        )
+
+    console.print(table)
+
+
+def _list_public(limit: int, offset: int) -> None:
+    """Hit the anonymous catalogue endpoint and render the result."""
+    base_url, _ = resolve_base_url_with_source()
+    with make_anonymous_client(base_url) as client:
+        try:
+            rulesets = client.list_public_rulesets(limit=limit, offset=offset)
+        except AethisAPIError as e:
+            error_panel(e)
+            raise typer.Exit(code=1)
+
+    if not rulesets:
+        console.print("[dim]No public rulesets published yet.[/dim]")
+        return
+
+    _print_public_table(rulesets)
+    console.print(
+        "\n[dim]Try: aethis fields -b <slug>  ·  aethis explain -b <slug>  ·  aethis decide -b <slug> -i '{...}'[/dim]"
+    )
+
+
 @rulesets_app.command(name="list")
 def list_rulesets(
     project_id: Optional[str] = typer.Option(None, "--project-id", "-p", help="Project ID"),
     status: Optional[str] = typer.Option(None, "--status", "-s", help="Filter by status (comma-separated)"),
+    public: bool = typer.Option(
+        False,
+        "--public",
+        help="List the cross-tenant public showcase catalogue (no auth required).",
+    ),
+    limit: int = typer.Option(20, "--limit", min=1, max=50, help="Max rulesets to return (public mode)."),
+    offset: int = typer.Option(0, "--offset", min=0, help="Pagination offset (public mode)."),
 ) -> None:
-    """List rulesets for a project.
+    """List rulesets for a project, or the public showcase catalogue.
 
     Examples:
 
-        aethis rulesets list -p proj_i1HyinBtFJniayUC
+        aethis rulesets list                                  # auto: showcase if no project context
+        aethis rulesets list --public                         # explicit: anonymous catalogue
+        aethis rulesets list -p proj_i1HyinBtFJniayUC         # tenant-scoped
         aethis rulesets list -p proj_i1HyinBtFJniayUC -s active,archived
-        aethis rulesets list              # uses project_id from .aethis/state.json
     """
-    cfg, client = load_client_or_fallback()
-    pid = project_id or cfg.project_id
+    if public:
+        _list_public(limit=limit, offset=offset)
+        return
+
+    # Resolve the project id without forcing a login first — if there's no
+    # project context we want to fall through to the public catalogue rather
+    # than ask the user to authenticate just to discover what's available.
+    from aethis_cli.config import load_project_config, read_state
+    from aethis_cli.errors import ConfigError
+
+    pid: Optional[str] = project_id
+    if not pid:
+        try:
+            cfg = load_project_config()
+            pid = read_state(cfg.config_path).get("project_id")
+        except ConfigError:
+            pid = None
 
     if not pid:
         console.print(
-            "[red]No project_id.[/red] Pass --project-id or run from a project "
-            "directory where `aethis generate` has created .aethis/state.json."
+            "[dim]No project context — showing public showcase rulesets. Pass --project-id <id> to list your own.[/dim]"
         )
-        raise typer.Exit(code=1)
+        _list_public(limit=limit, offset=offset)
+        return
+
+    cfg, client = load_client_or_fallback()
 
     try:
         rulesets = client.list_rulesets(pid, status=status)

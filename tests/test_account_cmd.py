@@ -44,30 +44,30 @@ MOCK_KEYS_LIST = [
 
 class TestAccountGenerate:
     @patch("aethis_cli.commands.account_cmd._fetch_permissions", return_value=([], set(VALID_SCOPES)))
-    @patch("aethis_cli.commands.account_cmd._save_to_keyring", return_value=True)
+    @patch("aethis_cli.commands.account_cmd.save_api_key")
     @patch("aethis_cli.commands.account_cmd.httpx.post")
     @patch("aethis_cli.commands.account_cmd._clerk_auth", return_value=MOCK_ACCESS_TOKEN)
-    def test_generate_success(self, mock_auth, mock_post, mock_keyring, mock_permissions):
+    def test_generate_success(self, mock_auth, mock_post, mock_save, mock_permissions):
         mock_post.return_value = MagicMock(status_code=201, json=MagicMock(return_value=MOCK_KEY_RESPONSE))
 
         result = runner.invoke(app, ["account", "generate", "--name", "test-key"])
         assert result.exit_code == 0
         assert "ak_test123" in result.output
         assert "ak_live_abcdef123456" in result.output
-        assert "saved" in result.output.lower()
+        mock_save.assert_called_once_with("ak_live_abcdef123456")
 
     @patch("aethis_cli.commands.account_cmd._fetch_permissions", return_value=([], set(VALID_SCOPES)))
-    @patch("aethis_cli.commands.account_cmd._save_to_keyring", return_value=True)
+    @patch("aethis_cli.commands.account_cmd.save_api_key")
     @patch("aethis_cli.commands.account_cmd.httpx.post")
     @patch("aethis_cli.commands.account_cmd._clerk_auth", return_value=MOCK_ACCESS_TOKEN)
-    def test_generate_no_save(self, mock_auth, mock_post, mock_keyring, mock_permissions):
+    def test_generate_no_save(self, mock_auth, mock_post, mock_save, mock_permissions):
         mock_post.return_value = MagicMock(status_code=201, json=MagicMock(return_value=MOCK_KEY_RESPONSE))
 
         result = runner.invoke(app, ["account", "generate", "--no-save"])
         assert result.exit_code == 0
         assert "ak_live_abcdef123456" in result.output
         assert "--no-save" in result.output
-        mock_keyring.assert_not_called()
+        mock_save.assert_not_called()
 
     @patch("aethis_cli.commands.account_cmd._fetch_permissions", return_value=([], set(VALID_SCOPES)))
     @patch("aethis_cli.commands.account_cmd.httpx.post")
@@ -94,10 +94,10 @@ class TestAccountGenerate:
         assert "Invalid tier" in result.output
 
     @patch("aethis_cli.commands.account_cmd._fetch_permissions", return_value=([], set(VALID_SCOPES)))
-    @patch("aethis_cli.commands.account_cmd._save_to_keyring", return_value=True)
+    @patch("aethis_cli.commands.account_cmd.save_api_key")
     @patch("aethis_cli.commands.account_cmd.httpx.post")
     @patch("aethis_cli.commands.account_cmd._clerk_auth", return_value=MOCK_ACCESS_TOKEN)
-    def test_generate_sends_bearer_token(self, mock_auth, mock_post, mock_keyring, mock_permissions):
+    def test_generate_sends_bearer_token(self, mock_auth, mock_post, mock_save, mock_permissions):
         mock_post.return_value = MagicMock(status_code=201, json=MagicMock(return_value=MOCK_KEY_RESPONSE))
 
         runner.invoke(app, ["account", "generate"])
