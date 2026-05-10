@@ -118,10 +118,7 @@ def _detect_install_method(package: str) -> tuple[str, str]:
 
 def _print_banner(package: str, current: str, latest: str) -> None:
     _, command = _detect_install_method(package)
-    msg = (
-        f"\nA new release of {package} is available: {current} → {latest}\n"
-        f"To upgrade, run: {command}\n"
-    )
+    msg = f"\nA new release of {package} is available: {current} → {latest}\nTo upgrade, run: {command}\n"
     try:
         sys.stderr.write(msg)
         sys.stderr.flush()
