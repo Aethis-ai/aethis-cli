@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.11.0 (2026-05-10)
+
+- feat(updater): gh-style update-check banner. On startup the CLI
+  kicks off a background thread that queries PyPI; if a newer release
+  is available it prints a one-line notice to stderr at exit:
+  "A new release of aethis-cli is available: 0.11.0 → 0.12.0 — to
+  upgrade, run: <method-aware command>". Detects whether the install
+  came via uv tool, pipx, or pip and renders the matching upgrade
+  command. Result is cached for 24 h at
+  `~/.config/aethis/update_check.json`. Suppressed automatically when
+  stderr is not a TTY (CI, piped output). Disable with
+  `AETHIS_DISABLE_UPDATE_CHECK=1`. The check never blocks the
+  command — failures are silent.
+
 ## 0.10.0 (2026-05-10)
 
 - feat(rulesets): `aethis rulesets list --public` lists the cross-tenant
