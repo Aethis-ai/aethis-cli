@@ -53,9 +53,7 @@ def test_detect_install_method_pipx() -> None:
 
 
 def test_detect_install_method_falls_back_to_pip() -> None:
-    with patch.object(uc.sys, "executable", "/usr/local/bin/python3"), patch.object(
-        uc.sys, "prefix", "/usr/local"
-    ):
+    with patch.object(uc.sys, "executable", "/usr/local/bin/python3"), patch.object(uc.sys, "prefix", "/usr/local"):
         method, cmd = uc._detect_install_method("aethis-cli")
     assert method == "pip"
     assert cmd == "pip install --upgrade aethis-cli"
@@ -143,9 +141,7 @@ def test_should_skip_when_stderr_not_tty(monkeypatch: pytest.MonkeyPatch) -> Non
     assert uc._should_skip() is True
 
 
-def test_start_background_check_skips_when_disabled(
-    fake_config_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_start_background_check_skips_when_disabled(fake_config_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Disabled: no thread spawned, no atexit registered."""
     monkeypatch.setenv(uc._DISABLE_ENV, "1")
     with patch.object(uc.threading, "Thread") as mock_thread:
