@@ -127,7 +127,11 @@ def test_publish_force_threads_force_unsafe_to_server(base_patches):
     """
     mock_client = MagicMock()
     mock_client.run_tests.return_value = {
-        "passed": 2, "total": 5, "failed": 3, "errors": 0, "results": [],
+        "passed": 2,
+        "total": 5,
+        "failed": 3,
+        "errors": 0,
+        "results": [],
     }
     mock_client.publish.return_value = {"ruleset_id": "test:abc", "version": "v2"}
 
@@ -142,8 +146,7 @@ def test_publish_force_threads_force_unsafe_to_server(base_patches):
     mock_client.publish.assert_called_once()
     _, call_kwargs = mock_client.publish.call_args
     assert call_kwargs.get("force_unsafe") is True, (
-        "publish --force must pass force_unsafe=True to the client, "
-        f"got call_kwargs={call_kwargs}"
+        f"publish --force must pass force_unsafe=True to the client, got call_kwargs={call_kwargs}"
     )
 
 
