@@ -39,10 +39,9 @@ pytestmark = pytest.mark.manual
 # ---------------------------------------------------------------------------
 
 SPACECRAFT_POLICY_PATH = (
-    Path(__file__).resolve().parents[3]
-    / "tda-server"
-    / "docs"
-    / "test-fixtures"
+    Path(__file__).resolve().parents[2]
+    / "examples"
+    / "spacecraft-crew-rules"
     / "spacecraft-crew-certification-act.md"
 )
 
@@ -50,7 +49,7 @@ GENERATION_TIMEOUT = 300  # 5 minutes
 POLL_INTERVAL = 5
 
 # ---------------------------------------------------------------------------
-# Guidance hints — prescriptive DSL structure (same as tda-server e2e)
+# Guidance hints — prescriptive DSL structure
 # ---------------------------------------------------------------------------
 
 GUIDANCE_HINTS = [
