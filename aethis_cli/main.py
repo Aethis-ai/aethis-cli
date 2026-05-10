@@ -174,6 +174,9 @@ _load_plugins(app)
 
 def cli() -> None:
     """Entry point wrapper that catches config/auth errors cleanly."""
+    from aethis_cli.update_check import start_background_check
+
+    start_background_check("aethis-cli", __version__)
     try:
         app()
     except ConfigError as e:
