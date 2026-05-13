@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.11.1 (2026-05-10)
+- fix: remove `examples/demo_core.sh` (internal dev script referencing `aethis-core` by name and a private API path — not intended for public release)
+- fix: update `tests/e2e/test_spacecraft_e2e.py` to resolve the spacecraft fixture from `examples/spacecraft-crew-rules/` instead of a `tda-server` path; drop internal service name from comment
+- docs: fix "rule bundle" → "ruleset" in `examples/spacecraft-crew-rules/README.md`
+
 ## 0.11.0 (2026-05-10)
 
 - feat(updater): gh-style update-check banner. On startup the CLI

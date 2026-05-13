@@ -14,7 +14,7 @@ cd my-first-rules
 # Authenticate (you need an Aethis API key)
 aethis login
 
-# Generate a rule bundle from the source document + guidance hints
+# Generate a ruleset from the source document + guidance hints
 aethis generate --poll
 
 # Run the 5 golden test cases
