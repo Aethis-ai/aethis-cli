@@ -85,7 +85,7 @@ def run_browser_login(base_url: str, timeout: int = 120, *, profile: Optional[st
     from aethis_cli.auth import authenticate_with_clerk
     from aethis_cli.errors import AuthenticationError
 
-    clerk_domain = os.environ.get("AETHIS_CLERK_DOMAIN", "clerk.aethis.legal")
+    clerk_domain = os.environ.get("AETHIS_CLERK_DOMAIN", "clerk.aethis.ai")
     clerk_client_id = os.environ.get("AETHIS_CLERK_CLIENT_ID", "cwH009p1vPtyy1EG")
 
     info("Opening browser for sign-in...")

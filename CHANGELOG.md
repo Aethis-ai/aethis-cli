@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.12.1 (2026-05-12)
+
+- fix: default Clerk domain changed from `clerk.aethis.legal` to `clerk.aethis.ai` so developer portal users can authenticate via `aethis login` (closes aethis-cli#40)
+
 ## 0.12.0 (2026-05-13)
 
 - feat: `decide`, `explain`, and `fields` no longer prompt for sign-in when no API key is present. Public rulesets are now accessible with zero setup — the CLI silently uses an anonymous client and lets the server return an error only if a private ruleset is requested.
