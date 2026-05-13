@@ -54,22 +54,21 @@ def _version_callback(value: bool) -> None:
 _APP_HELP = """
 Author, test, and publish rulesets via the Aethis developer API.
 
-Common flows:
+No account needed to explore:
 
-    aethis status                       # what server / key / project am I on?
-    aethis projects list                # see all projects + latest rulesets
-    aethis explain -b <ruleset>          # human-readable rules for a ruleset
+    aethis rulesets list                # browse public rulesets (no key needed)
+    aethis fields -b <ruleset>          # show required fields
+    aethis explain -b <ruleset>         # human-readable rules for a ruleset
     aethis decide -b <ruleset> -i '{"age": 21}'   # evaluate eligibility
 
-Authoring (invite-only beta):
+Authoring (API key required):
 
+    aethis login                        # sign in and cache your key
+    aethis status                       # what server / key / project am I on?
+    aethis projects list                # see all projects + latest rulesets
     aethis init                         # scaffold a new project dir
     aethis generate --poll              # generate + poll until done
     aethis test && aethis publish       # gate on tests, then publish
-
-Targeting a different server:
-
-    AETHIS_BASE_URL=http://localhost:8080 aethis projects list
 
 Run `aethis <command> --help` for per-command examples.
 """
@@ -102,6 +101,7 @@ def main(
         None,
         "--base-url",
         help="Override the API base URL (defaults to AETHIS_BASE_URL or https://api.aethis.ai).",
+        hidden=True,
     ),
     profile: Optional[str] = typer.Option(
         None,

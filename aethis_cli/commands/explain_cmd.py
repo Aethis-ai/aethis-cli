@@ -8,7 +8,7 @@ import typer
 from rich.table import Table
 
 from aethis_cli.commands._id_utils import require_ruleset_id
-from aethis_cli.config import load_client_or_fallback, read_state
+from aethis_cli.config import load_client_or_anon, read_state
 from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel
 
@@ -33,7 +33,7 @@ def explain(
         aethis explain                   # uses .aethis/state.json if present
         aethis --base-url http://localhost:8080 explain -b my_ruleset:20260401-a1b2c3d
     """
-    cfg, client = load_client_or_fallback()
+    cfg, client = load_client_or_anon()
 
     if not ruleset_id:
         state = read_state(cfg.config_path)

@@ -7,7 +7,7 @@ from typing import Optional
 import typer
 from rich.table import Table
 
-from aethis_cli.config import load_client_or_fallback, read_state
+from aethis_cli.config import load_client_or_anon, read_state
 from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel
 
@@ -16,7 +16,7 @@ def fields(
     ruleset_id: Optional[str] = typer.Option(None, "--ruleset-id", "-b"),
 ) -> None:
     """Show the input fields expected by a ruleset."""
-    cfg, client = load_client_or_fallback()
+    cfg, client = load_client_or_anon()
 
     if not ruleset_id:
         state = read_state(cfg.config_path)
