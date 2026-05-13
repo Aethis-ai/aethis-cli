@@ -27,7 +27,6 @@ def list_projects(
 
         aethis projects list
         aethis projects list --include-archived
-        aethis --base-url http://localhost:8080 projects list
     """
     _cfg, client = load_client_or_fallback()
 
