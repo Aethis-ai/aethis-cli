@@ -97,12 +97,10 @@ def test_init_prints_next_step_ladder(tmp_path, monkeypatch):
     with _patch_auth_present():
         result = runner.invoke(app, ["init", "ladder-proj"])
     assert result.exit_code == 0, result.output
-    # Order matters: header, then the three commands the docs walk users through.
     assert "Project initialised: ladder-proj" in result.output
     assert "Next:" in result.output
-    assert "aethis sections discover" in result.output
-    assert "aethis fields discover" in result.output
     assert "aethis generate --poll" in result.output
+    assert "aethis test && aethis publish" in result.output
 
 
 # --- prompted (no-arg) form ------------------------------------------------

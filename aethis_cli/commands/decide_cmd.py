@@ -9,7 +9,7 @@ import typer
 from rich.table import Table
 
 from aethis_cli.commands._id_utils import require_ruleset_id
-from aethis_cli.config import load_client_or_fallback, read_state
+from aethis_cli.config import load_client_or_anon, read_state
 from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel
 
@@ -28,18 +28,19 @@ def decide(
     ),
     explain: bool = typer.Option(False, "--explain", "-e", help="Show reasoning for the decision"),
 ) -> None:
-    """Evaluate eligibility against a published ruleset.
+    """Evaluate eligibility against a published ruleset. No API key required for public rulesets.
 
     Examples:
 
+        aethis decide -b aethis/uk-settlement-continuous-residence -i '{"days_outside_uk": 50}'
         aethis decide -b my_ruleset:20260401-a1b2c3d -i '{"age": 21, "country": "UK"}'
-        aethis decide -b my_ruleset:20260401-a1b2c3d -i @inputs.json --explain
+        aethis decide -b my_ruleset:20260401-a1b2c3d --input @inputs.json --explain
         aethis decide -i '{...}'         # uses ruleset from .aethis/state.json
 
-    Input is a JSON object mapping field IDs to values. Use --explain to see the
-    reasoning trace (which rules fired, which group satisfied the decision).
+    Input is a JSON object mapping field IDs to values. Use `aethis fields -b <ruleset>`
+    to see which fields are available. Use --explain to see the reasoning trace.
     """
-    cfg, client = load_client_or_fallback()
+    cfg, client = load_client_or_anon()
 
     if not ruleset_id:
         state = read_state(cfg.config_path)

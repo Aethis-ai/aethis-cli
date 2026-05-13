@@ -118,6 +118,36 @@ def load_client_or_fallback() -> tuple["ProjectConfig", "AethisClient"]:
     return cfg, make_authed_client(api_key, cfg.base_url)
 
 
+def load_client_or_anon() -> tuple["ProjectConfig", "AethisClient"]:
+    """Like load_client_or_fallback but never prompts for sign-in.
+
+    Used by read-only public-endpoint commands (decide, explain, fields).
+    If a key is cached or set via env/flag, use it — authenticated callers
+    get access to their private rulesets. If no key is found, fall back to
+    an unsigned client so public rulesets work with zero setup.
+    """
+    from aethis_cli.auth_helpers import RUNTIME, _resolve_cached_key, is_anonymous_active
+    from aethis_cli.client import make_anonymous_client
+
+    try:
+        cfg = load_project_config()
+    except ConfigError:
+        base_url, _ = resolve_base_url_with_source()
+        if RUNTIME.base_url_override:
+            base_url = RUNTIME.base_url_override
+        _validate_base_url(base_url)
+        cfg = ProjectConfig(project="", base_url=base_url)
+
+    if is_anonymous_active():
+        return cfg, make_anonymous_client(cfg.base_url)
+
+    api_key = _resolve_cached_key()
+    if api_key is None:
+        return cfg, make_anonymous_client(cfg.base_url)
+
+    return cfg, make_authed_client(api_key, cfg.base_url)
+
+
 def load_project_config(path: Optional[Path] = None) -> ProjectConfig:
     """Load aethis.yaml. Walks up the directory tree if no explicit path given."""
     if path and path.is_file():

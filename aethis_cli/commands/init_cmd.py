@@ -71,9 +71,8 @@ def _print_next_steps(name: str) -> None:
     console.print()
     console.print("Next:")
     console.print(f"  cd {name}")
-    console.print("  aethis sections discover --file <legislation.txt>")
-    console.print("  aethis fields discover --section <section_id>")
     console.print("  aethis generate --poll")
+    console.print("  aethis test && aethis publish")
 
 
 def init(

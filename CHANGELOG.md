@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.12.0 (2026-05-13)
+
+- feat: `decide`, `explain`, and `fields` no longer prompt for sign-in when no API key is present. Public rulesets are now accessible with zero setup — the CLI silently uses an anonymous client and lets the server return an error only if a private ruleset is requested.
+- fix: hide `--base-url` global flag from `aethis --help` (internal dev override; `AETHIS_BASE_URL` env var unchanged)
+- docs: reorder `aethis --help` to lead with the no-auth explore flow, then authoring
+
 ## 0.11.1 (2026-05-10)
 - fix: remove `examples/demo_core.sh` (internal dev script referencing `aethis-core` by name and a private API path — not intended for public release)
 - fix: update `tests/e2e/test_spacecraft_e2e.py` to resolve the spacecraft fixture from `examples/spacecraft-crew-rules/` instead of a `tda-server` path; drop internal service name from comment

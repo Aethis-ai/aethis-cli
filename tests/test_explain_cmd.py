@@ -14,7 +14,7 @@ def test_explain_rejects_project_id_without_api_call(tmp_path, monkeypatch):
 
     client = MagicMock()
     with patch(
-        "aethis_cli.commands.explain_cmd.load_client_or_fallback",
+        "aethis_cli.commands.explain_cmd.load_client_or_anon",
         return_value=(MagicMock(config_path=tmp_path), client),
     ):
         from aethis_cli.main import app
@@ -64,7 +64,7 @@ def test_explain_missing_ruleset_id_gives_one_line_error(tmp_path, monkeypatch):
 
     client = MagicMock()
     with patch(
-        "aethis_cli.commands.explain_cmd.load_client_or_fallback",
+        "aethis_cli.commands.explain_cmd.load_client_or_anon",
         return_value=(MagicMock(config_path=tmp_path), client),
     ):
         from aethis_cli.main import app
@@ -87,7 +87,7 @@ def test_explain_config_error_renders_without_rich_traceback(tmp_path, monkeypat
     from aethis_cli.errors import ConfigError
 
     with patch(
-        "aethis_cli.commands.explain_cmd.load_client_or_fallback",
+        "aethis_cli.commands.explain_cmd.load_client_or_anon",
         side_effect=ConfigError("API key not found. Run 'aethis login'."),
     ):
         from aethis_cli.main import app

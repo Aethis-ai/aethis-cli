@@ -26,7 +26,7 @@ def test_fields_works_without_aethis_yaml_using_slug(tmp_path, monkeypatch):
     }
 
     with patch(
-        "aethis_cli.commands.fields_cmd.load_client_or_fallback",
+        "aethis_cli.commands.fields_cmd.load_client_or_anon",
         return_value=(MagicMock(config_path=tmp_path), client),
     ):
         from aethis_cli.main import app
@@ -53,7 +53,7 @@ def test_fields_works_without_aethis_yaml_using_ruleset_id(tmp_path, monkeypatch
     client.get_schema.return_value = {"fields": []}
 
     with patch(
-        "aethis_cli.commands.fields_cmd.load_client_or_fallback",
+        "aethis_cli.commands.fields_cmd.load_client_or_anon",
         return_value=(MagicMock(config_path=tmp_path), client),
     ):
         from aethis_cli.main import app
@@ -76,7 +76,7 @@ def test_fields_missing_ruleset_id_gives_one_line_error(tmp_path, monkeypatch):
 
     client = MagicMock()
     with patch(
-        "aethis_cli.commands.fields_cmd.load_client_or_fallback",
+        "aethis_cli.commands.fields_cmd.load_client_or_anon",
         return_value=(MagicMock(config_path=tmp_path), client),
     ):
         from aethis_cli.main import app
