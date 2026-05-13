@@ -39,10 +39,7 @@ pytestmark = pytest.mark.manual
 # ---------------------------------------------------------------------------
 
 SPACECRAFT_POLICY_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "examples"
-    / "spacecraft-crew-rules"
-    / "spacecraft-crew-certification-act.md"
+    Path(__file__).resolve().parents[2] / "examples" / "spacecraft-crew-rules" / "spacecraft-crew-certification-act.md"
 )
 
 GENERATION_TIMEOUT = 300  # 5 minutes
