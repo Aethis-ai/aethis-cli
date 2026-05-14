@@ -4,6 +4,17 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  # Manual / chained trigger. GitHub deliberately does not fire `push: tags`
+  # workflows for tags pushed by GITHUB_TOKEN (e.g. from auto-tag.yml), so we
+  # expose a workflow_dispatch entry point that auto-tag.yml chains into.
+  # workflow_dispatch + repository_dispatch are the only events GITHUB_TOKEN
+  # is allowed to trigger.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build and publish (e.g. v0.12.1)'
+        required: true
+        type: string
 
 jobs:
   build:
@@ -11,6 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0   # setuptools-scm needs full history for versioning
           fetch-tags: true # …and tags, explicitly (actions/checkout no longer fetches tags by default)
 

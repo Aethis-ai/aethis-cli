@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write   # needed to dispatch publish.yml after pushing the tag
     steps:
       - uses: actions/checkout@v6
         with:
@@ -45,4 +46,16 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "v${{ steps.ver.outputs.version }}" -m "Release ${{ steps.ver.outputs.version }}"
           git push origin "v${{ steps.ver.outputs.version }}"
-          echo "Tagged and pushed v${{ steps.ver.outputs.version }} — publish.yml will fire next."
+
+      # GITHUB_TOKEN-pushed tags do NOT fire `push: tags` workflows, so we
+      # explicitly dispatch publish.yml. workflow_dispatch is one of the two
+      # events GITHUB_TOKEN is allowed to trigger.
+      - name: Dispatch publish workflow
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run publish.yml \
+            --ref main \
+            -f tag="v${{ steps.ver.outputs.version }}"
+          echo "Dispatched publish.yml for v${{ steps.ver.outputs.version }}"
