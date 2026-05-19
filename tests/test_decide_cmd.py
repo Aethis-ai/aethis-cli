@@ -36,9 +36,7 @@ _REAL_EXPLANATION = {
                     "criterion_id": "species_eligible",
                     "title": "Applicant is of an eligible species",
                     "status": "satisfied",
-                    "supporting_facts": [
-                        {"field": "space.crew.species", "value": "human"}
-                    ],
+                    "supporting_facts": [{"field": "space.crew.species", "value": "human"}],
                 }
             ],
         },

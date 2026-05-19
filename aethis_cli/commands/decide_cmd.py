@@ -192,15 +192,10 @@ def _print_explanation(explanation: dict) -> None:
             console.print(f"    {cicon} {title}{suffix}")
             for fact in crit.get("supporting_facts", []) or []:
                 if isinstance(fact, dict):
-                    console.print(
-                        f"        [dim]{fact.get('field', '')} = {fact.get('value', '')}[/dim]"
-                    )
+                    console.print(f"        [dim]{fact.get('field', '')} = {fact.get('value', '')}[/dim]")
 
     unused = explanation.get("unused_facts") or []
     if unused:
-        console.print(
-            "\n  [dim]Unused fields (provided but not referenced by any "
-            "satisfied criterion):[/dim]"
-        )
+        console.print("\n  [dim]Unused fields (provided but not referenced by any satisfied criterion):[/dim]")
         for field in unused:
             console.print(f"    [dim]- {field}[/dim]")
