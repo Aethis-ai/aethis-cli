@@ -6,7 +6,6 @@ import json
 from typing import Optional
 
 import typer
-from rich.table import Table
 
 from aethis_cli.commands._id_utils import require_ruleset_id
 from aethis_cli.config import load_client_or_anon, read_state
@@ -158,19 +157,45 @@ def _print_trace(trace: dict) -> None:
                 console.print(f"    [red]\u2717[/red] {fr}")
 
 
-def _print_explanation(explanation: list) -> None:
-    """Print human-readable rule text in a table."""
+_CRITERION_ICONS = {
+    "satisfied": "[green]✓[/green]",
+    "not_satisfied": "[red]✗[/red]",
+    "pending": "[yellow]?[/yellow]",
+}
+
+
+def _print_explanation(explanation: dict) -> None:
+    """Print the layered decision explanation.
+
+    Shape (see aethis-core public decide route): `{decision, decision_path?,
+    groups: [{group, status, criteria: [{criterion_id, title, status,
+    supporting_facts?, source_refs?}]}], unused_facts}`.
+    """
     console.print("\n[bold]Rules[/bold]")
-    table = Table(show_header=True, header_style="bold")
-    table.add_column("Group")
-    table.add_column("Rule")
-    table.add_column("Requirement")
 
-    for rule in explanation:
-        table.add_row(
-            rule.get("group", ""),
-            rule.get("title", ""),
-            rule.get("rule_text", ""),
-        )
+    path = explanation.get("decision_path")
+    if path:
+        console.print(f"  Satisfied by: [green]{path}[/green]")
 
-    console.print(table)
+    for group in explanation.get("groups", []) or []:
+        name = group.get("group", "")
+        status = group.get("status", "")
+        icon = _STATUS_ICONS.get(status, f"[yellow]{status}[/yellow]")
+        console.print(f"\n  [bold]{name}[/bold] {icon}")
+
+        for crit in group.get("criteria", []) or []:
+            cstatus = crit.get("status", "")
+            cicon = _CRITERION_ICONS.get(cstatus, "[yellow]?[/yellow]")
+            title = crit.get("title") or crit.get("criterion_id", "")
+            cid = crit.get("criterion_id", "")
+            suffix = f" [dim]({cid})[/dim]" if cid and cid != title else ""
+            console.print(f"    {cicon} {title}{suffix}")
+            for fact in crit.get("supporting_facts", []) or []:
+                if isinstance(fact, dict):
+                    console.print(f"        [dim]{fact.get('field', '')} = {fact.get('value', '')}[/dim]")
+
+    unused = explanation.get("unused_facts") or []
+    if unused:
+        console.print("\n  [dim]Unused fields (provided but not referenced by any satisfied criterion):[/dim]")
+        for field in unused:
+            console.print(f"    [dim]- {field}[/dim]")

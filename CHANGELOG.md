@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.12.3 (2026-05-19)
+
+- fix(decide): `aethis decide --explain` no longer crashes with `AttributeError: 'str' object has no attribute 'get'`. The CLI previously treated the engine's `explanation` field as a flat `list[dict]`, but the public decide route returns a layered `{decision, decision_path?, groups: [{group, status, criteria: [{title, status, supporting_facts?, ...}]}], unused_facts}` shape. The "Rules" block now walks the actual structure and renders each group + criterion with PASS/FAIL marks, supporting fact field/value pairs underneath satisfied criteria, and a final list of unused fields (provided answers that no satisfied criterion referenced — useful for catching field-name typos).
+
 ## 0.12.2 (2026-05-19)
 
 - fix(login): default `AETHIS_CLERK_CLIENT_ID` to the OAuth Application registered on the `clerk.aethis.ai` Clerk instance. The previous default belonged to a different Clerk app, so `aethis login` returned `invalid_client` against the dev-tools domain set in 0.12.1.
