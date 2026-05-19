@@ -14,8 +14,8 @@ from aethis_cli.config import DEFAULT_BASE_URL
 from aethis_cli.errors import AuthenticationError
 from aethis_cli.output import console, info, success
 
-CLERK_DOMAIN = os.environ.get("AETHIS_CLERK_DOMAIN", "clerk.aethis.legal")
-CLERK_CLIENT_ID = os.environ.get("AETHIS_CLERK_CLIENT_ID", "cwH009p1vPtyy1EG")
+CLERK_DOMAIN = os.environ.get("AETHIS_CLERK_DOMAIN", "clerk.aethis.ai")
+CLERK_CLIENT_ID = os.environ.get("AETHIS_CLERK_CLIENT_ID", "gEiHOxoeLgZJifjf")
 
 VALID_SCOPES = {
     "decide",

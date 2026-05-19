@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.2 (2026-05-19)
+
+- fix(login): default `AETHIS_CLERK_CLIENT_ID` to the OAuth Application registered on the `clerk.aethis.ai` Clerk instance. The previous default belonged to a different Clerk app, so `aethis login` returned `invalid_client` against the dev-tools domain set in 0.12.1.
+- fix(account): default `AETHIS_CLERK_DOMAIN` to `clerk.aethis.ai` for `aethis account generate` (matching the 0.12.1 change to `aethis login`); previously still pointed at the immigration domain.
+
 ## 0.12.1 (2026-05-12)
 
 - fix: default Clerk domain changed from `clerk.aethis.legal` to `clerk.aethis.ai` so developer portal users can authenticate via `aethis login` (closes aethis-cli#40)
