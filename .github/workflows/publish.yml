@@ -32,6 +32,18 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
+      - name: Verify tag matches pyproject version
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          PYPROJECT_VERSION="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          if [[ "$PYPROJECT_VERSION" != "$VERSION" ]]; then
+            echo "Tag $RELEASE_TAG does not match pyproject.toml version $PYPROJECT_VERSION"
+            exit 1
+          fi
+
       - name: Build sdist and wheel
         run: uv build
 
@@ -62,3 +74,36 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Verify PyPI received release
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          for attempt in {1..12}; do
+            PUBLISHED="$(python -c 'import json, urllib.request; print(json.load(urllib.request.urlopen("https://pypi.org/pypi/aethis-cli/json", timeout=30))["info"]["version"])')"
+            if [[ "$PUBLISHED" == "$VERSION" ]]; then
+              echo "PyPI has aethis-cli $VERSION"
+              exit 0
+            fi
+            echo "PyPI reports $PUBLISHED, waiting for $VERSION (attempt $attempt/12)"
+            sleep 10
+          done
+          exit 1
+
+      - name: Trigger workspace release sync
+        env:
+          WORKSPACE_SYNC_TOKEN: ${{ secrets.WORKSPACE_SYNC_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${WORKSPACE_SYNC_TOKEN:-}" ]]; then
+            echo "WORKSPACE_SYNC_TOKEN not configured; skipping workspace dispatch."
+            exit 0
+          fi
+          curl -fsS -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $WORKSPACE_SYNC_TOKEN" \
+            https://api.github.com/repos/Aethis-ai/aethis-workspace/dispatches \
+            -d "{\"event_type\":\"release-package-published\",\"client_payload\":{\"package\":\"aethis-cli\",\"version\":\"${RELEASE_TAG#v}\",\"tag\":\"$RELEASE_TAG\"}}"
