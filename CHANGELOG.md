@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.13.0 (2026-05-20)
+
+- feat: pluggable auth providers. Profiles now carry an optional `auth_mode` (default `"api_key"`) and `audience` field. The new `aethis_cli.auth_providers` module exposes a process-local registry; plugins (e.g. `aethis-cli-internal`) can `register_provider("gcloud_id_token", ...)` to add staff/internal auth schemes without touching the published package. `AethisClient` accepts an optional `auth_provider` callable, and `make_authed_client(...)` picks the right provider based on the active profile's mode.
+- feat: `aethis status` now prints the active profile name + auth mode (plus audience when set). For non-`api_key` modes it shows "provider-minted at request time" instead of calling `/me`, which is X-API-Key-only.
+- chore: un-hide the `--base-url` global flag in `aethis --help` (it was already implemented, just `hidden=True`).
+
 ## 0.12.3 (2026-05-19)
 
 - fix(decide): `aethis decide --explain` no longer crashes with `AttributeError: 'str' object has no attribute 'get'`. The CLI previously treated the engine's `explanation` field as a flat `list[dict]`, but the public decide route returns a layered `{decision, decision_path?, groups: [{group, status, criteria: [{title, status, supporting_facts?, ...}]}], unused_facts}` shape. The "Rules" block now walks the actual structure and renders each group + criterion with PASS/FAIL marks, supporting fact field/value pairs underneath satisfied criteria, and a final list of unused fields (provided answers that no satisfied criterion referenced — useful for catching field-name typos).

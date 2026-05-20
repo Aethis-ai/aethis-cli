@@ -100,8 +100,11 @@ def main(
     base_url: Optional[str] = typer.Option(
         None,
         "--base-url",
-        help="Override the API base URL (defaults to AETHIS_BASE_URL or https://api.aethis.ai).",
-        hidden=True,
+        help=(
+            "Override the API base URL for this command (e.g. local dev, "
+            "staging). Equivalent to setting AETHIS_BASE_URL. Defaults to the "
+            "active profile's base_url, or https://api.aethis.ai."
+        ),
     ),
     profile: Optional[str] = typer.Option(
         None,
