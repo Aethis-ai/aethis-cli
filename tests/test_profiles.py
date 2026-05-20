@@ -110,6 +110,38 @@ def test_remove_profile_resets_active_when_active(tmp_path: Path) -> None:
     assert config.active_profile_name() == "default"
 
 
+def test_set_profile_writes_auth_mode_and_audience(tmp_path: Path) -> None:
+    config.set_profile(
+        "internal-staging",
+        base_url="https://aethis-core-internal-staging.run.app",
+        auth_mode="gcloud_id_token",
+        audience="https://aethis-core-internal-staging.run.app",
+    )
+    creds = config.load_credentials()
+    profile = creds["profiles"]["internal-staging"]
+    assert profile["base_url"] == "https://aethis-core-internal-staging.run.app"
+    assert profile["auth_mode"] == "gcloud_id_token"
+    assert profile["audience"] == "https://aethis-core-internal-staging.run.app"
+    # Crucially, no api_key was written — that's the whole point.
+    assert "api_key" not in profile
+
+
+def test_set_profile_preserves_existing_auth_mode_when_unspecified(tmp_path: Path) -> None:
+    config.set_profile("staff", base_url="https://foo", auth_mode="gcloud_id_token")
+    # Now update only the base_url; auth_mode should stick.
+    config.set_profile("staff", base_url="https://bar")
+    profile = config.get_profile("staff")
+    assert profile["auth_mode"] == "gcloud_id_token"
+    assert profile["base_url"] == "https://bar"
+
+
+def test_legacy_profile_without_auth_mode_defaults_to_api_key(tmp_path: Path) -> None:
+    _write_legacy_single_key(tmp_path, "ak_legacy")
+    profile = config.get_profile("default")
+    # ``auth_mode`` is implicit — readers default to ``"api_key"`` when absent.
+    assert profile.get("auth_mode") in (None, "api_key")
+
+
 def test_profile_list_command_marks_active(tmp_path: Path) -> None:
     config.set_profile("admin", api_key="ak_admin_with_long_suffix_xyz")
     config.set_active_profile("admin")

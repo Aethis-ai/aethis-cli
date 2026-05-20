@@ -55,6 +55,28 @@ def test_decide_401_raises_api_error(respx_mock):
 
 
 @respx.mock(base_url=BASE)
+def test_custom_auth_provider_overrides_x_api_key(respx_mock):
+    route = respx_mock.post("/api/v1/public/decide").mock(
+        return_value=httpx.Response(200, json={"decision": "eligible"})
+    )
+
+    def gcloud_provider(ctx):
+        return {"Authorization": f"Bearer fake-id-token-for-{ctx.profile.get('audience')}"}
+
+    client = AethisClient(
+        api_key=None,
+        base_url=BASE,
+        auth_provider=gcloud_provider,
+        profile={"audience": "https://internal.example/aud"},
+    )
+    client.decide("b:1", {})
+    sent = route.calls[0].request.headers
+    assert sent["authorization"] == "Bearer fake-id-token-for-https://internal.example/aud"
+    # The custom provider replaces the default — no X-API-Key leaks out.
+    assert "x-api-key" not in sent
+
+
+@respx.mock(base_url=BASE)
 def test_get_schema(respx_mock):
     respx_mock.get("/api/v1/public/rulesets/b:1/schema").mock(
         return_value=httpx.Response(

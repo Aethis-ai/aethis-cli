@@ -11,6 +11,8 @@ from aethis_cli._version import __version__
 from aethis_cli.client import AethisClient
 from aethis_cli.config import (
     DEFAULT_BASE_URL,
+    active_profile_name,
+    get_profile,
     load_project_config,
     read_state,
     resolve_base_url_with_source,
@@ -69,12 +71,21 @@ def _print_server_section() -> None:
     base_url, source = resolve_base_url_with_source()
     if source == "default":
         console.print(f"[bold]Server:[/bold]      {base_url}")
-        return
-    source_label = {
-        "env": "from AETHIS_BASE_URL env var",
-        "yaml": "from aethis.yaml",
-    }[source]
-    console.print(f"[bold]Server:[/bold]      [green]●[/green] {base_url}  [dim]({source_label})[/dim]")
+    else:
+        source_label = {
+            "env": "from AETHIS_BASE_URL env var",
+            "yaml": "from aethis.yaml",
+            "profile": "from active profile",
+        }.get(source, source)
+        console.print(f"[bold]Server:[/bold]      [green]●[/green] {base_url}  [dim]({source_label})[/dim]")
+
+    profile_name = active_profile_name()
+    profile = get_profile(profile_name)
+    auth_mode = profile.get("auth_mode") or "api_key"
+    audience = profile.get("audience")
+    aud_suffix = f"  [dim](audience: {audience})[/dim]" if audience else ""
+    console.print(f"[bold]Profile:[/bold]     {profile_name}")
+    console.print(f"[bold]Auth mode:[/bold]   {auth_mode}{aud_suffix}")
 
 
 def _print_project_section() -> tuple[Optional[object], Optional[str]]:
@@ -105,6 +116,15 @@ def _print_identity_section() -> None:
         base_url = cfg.base_url
     except ConfigError:
         pass
+
+    profile = get_profile(active_profile_name())
+    auth_mode = profile.get("auth_mode") or "api_key"
+    if auth_mode != "api_key":
+        # ``/me`` is an X-API-Key endpoint; non-api_key modes don't have a
+        # tenant identity to show. The provider mints its credential at
+        # request time, so "Identity" here just confirms the scheme.
+        console.print(f"[bold]Identity:[/bold]    [dim]{auth_mode} (provider-minted at request time)[/dim]")
+        return
 
     api_key = _resolve_key_silent()
     if api_key is None:

@@ -7,6 +7,7 @@ from typing import Any, Callable, Optional
 
 import httpx
 
+from aethis_cli.auth_providers import AuthProvider, ProviderContext, get_provider
 from aethis_cli.errors import AethisAPIError
 
 # Callback signature for the lazy-auth refresh hook. Receives ``force_browser``
@@ -26,14 +27,26 @@ class AethisClient:
         on_auth_required: Optional[KeyRefreshCallback] = None,
         *,
         unsigned: bool = False,
+        auth_provider: Optional[AuthProvider] = None,
+        profile: Optional[dict] = None,
     ) -> None:
-        # ``unsigned=True`` skips the X-API-Key header so anonymous endpoints
-        # (e.g. the public ruleset catalogue) can be hit from the same client.
-        headers: dict[str, str] = {}
-        if api_key and not unsigned:
-            headers["X-API-Key"] = api_key
+        # Auth resolution: an explicit ``auth_provider`` wins (the staff plugin
+        # passes its gcloud-ID-token provider this way). Otherwise we keep
+        # legacy behaviour: ``unsigned=True`` => no auth header; api_key
+        # present => ``X-API-Key`` header. Every existing call site that just
+        # passes ``(api_key, base_url)`` keeps working unchanged.
+        if auth_provider is None:
+            auth_provider = get_provider("none" if unsigned else "api_key")
+        ctx = ProviderContext(
+            api_key=None if unsigned else api_key,
+            base_url=base_url,
+            profile=profile or {},
+        )
+        headers: dict[str, str] = dict(auth_provider(ctx))
         if anthropic_key:
             headers["X-Anthropic-Key"] = anthropic_key
+        self._auth_provider = auth_provider
+        self._auth_ctx = ctx
         self._client = httpx.Client(
             base_url=base_url,
             headers=headers,

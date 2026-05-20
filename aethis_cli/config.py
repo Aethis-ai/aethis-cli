@@ -70,20 +70,40 @@ def make_authed_client(
     base_url: str,
     *,
     anthropic_key: Optional[str] = None,
+    profile: Optional[dict] = None,
 ) -> "AethisClient":
-    """Build an :class:`AethisClient` wired with the lazy-auth refresh hook.
+    """Build an :class:`AethisClient` for the active profile's auth mode.
 
-    Use this in place of constructing ``AethisClient`` directly so a 401 from
-    the server transparently triggers the inline browser sign-in flow once
-    before failing.
+    For the default ``api_key`` mode this wires the lazy-auth refresh hook so
+    a 401 from the server transparently triggers the inline browser sign-in
+    flow once before failing. For any other mode (e.g. ``gcloud_id_token``
+    contributed by ``aethis-cli-internal``) the corresponding provider is
+    selected from the registry and the refresh hook is left unset — those
+    providers handle their own token lifetime.
     """
     from aethis_cli.auth_helpers import require_auth_or_login_inline
+    from aethis_cli.auth_providers import get_provider
     from aethis_cli.client import AethisClient
 
-    def _refresh(force_browser: bool = True) -> str:
-        return require_auth_or_login_inline(base_url, force_browser=force_browser)
+    auth_mode = (profile or {}).get("auth_mode", "api_key")
+    auth_provider = get_provider(auth_mode)
 
-    return AethisClient(api_key, base_url, anthropic_key=anthropic_key, on_auth_required=_refresh)
+    on_auth_required = None
+    if auth_mode == "api_key":
+
+        def _refresh(force_browser: bool = True) -> str:
+            return require_auth_or_login_inline(base_url, force_browser=force_browser)
+
+        on_auth_required = _refresh
+
+    return AethisClient(
+        api_key,
+        base_url,
+        anthropic_key=anthropic_key,
+        on_auth_required=on_auth_required,
+        auth_provider=auth_provider,
+        profile=profile,
+    )
 
 
 def load_client_or_fallback() -> tuple["ProjectConfig", "AethisClient"]:
@@ -114,8 +134,14 @@ def load_client_or_fallback() -> tuple["ProjectConfig", "AethisClient"]:
     if is_anonymous_active():
         return cfg, make_anonymous_client(cfg.base_url)
 
-    api_key = require_auth_or_login_inline(cfg.base_url)
-    return cfg, make_authed_client(api_key, cfg.base_url)
+    profile = get_profile(active_profile_name())
+    if (profile.get("auth_mode") or "api_key") == "api_key":
+        api_key = require_auth_or_login_inline(cfg.base_url)
+    else:
+        # Non-api_key modes (e.g. gcloud_id_token) don't need a cached key —
+        # the provider mints its own credential at request time.
+        api_key = ""
+    return cfg, make_authed_client(api_key, cfg.base_url, profile=profile)
 
 
 def load_client_or_anon() -> tuple["ProjectConfig", "AethisClient"]:
@@ -141,11 +167,20 @@ def load_client_or_anon() -> tuple["ProjectConfig", "AethisClient"]:
     if is_anonymous_active():
         return cfg, make_anonymous_client(cfg.base_url)
 
+    profile = get_profile(active_profile_name())
+    auth_mode = profile.get("auth_mode") or "api_key"
+    if auth_mode != "api_key":
+        # Profile selects a non-api_key auth scheme (e.g. gcloud_id_token).
+        # The provider is responsible for minting its own credential; we
+        # don't need a cached API key, and we shouldn't fall back to
+        # anonymous just because one isn't present.
+        return cfg, make_authed_client("", cfg.base_url, profile=profile)
+
     api_key = _resolve_cached_key()
     if api_key is None:
         return cfg, make_anonymous_client(cfg.base_url)
 
-    return cfg, make_authed_client(api_key, cfg.base_url)
+    return cfg, make_authed_client(api_key, cfg.base_url, profile=profile)
 
 
 def load_project_config(path: Optional[Path] = None) -> ProjectConfig:
@@ -272,7 +307,18 @@ def credentials_path() -> Path:
 #         base_url: https://api.aethis.ai
 #       new-dev:
 #         api_key: ak_test_...
+#       internal-staging:                     # staff-only (aethis-cli-internal)
+#         base_url: https://aethis-core-internal-staging-...run.app
+#         auth_mode: gcloud_id_token
+#         audience: https://aethis-core-internal-staging-...run.app
 #       anonymous: {}
+#
+# Optional per-profile fields:
+#   * ``api_key`` — the ``X-API-Key`` header value (default ``auth_mode``).
+#   * ``base_url`` — overrides the global default for this profile.
+#   * ``auth_mode`` — name of an auth provider registered via
+#     :mod:`aethis_cli.auth_providers`. Defaults to ``"api_key"``.
+#   * ``audience`` — used by audience-scoped providers (e.g. GCP ID tokens).
 #
 # The reserved name ``anonymous`` is recognised even when not present in the
 # file: selecting it yields no API key (and the client runs in unsigned mode).
@@ -354,10 +400,20 @@ def get_profile(name: str) -> dict:
     return dict(creds["profiles"].get(name, {}))
 
 
-def set_profile(name: str, *, api_key: Optional[str] = None, base_url: Optional[str] = None) -> None:
+def set_profile(
+    name: str,
+    *,
+    api_key: Optional[str] = None,
+    base_url: Optional[str] = None,
+    auth_mode: Optional[str] = None,
+    audience: Optional[str] = None,
+) -> None:
     """Create or update a named profile in the credentials file.
 
     Only fields passed as non-None are written; existing fields are preserved.
+    ``auth_mode`` selects an auth provider registered via
+    :mod:`aethis_cli.auth_providers` (default ``"api_key"``); ``audience`` is
+    consumed by audience-scoped providers like ``gcloud_id_token``.
     """
     if name == ANONYMOUS_PROFILE:
         raise ConfigError(
@@ -370,6 +426,10 @@ def set_profile(name: str, *, api_key: Optional[str] = None, base_url: Optional[
         profile["api_key"] = api_key
     if base_url is not None:
         profile["base_url"] = base_url
+    if auth_mode is not None:
+        profile["auth_mode"] = auth_mode
+    if audience is not None:
+        profile["audience"] = audience
     creds["profiles"][name] = profile
     save_credentials(creds)
 
