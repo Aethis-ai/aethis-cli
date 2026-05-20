@@ -90,8 +90,10 @@ def make_authed_client(
 
     on_auth_required = None
     if auth_mode == "api_key":
+
         def _refresh(force_browser: bool = True) -> str:
             return require_auth_or_login_inline(base_url, force_browser=force_browser)
+
         on_auth_required = _refresh
 
     return AethisClient(

@@ -123,9 +123,7 @@ def _print_identity_section() -> None:
         # ``/me`` is an X-API-Key endpoint; non-api_key modes don't have a
         # tenant identity to show. The provider mints its credential at
         # request time, so "Identity" here just confirms the scheme.
-        console.print(
-            f"[bold]Identity:[/bold]    [dim]{auth_mode} (provider-minted at request time)[/dim]"
-        )
+        console.print(f"[bold]Identity:[/bold]    [dim]{auth_mode} (provider-minted at request time)[/dim]")
         return
 
     api_key = _resolve_key_silent()
