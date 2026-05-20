@@ -25,6 +25,7 @@ def _print_public_table(rulesets: list[dict]) -> None:
     table = Table(title="Public showcase rulesets")
     table.add_column("Slug", style="cyan")
     table.add_column("Ruleset ID", style="dim")
+    table.add_column("Name")
     table.add_column("Description")
     table.add_column("Fields", justify="right")
     table.add_column("Rules", justify="right")
@@ -33,6 +34,7 @@ def _print_public_table(rulesets: list[dict]) -> None:
         table.add_row(
             r.get("slug") or "[dim]—[/dim]",
             r.get("ruleset_id", ""),
+            r.get("name") or "[dim]—[/dim]",
             r.get("description", "") or "[dim]—[/dim]",
             str(r.get("field_count", 0)),
             str(r.get("rule_count", 0)),
@@ -121,6 +123,7 @@ def list_rulesets(
 
     table = Table(title=f"Rulesets — {pid}")
     table.add_column("Ruleset ID", style="cyan")
+    table.add_column("Name")
     table.add_column("Status")
     table.add_column("Fields", justify="right")
     table.add_column("Rules", justify="right")
@@ -132,6 +135,7 @@ def list_rulesets(
         style = "dim" if s == "archived" else None
         table.add_row(
             b["ruleset_id"],
+            b.get("name") or "[dim]—[/dim]",
             s,
             str(b.get("total_fields", 0)),
             str(b.get("total_rules", 0)),

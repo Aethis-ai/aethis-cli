@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.1 (2026-05-20)
+
+- feat(rulesets): show the human-readable section `name` column in `aethis rulesets list` output (both the public showcase and project-scoped tables). Surfaces the new field from aethis-core v0.18.0.
+
 ## 0.13.0 (2026-05-20)
 
 - feat: pluggable auth providers. Profiles now carry an optional `auth_mode` (default `"api_key"`) and `audience` field. The new `aethis_cli.auth_providers` module exposes a process-local registry; plugins (e.g. `aethis-cli-internal`) can `register_provider("gcloud_id_token", ...)` to add staff/internal auth schemes without touching the published package. `AethisClient` accepts an optional `auth_provider` callable, and `make_authed_client(...)` picks the right provider based on the active profile's mode.
