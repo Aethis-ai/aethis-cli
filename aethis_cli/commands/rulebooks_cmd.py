@@ -14,6 +14,7 @@ This command group covers the rulebook lifecycle and configuration:
     aethis rulebooks set-fields <id> -f fields.yaml
     aethis rulebooks lock-fields <id>
     aethis rulebooks unlock-fields <id>
+    aethis rulebooks set-logic <id> -f logic.yaml
     aethis rulebooks tests add <id> -f scenario.yaml
     aethis rulebooks tests list <id>
     aethis rulebooks tests delete <id> <tc_id>
@@ -298,6 +299,83 @@ def get_fields(
             f.get("description") or "[dim]—[/dim]",
         )
     console.print(table)
+
+
+# ============================================================================
+# rulebooks set-logic
+# ============================================================================
+
+
+@rulebooks_app.command(name="set-logic")
+def set_logic(
+    rulebook: str = typer.Argument(..., help="Rulebook ID or slug."),
+    file: Optional[Path] = typer.Option(
+        None,
+        "--file",
+        "-f",
+        exists=True,
+        readable=True,
+        help="Path to a YAML or JSON file containing the outcome_logic Expr AST.",
+    ),
+    logic: Optional[str] = typer.Option(
+        None,
+        "--logic",
+        "-l",
+        help="Inline JSON Expr AST. Mutually exclusive with --file.",
+    ),
+) -> None:
+    """Set the rulebook's composition expression (``outcome_logic``).
+
+    The composition expression is an Expr AST that combines per-ruleset
+    outcomes into the rulebook's final decision. The smallest example::
+
+        {"type": "field_ref", "key": "single_ruleset_name"}
+
+    A typical multi-ruleset composition, e.g. ``A AND (B OR C)``::
+
+        {
+          "type": "op", "operator": "and",
+          "args": [
+            {"type": "field_ref", "key": "A"},
+            {"type": "op", "operator": "or", "args": [
+              {"type": "field_ref", "key": "B"},
+              {"type": "field_ref", "key": "C"}
+            ]}
+          ]
+        }
+
+    ``field_ref.key`` values are ruleset names within the rulebook. Pass
+    the expression as either a file (``--file logic.yaml``) or inline
+    JSON (``--logic '{...}'``). Exactly one of the two is required.
+    """
+    if (file is None) == (logic is None):
+        # Either both supplied or both missing — neither is valid.
+        raise typer.BadParameter(
+            "Provide exactly one of --file/-f or --logic/-l."
+        )
+
+    if file is not None:
+        payload = _load_yaml_or_json(file)
+    else:
+        try:
+            payload = json.loads(logic or "")
+        except json.JSONDecodeError as exc:
+            raise typer.BadParameter(f"--logic is not valid JSON: {exc}") from exc
+
+    if not isinstance(payload, dict):
+        raise typer.BadParameter(
+            "outcome_logic must be a JSON object (Expr AST), not a list or scalar."
+        )
+
+    _cfg, client = load_client_or_fallback()
+    try:
+        client.update_rulebook(rulebook, outcome_logic=payload)
+    except AethisAPIError as e:
+        error_panel(e)
+        raise typer.Exit(code=1)
+
+    op = payload.get("operator") or payload.get("type")
+    success(f"Set outcome_logic on rulebook {rulebook} (top-level: {op})")
 
 
 # ============================================================================
