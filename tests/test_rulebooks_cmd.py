@@ -308,6 +308,170 @@ def test_get_fields_empty_state(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# rulebooks set-logic
+# ---------------------------------------------------------------------------
+
+
+def _logic_expr() -> dict:
+    """The composition expression that the UK FSM example uses.
+
+    Plain English: ``child_eligibility AND (household_criteria OR universal_infant)``.
+    The shape is the Expr AST the server validates against.
+    """
+    return {
+        "type": "op",
+        "operator": "and",
+        "args": [
+            {"type": "field_ref", "key": "child_eligibility"},
+            {
+                "type": "op",
+                "operator": "or",
+                "args": [
+                    {"type": "field_ref", "key": "household_criteria"},
+                    {"type": "field_ref", "key": "universal_infant"},
+                ],
+            },
+        ],
+    }
+
+
+def test_set_logic_from_json_file(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
+
+    logic_path = tmp_path / "logic.json"
+    logic_path.write_text(json.dumps(_logic_expr()))
+
+    client = MagicMock()
+    client.update_rulebook.return_value = {
+        "rulebook_id": "rb_x",
+        "outcome_logic": _logic_expr(),
+    }
+
+    with patch("aethis_cli.client.AethisClient", return_value=client):
+        result = _runner_invoke(["rulebooks", "set-logic", "rb_x", "--file", str(logic_path)])
+
+    assert result.exit_code == 0, result.output
+    client.update_rulebook.assert_called_once()
+    _args, kwargs = client.update_rulebook.call_args
+    assert kwargs["outcome_logic"] == _logic_expr()
+    # Only outcome_logic should have been sent — no accidental name/slug edits.
+    for k in ("name", "description", "ruleset_refs", "slug"):
+        assert kwargs.get(k) is None, f"unexpected {k} sent on set-logic"
+    out = _strip(result.output)
+    assert "rb_x" in out
+
+
+def test_set_logic_from_yaml_file(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
+    import importlib.util
+
+    if importlib.util.find_spec("yaml") is None:
+        import pytest
+
+        pytest.skip("PyYAML not installed")
+
+    logic_path = tmp_path / "logic.yaml"
+    logic_path.write_text(
+        "type: op\n"
+        "operator: and\n"
+        "args:\n"
+        "  - type: field_ref\n"
+        "    key: child_eligibility\n"
+        "  - type: op\n"
+        "    operator: or\n"
+        "    args:\n"
+        "      - type: field_ref\n"
+        "        key: household_criteria\n"
+        "      - type: field_ref\n"
+        "        key: universal_infant\n"
+    )
+
+    client = MagicMock()
+    client.update_rulebook.return_value = {"rulebook_id": "rb_x"}
+    with patch("aethis_cli.client.AethisClient", return_value=client):
+        result = _runner_invoke(["rulebooks", "set-logic", "rb_x", "-f", str(logic_path)])
+
+    assert result.exit_code == 0, result.output
+    sent = client.update_rulebook.call_args.kwargs["outcome_logic"]
+    assert sent == _logic_expr()
+
+
+def test_set_logic_inline_json(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
+
+    client = MagicMock()
+    client.update_rulebook.return_value = {"rulebook_id": "rb_x"}
+    inline = json.dumps(_logic_expr())
+    with patch("aethis_cli.client.AethisClient", return_value=client):
+        result = _runner_invoke(["rulebooks", "set-logic", "rb_x", "--logic", inline])
+
+    assert result.exit_code == 0, result.output
+    sent = client.update_rulebook.call_args.kwargs["outcome_logic"]
+    assert sent == _logic_expr()
+
+
+def test_set_logic_requires_one_of_file_or_logic(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
+    client = MagicMock()
+    with patch("aethis_cli.client.AethisClient", return_value=client):
+        result = _runner_invoke(["rulebooks", "set-logic", "rb_x"])
+    assert result.exit_code != 0
+    out = _strip(result.output).lower()
+    assert "--file" in out or "--logic" in out
+    client.update_rulebook.assert_not_called()
+
+
+def test_set_logic_rejects_both_file_and_inline(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
+    logic_path = tmp_path / "logic.json"
+    logic_path.write_text(json.dumps(_logic_expr()))
+    client = MagicMock()
+    with patch("aethis_cli.client.AethisClient", return_value=client):
+        result = _runner_invoke(
+            [
+                "rulebooks",
+                "set-logic",
+                "rb_x",
+                "--file",
+                str(logic_path),
+                "--logic",
+                json.dumps(_logic_expr()),
+            ]
+        )
+    assert result.exit_code != 0
+    client.update_rulebook.assert_not_called()
+
+
+def test_set_logic_rejects_non_object_payload(tmp_path, monkeypatch):
+    """The Expr AST must be a JSON object (dict). Lists, scalars, etc. are
+    rejected at the client side so the server doesn't have to."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
+    bad_path = tmp_path / "logic.json"
+    bad_path.write_text(json.dumps(["not", "an", "expr"]))
+    client = MagicMock()
+    with patch("aethis_cli.client.AethisClient", return_value=client):
+        result = _runner_invoke(["rulebooks", "set-logic", "rb_x", "-f", str(bad_path)])
+    assert result.exit_code != 0
+    client.update_rulebook.assert_not_called()
+
+
+def test_set_logic_inline_json_invalid(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
+    client = MagicMock()
+    with patch("aethis_cli.client.AethisClient", return_value=client):
+        result = _runner_invoke(["rulebooks", "set-logic", "rb_x", "--logic", "{not-json}"])
+    assert result.exit_code != 0
+    client.update_rulebook.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # rulebooks archive
 # ---------------------------------------------------------------------------
 

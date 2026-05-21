@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.16.0 (2026-05-21)
+
+- **feat(rulebooks): `aethis rulebooks set-logic` — set the composition expression on a rulebook.** The composition expression (server field `outcome_logic`) is an Expr AST that combines per-ruleset outcomes into the rulebook's final decision. Previously settable only via raw PATCH; now exposed via the CLI for multi-ruleset rulebooks (e.g. UK FSM's `child_eligibility AND (household_criteria OR universal_infant)`).
+  - `aethis rulebooks set-logic <id> -f logic.yaml` — load from YAML/JSON file
+  - `aethis rulebooks set-logic <id> --logic '<json>'` — inline JSON
+  - Exactly one of `--file` / `--logic` is required; both forms reject non-object payloads at the client side so server validation isn't the first line of defence.
+
 ## 0.15.0 (2026-05-21)
 
 - **feat(rulesets): ruleset lifecycle commands scoped to a rulebook.** Phase B.1b of the converged 2-term model. Adds four new sub-commands under `aethis rulesets`:
