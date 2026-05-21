@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.15.0 (2026-05-21)
+
+- **feat(rulesets): ruleset lifecycle commands scoped to a rulebook.** Phase B.1b of the converged 2-term model. Adds four new sub-commands under `aethis rulesets`:
+  - `aethis rulesets list <rulebook>` — list rulesets in a rulebook (grouped by `ruleset_name` with version counts, live version, and observed states). The legacy `-p <project_id>` and `--public` modes are preserved while the project-scoped authoring pipeline retires in a future phase.
+  - `aethis rulesets create <rulebook> <ruleset_name> [-n "Display name"]` — create a new draft Ruleset inside the rulebook. The display name auto-derives from `ruleset_name` if not provided (`child_eligibility` → `Child Eligibility`).
+  - `aethis rulesets show <rulebook> <ruleset_name>` — full version history for one ruleset name (bundle_id, version, state, created), with live version highlighted.
+  - `aethis rulesets promote-to-live <rulebook> <ruleset_name> <ruleset_id> [--note "..."]` — atomically promote a `testing`-state ruleset version to `live` via the Phase A.4 service. Auto-cuts a new rulebook version; previous live ruleset is archived.
+- feat(client): four new `AethisClient` methods — `create_ruleset_in_rulebook`, `list_rulesets_in_rulebook`, `show_ruleset_in_rulebook`, `promote_ruleset_to_live`.
+- Requires aethis-core v0.20.0+ live on the target API (Phase A.8 endpoints).
+
 ## 0.14.0 (2026-05-21)
 
 - **feat(rulebooks): new `aethis rulebooks` command group.** First user-facing surface for the converged 2-term authoring model (workspace PR #64, aethis-core PRs #133-139). A Rulebook is the whole form — the execution unit — that owns a locked field vocabulary, composition logic, rulebook-level test cases, and an integer version history.

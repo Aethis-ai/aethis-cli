@@ -390,6 +390,57 @@ class AethisClient:
             },
         )
 
+    # -- Ruleset-within-rulebook lifecycle (Phase A.8) --
+
+    def create_ruleset_in_rulebook(
+        self,
+        rulebook_id_or_slug: str,
+        *,
+        ruleset_name: str,
+        name: str,
+        python_source: Optional[str] = None,
+    ) -> dict:
+        body: dict[str, Any] = {
+            "ruleset_name": ruleset_name,
+            "name": name,
+        }
+        if python_source is not None:
+            body["python_source"] = python_source
+        return self._request(
+            "POST",
+            f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/rulesets",
+            json=body,
+        )
+
+    def list_rulesets_in_rulebook(self, rulebook_id_or_slug: str) -> dict:
+        return self._request(
+            "GET",
+            f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/rulesets",
+        )
+
+    def show_ruleset_in_rulebook(self, rulebook_id_or_slug: str, ruleset_name: str) -> dict:
+        return self._request(
+            "GET",
+            f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/rulesets/{ruleset_name}",
+        )
+
+    def promote_ruleset_to_live(
+        self,
+        rulebook_id_or_slug: str,
+        ruleset_name: str,
+        *,
+        ruleset_id: str,
+        note: Optional[str] = None,
+    ) -> dict:
+        body: dict[str, Any] = {"ruleset_id": ruleset_id}
+        if note is not None:
+            body["note"] = note
+        return self._request(
+            "POST",
+            f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/rulesets/{ruleset_name}/promote-to-live",
+            json=body,
+        )
+
     # -- Domain guidance API --
 
     def add_domain_guidance(
