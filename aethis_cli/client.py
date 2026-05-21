@@ -279,9 +279,7 @@ class AethisClient:
         return self._request("GET", "/api/v1/public/rulebooks/")
 
     def get_rulebook(self, rulebook_id_or_slug: str) -> dict:
-        return self._request(
-            "GET", f"/api/v1/public/rulebooks/{rulebook_id_or_slug}"
-        )
+        return self._request("GET", f"/api/v1/public/rulebooks/{rulebook_id_or_slug}")
 
     def update_rulebook(
         self,
@@ -311,30 +309,20 @@ class AethisClient:
         )
 
     def activate_rulebook(self, rulebook_id_or_slug: str) -> dict:
-        return self._request(
-            "POST", f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/activate"
-        )
+        return self._request("POST", f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/activate")
 
     def archive_rulebook(self, rulebook_id_or_slug: str) -> dict:
-        return self._request(
-            "POST", f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/archive"
-        )
+        return self._request("POST", f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/archive")
 
     def get_rulebook_schema(self, rulebook_id_or_slug: str) -> dict:
-        return self._request(
-            "GET", f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/schema"
-        )
+        return self._request("GET", f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/schema")
 
     def explain_rulebook(self, rulebook_id_or_slug: str) -> dict:
-        return self._request(
-            "GET", f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/explain"
-        )
+        return self._request("GET", f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/explain")
 
     # -- Rulebook fields (Phase A.6) --
 
-    def set_rulebook_fields(
-        self, rulebook_id_or_slug: str, fields: list[dict]
-    ) -> dict:
+    def set_rulebook_fields(self, rulebook_id_or_slug: str, fields: list[dict]) -> dict:
         return self._request(
             "POST",
             f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/fields",
@@ -354,9 +342,7 @@ class AethisClient:
         )
 
     def get_rulebook_fields(self, rulebook_id_or_slug: str) -> dict:
-        return self._request(
-            "GET", f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/fields"
-        )
+        return self._request("GET", f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/fields")
 
     # -- Rulebook-level test cases (Phase A.6) --
 
@@ -379,21 +365,15 @@ class AethisClient:
         )
 
     def list_rulebook_test_cases(self, rulebook_id_or_slug: str) -> dict:
-        return self._request(
-            "GET", f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/tests"
-        )
+        return self._request("GET", f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/tests")
 
-    def delete_rulebook_test_case(
-        self, rulebook_id_or_slug: str, tc_id: str
-    ) -> None:
+    def delete_rulebook_test_case(self, rulebook_id_or_slug: str, tc_id: str) -> None:
         self._request(
             "DELETE",
             f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/tests/{tc_id}",
         )
 
-    def decide_rulebook(
-        self, rulebook_id_or_slug: str, field_values: dict, **opts: Any
-    ) -> dict:
+    def decide_rulebook(self, rulebook_id_or_slug: str, field_values: dict, **opts: Any) -> dict:
         """Evaluate a rulebook against field_values.
 
         Same endpoint as :py:meth:`decide` but passes ``rulebook_id`` instead

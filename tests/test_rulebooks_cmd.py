@@ -153,9 +153,7 @@ def test_rulebooks_create_minimal(tmp_path, monkeypatch):
     with patch("aethis_cli.client.AethisClient", return_value=client):
         result = _runner_invoke(["rulebooks", "create", "Bare bones"])
     assert result.exit_code == 0
-    client.create_rulebook.assert_called_once_with(
-        name="Bare bones", domain="", slug=None, description=None
-    )
+    client.create_rulebook.assert_called_once_with(name="Bare bones", domain="", slug=None, description=None)
 
 
 # ---------------------------------------------------------------------------
@@ -195,9 +193,7 @@ def test_set_fields_from_json_top_level_list(tmp_path, monkeypatch):
         "field_lock_state": "unlocked",
     }
     with patch("aethis_cli.client.AethisClient", return_value=client):
-        result = _runner_invoke(
-            ["rulebooks", "set-fields", "rb_x", "-f", str(fields_path)]
-        )
+        result = _runner_invoke(["rulebooks", "set-fields", "rb_x", "-f", str(fields_path)])
 
     assert result.exit_code == 0, result.output
     args, _kwargs = client.set_rulebook_fields.call_args
@@ -213,18 +209,14 @@ def test_set_fields_from_json_wrapped_object(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
     fields_path = tmp_path / "fields.json"
-    fields_path.write_text(
-        json.dumps({"fields": [{"key": "x", "sort": "Bool"}]})
-    )
+    fields_path.write_text(json.dumps({"fields": [{"key": "x", "sort": "Bool"}]}))
     client = MagicMock()
     client.set_rulebook_fields.return_value = {
         "fields": [{"key": "x", "sort": "Bool"}],
         "field_lock_state": "unlocked",
     }
     with patch("aethis_cli.client.AethisClient", return_value=client):
-        result = _runner_invoke(
-            ["rulebooks", "set-fields", "rb_x", "-f", str(fields_path)]
-        )
+        result = _runner_invoke(["rulebooks", "set-fields", "rb_x", "-f", str(fields_path)])
     assert result.exit_code == 0
     sent = client.set_rulebook_fields.call_args[0][1]
     assert sent == [{"key": "x", "sort": "Bool"}]
@@ -237,9 +229,7 @@ def test_set_fields_rejects_empty_list(tmp_path, monkeypatch):
     fields_path.write_text("[]")
     client = MagicMock()
     with patch("aethis_cli.client.AethisClient", return_value=client):
-        result = _runner_invoke(
-            ["rulebooks", "set-fields", "rb_x", "-f", str(fields_path)]
-        )
+        result = _runner_invoke(["rulebooks", "set-fields", "rb_x", "-f", str(fields_path)])
     assert result.exit_code != 0
     assert "non-empty" in _strip(result.output).lower()
 
@@ -435,9 +425,7 @@ def test_decide_rejects_non_object_inputs(tmp_path, monkeypatch):
     monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
     client = MagicMock()
     with patch("aethis_cli.client.AethisClient", return_value=client):
-        result = _runner_invoke(
-            ["rulebooks", "decide", "rb_x", "-i", "[1, 2, 3]"]
-        )
+        result = _runner_invoke(["rulebooks", "decide", "rb_x", "-i", "[1, 2, 3]"])
     assert result.exit_code != 0
     assert "object" in _strip(result.output).lower() or "mapping" in _strip(result.output).lower()
 
@@ -467,9 +455,7 @@ def test_tests_add_single_case(tmp_path, monkeypatch):
         "expected_outcome": "eligible",
     }
     with patch("aethis_cli.client.AethisClient", return_value=client):
-        result = _runner_invoke(
-            ["rulebooks", "tests", "add", "rb_x", "-f", str(case_path)]
-        )
+        result = _runner_invoke(["rulebooks", "tests", "add", "rb_x", "-f", str(case_path)])
     assert result.exit_code == 0, result.output
     client.add_rulebook_test_case.assert_called_once()
     _args, kwargs = client.add_rulebook_test_case.call_args
@@ -504,9 +490,7 @@ def test_tests_add_multiple_cases(tmp_path, monkeypatch):
         {"tc_id": "tc_b", "name": "B", "expected_outcome": "not_eligible"},
     ]
     with patch("aethis_cli.client.AethisClient", return_value=client):
-        result = _runner_invoke(
-            ["rulebooks", "tests", "add", "rb_x", "-f", str(cases_path)]
-        )
+        result = _runner_invoke(["rulebooks", "tests", "add", "rb_x", "-f", str(cases_path)])
     assert result.exit_code == 0, result.output
     assert client.add_rulebook_test_case.call_count == 2
     out = _strip(result.output)
@@ -518,14 +502,10 @@ def test_tests_add_missing_required_key(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
     bad = tmp_path / "bad.json"
-    bad.write_text(
-        json.dumps({"name": "No outcome", "field_values": {}})
-    )  # missing expected_outcome
+    bad.write_text(json.dumps({"name": "No outcome", "field_values": {}}))  # missing expected_outcome
     client = MagicMock()
     with patch("aethis_cli.client.AethisClient", return_value=client):
-        result = _runner_invoke(
-            ["rulebooks", "tests", "add", "rb_x", "-f", str(bad)]
-        )
+        result = _runner_invoke(["rulebooks", "tests", "add", "rb_x", "-f", str(bad)])
     assert result.exit_code != 0
     client.add_rulebook_test_case.assert_not_called()
 
@@ -579,8 +559,6 @@ def test_tests_delete_with_yes(tmp_path, monkeypatch):
     client = MagicMock()
     client.delete_rulebook_test_case.return_value = None
     with patch("aethis_cli.client.AethisClient", return_value=client):
-        result = _runner_invoke(
-            ["rulebooks", "tests", "delete", "rb_x", "tc_abc", "--yes"]
-        )
+        result = _runner_invoke(["rulebooks", "tests", "delete", "rb_x", "tc_abc", "--yes"])
     assert result.exit_code == 0, result.output
     client.delete_rulebook_test_case.assert_called_once_with("rb_x", "tc_abc")

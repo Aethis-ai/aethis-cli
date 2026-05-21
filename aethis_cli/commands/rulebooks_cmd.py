@@ -61,8 +61,7 @@ def _load_yaml_or_json(path: Path) -> Any:
             import yaml  # type: ignore[import-untyped]
         except ImportError as exc:
             raise typer.BadParameter(
-                f"YAML input requires PyYAML; install it or pass a .json "
-                f"file instead. ({exc})"
+                f"YAML input requires PyYAML; install it or pass a .json file instead. ({exc})"
             ) from exc
         return yaml.safe_load(text)
     return json.loads(text)
@@ -89,9 +88,7 @@ def list_rulebooks() -> None:
         raise typer.Exit(code=1)
 
     if not rulebooks:
-        console.print(
-            "[dim]No rulebooks yet. Create one with `aethis rulebooks create`.[/dim]"
-        )
+        console.print("[dim]No rulebooks yet. Create one with `aethis rulebooks create`.[/dim]")
         return
 
     table = Table(title="Rulebooks")
@@ -157,9 +154,7 @@ def create_rulebook(
             "intend to reference from outside the CLI."
         ),
     ),
-    description: Optional[str] = typer.Option(
-        None, "--description", help="Optional description."
-    ),
+    description: Optional[str] = typer.Option(None, "--description", help="Optional description."),
 ) -> None:
     """Create a new Rulebook.
 
@@ -182,10 +177,7 @@ def create_rulebook(
         error_panel(e)
         raise typer.Exit(code=1)
 
-    success(
-        f"Created rulebook {rb['rulebook_id']}"
-        + (f" (slug: {rb['slug']})" if rb.get("slug") else "")
-    )
+    success(f"Created rulebook {rb['rulebook_id']}" + (f" (slug: {rb['slug']})" if rb.get("slug") else ""))
     console.print_json(data=rb)
 
 
@@ -203,7 +195,7 @@ def set_fields(
         "-f",
         exists=True,
         readable=True,
-        help='Path to fields.yaml or fields.json (list of {key, sort, ...}).',
+        help="Path to fields.yaml or fields.json (list of {key, sort, ...}).",
     ),
 ) -> None:
     """Replace the rulebook's locked field vocabulary.
@@ -225,9 +217,7 @@ def set_fields(
     else:
         fields = payload
     if not isinstance(fields, list) or not fields:
-        raise typer.BadParameter(
-            f"{file} must contain a non-empty list of field specs."
-        )
+        raise typer.BadParameter(f"{file} must contain a non-empty list of field specs.")
 
     _cfg, client = load_client_or_fallback()
     try:
@@ -262,9 +252,7 @@ def lock_fields(
         error_panel(e)
         raise typer.Exit(code=1)
     success(f"Locked field vocabulary on rulebook {rulebook}")
-    console.print(
-        f"Locked field count: [cyan]{len(result.get('fields', []))}[/cyan]"
-    )
+    console.print(f"Locked field count: [cyan]{len(result.get('fields', []))}[/cyan]")
 
 
 @rulebooks_app.command(name="unlock-fields")
@@ -292,9 +280,7 @@ def get_fields(
     except AethisAPIError as e:
         error_panel(e)
         raise typer.Exit(code=1)
-    console.print(
-        f"Lock state: [cyan]{result['field_lock_state']}[/cyan]"
-    )
+    console.print(f"Lock state: [cyan]{result['field_lock_state']}[/cyan]")
     fields = result.get("fields", [])
     if not fields:
         console.print("[dim]No fields locked yet.[/dim]")
@@ -364,10 +350,7 @@ def decide_rulebook(
         None,
         "--inputs",
         "-i",
-        help=(
-            'Field values as JSON inline (e.g. \'{"age": 21}\') or @path.json '
-            "to load from disk."
-        ),
+        help=("Field values as JSON inline (e.g. '{\"age\": 21}') or @path.json to load from disk."),
     ),
     input_file: Optional[Path] = typer.Option(
         None,
@@ -376,9 +359,7 @@ def decide_rulebook(
         readable=True,
         help="YAML or JSON file with field values (alternative to --inputs).",
     ),
-    explain: bool = typer.Option(
-        False, "--explain", help="Include a human-readable explanation."
-    ),
+    explain: bool = typer.Option(False, "--explain", help="Include a human-readable explanation."),
 ) -> None:
     """Evaluate a rulebook against a set of field values.
 
@@ -388,13 +369,9 @@ def decide_rulebook(
         aethis rulebooks decide aethis/uk-fsm --input-file persona.yaml --explain
     """
     if inputs is None and input_file is None:
-        raise typer.BadParameter(
-            "Provide field values via --inputs / -i or --input-file."
-        )
+        raise typer.BadParameter("Provide field values via --inputs / -i or --input-file.")
     if inputs and input_file:
-        raise typer.BadParameter(
-            "Pass either --inputs or --input-file, not both."
-        )
+        raise typer.BadParameter("Pass either --inputs or --input-file, not both.")
 
     if input_file is not None:
         field_values = _load_yaml_or_json(input_file)
@@ -406,14 +383,10 @@ def decide_rulebook(
             try:
                 field_values = json.loads(inputs or "{}")
             except json.JSONDecodeError as exc:
-                raise typer.BadParameter(
-                    f"--inputs must be valid JSON: {exc}"
-                ) from exc
+                raise typer.BadParameter(f"--inputs must be valid JSON: {exc}") from exc
 
     if not isinstance(field_values, dict):
-        raise typer.BadParameter(
-            "Field values must be a JSON object / YAML mapping."
-        )
+        raise typer.BadParameter("Field values must be a JSON object / YAML mapping.")
 
     _cfg, client = load_client_or_fallback()
     try:
@@ -498,17 +471,13 @@ def tests_add(
     elif isinstance(payload, list):
         cases = payload
     else:
-        raise typer.BadParameter(
-            f"{file} must contain a test-case object or a list of them."
-        )
+        raise typer.BadParameter(f"{file} must contain a test-case object or a list of them.")
 
     _cfg, client = load_client_or_fallback()
     added: list[dict[str, Any]] = []
     for tc in cases:
         if not isinstance(tc, dict):
-            raise typer.BadParameter(
-                f"Each test case must be a mapping; got {type(tc).__name__}."
-            )
+            raise typer.BadParameter(f"Each test case must be a mapping; got {type(tc).__name__}.")
         try:
             result = client.add_rulebook_test_case(
                 rulebook,
@@ -517,9 +486,7 @@ def tests_add(
                 expected_outcome=tc["expected_outcome"],
             )
         except KeyError as exc:
-            raise typer.BadParameter(
-                f"Test case missing required key: {exc}"
-            ) from exc
+            raise typer.BadParameter(f"Test case missing required key: {exc}") from exc
         except AethisAPIError as e:
             error_panel(e)
             raise typer.Exit(code=1)
@@ -568,9 +535,7 @@ def tests_delete(
 ) -> None:
     """Delete a rulebook-level test case by tc_id."""
     if not yes:
-        confirmed = typer.confirm(
-            f"Delete test case {tc_id} from rulebook {rulebook}?"
-        )
+        confirmed = typer.confirm(f"Delete test case {tc_id} from rulebook {rulebook}?")
         if not confirmed:
             raise typer.Abort()
     _cfg, client = load_client_or_fallback()
