@@ -207,6 +207,8 @@ class AethisClient:
         *,
         slug: str | None = None,
         force_unsafe: bool = False,
+        rulebook_id: str | None = None,
+        ruleset_name: str | None = None,
     ) -> dict:
         body: dict = {}
         if slug is not None:
@@ -216,6 +218,16 @@ class AethisClient:
             # publish when stored test cases fail; force_unsafe=True records
             # an audit event and proceeds. Older engines ignore the field.
             body["force_unsafe"] = True
+        # Phase A.9 — publish-into-rulebook bridge. When both set, the
+        # produced ruleset is stamped with rulebook_id + ruleset_name and
+        # lands in state="testing" (instead of status="active"). Promotion
+        # to live then flows via /rulebooks/{id}/rulesets/{name}/promote-
+        # to-live. Requires aethis-core v0.21.0+; older engines either
+        # ignore the fields silently or 422 on the model_validator.
+        if rulebook_id is not None:
+            body["rulebook_id"] = rulebook_id
+        if ruleset_name is not None:
+            body["ruleset_name"] = ruleset_name
         kwargs: dict = {}
         if body:
             kwargs["json"] = body
