@@ -107,3 +107,84 @@ jobs:
             -H "Authorization: Bearer $WORKSPACE_SYNC_TOKEN" \
             https://api.github.com/repos/Aethis-ai/aethis-workspace/dispatches \
             -d "{\"event_type\":\"release-package-published\",\"client_payload\":{\"package\":\"aethis-cli\",\"version\":\"${RELEASE_TAG#v}\",\"tag\":\"$RELEASE_TAG\"}}"
+
+  unstick-downstream:
+    # After a successful publish, find downstream PRs across the Aethis-ai org
+    # that declared a dependency on this aethis-cli release via the marker
+    #   <!-- aethis-needs: aethis-cli >= X.Y.Z -->
+    # in their PR body. For each PR whose constraint is satisfied by the just-
+    # published version, post a comment and flip the PR from draft to ready.
+    # The marker convention is documented in
+    #   aethis-workspace/.claude/rules/downstream-unstick.md
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Find and unstick dependent PRs
+        env:
+          # Cross-repo PR mutation needs a token with `pull-requests:write` on
+          # the *target* repo, which the default GITHUB_TOKEN doesn't have.
+          # Reuses the same workspace dispatch token (PAT scoped to the org).
+          GH_TOKEN: ${{ secrets.WORKSPACE_SYNC_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "WORKSPACE_SYNC_TOKEN not configured; skipping unstick."
+            exit 0
+          fi
+          VERSION="${RELEASE_TAG#v}"
+          python3 - "$VERSION" <<'PY'
+          import json, os, re, subprocess, sys
+
+          version = sys.argv[1]
+          marker = re.compile(
+              r"<!--\s*aethis-needs:\s*aethis-cli\s*(>=|==)\s*(\d+\.\d+\.\d+)\s*-->",
+              re.IGNORECASE,
+          )
+
+          def vtuple(v): return tuple(int(p) for p in v.split("."))
+
+          def gh(*args):
+              out = subprocess.check_output(["gh"] + list(args))
+              return out.decode()
+
+          search = gh(
+              "search", "prs",
+              "--owner", "Aethis-ai",
+              "--state", "open",
+              "aethis-needs: aethis-cli",
+              "--json", "repository,number,title,isDraft,url",
+              "--limit", "100",
+          )
+          prs = json.loads(search)
+          if not prs:
+              print("No open PRs reference aethis-needs: aethis-cli — nothing to unstick.")
+              sys.exit(0)
+
+          published = vtuple(version)
+          for pr in prs:
+              repo = pr["repository"]["nameWithOwner"]
+              num = pr["number"]
+              body = gh("pr", "view", str(num), "-R", repo, "--json", "body", "-q", ".body") or ""
+              m = marker.search(body)
+              if not m:
+                  print(f"{repo}#{num}: marker not found in body (search false positive); skip")
+                  continue
+              op, required = m.group(1), m.group(2)
+              required_t = vtuple(required)
+              satisfied = (op == "==" and published == required_t) or (op == ">=" and published >= required_t)
+              if not satisfied:
+                  print(f"{repo}#{num}: needs aethis-cli {op} {required}, published {version}; not satisfied")
+                  continue
+              print(f"{repo}#{num}: marker satisfied (needs {op} {required}, got {version}) — unsticking")
+              comment = (
+                  f":unlock: aethis-cli **v{version}** is live on PyPI — "
+                  f"this PR's `aethis-needs: aethis-cli {op} {required}` constraint is satisfied. "
+                  f"Auto-readying for review."
+              )
+              subprocess.check_call(["gh", "pr", "comment", str(num), "-R", repo, "--body", comment])
+              if pr.get("isDraft"):
+                  subprocess.check_call(["gh", "pr", "ready", str(num), "-R", repo])
+          PY
