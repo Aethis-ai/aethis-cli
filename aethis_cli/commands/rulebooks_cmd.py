@@ -350,9 +350,7 @@ def set_logic(
     """
     if (file is None) == (logic is None):
         # Either both supplied or both missing — neither is valid.
-        raise typer.BadParameter(
-            "Provide exactly one of --file/-f or --logic/-l."
-        )
+        raise typer.BadParameter("Provide exactly one of --file/-f or --logic/-l.")
 
     if file is not None:
         payload = _load_yaml_or_json(file)
@@ -363,9 +361,7 @@ def set_logic(
             raise typer.BadParameter(f"--logic is not valid JSON: {exc}") from exc
 
     if not isinstance(payload, dict):
-        raise typer.BadParameter(
-            "outcome_logic must be a JSON object (Expr AST), not a list or scalar."
-        )
+        raise typer.BadParameter("outcome_logic must be a JSON object (Expr AST), not a list or scalar.")
 
     _cfg, client = load_client_or_fallback()
     try:

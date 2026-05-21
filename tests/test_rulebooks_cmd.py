@@ -349,9 +349,7 @@ def test_set_logic_from_json_file(tmp_path, monkeypatch):
     }
 
     with patch("aethis_cli.client.AethisClient", return_value=client):
-        result = _runner_invoke(
-            ["rulebooks", "set-logic", "rb_x", "--file", str(logic_path)]
-        )
+        result = _runner_invoke(["rulebooks", "set-logic", "rb_x", "--file", str(logic_path)])
 
     assert result.exit_code == 0, result.output
     client.update_rulebook.assert_called_once()
@@ -393,9 +391,7 @@ def test_set_logic_from_yaml_file(tmp_path, monkeypatch):
     client = MagicMock()
     client.update_rulebook.return_value = {"rulebook_id": "rb_x"}
     with patch("aethis_cli.client.AethisClient", return_value=client):
-        result = _runner_invoke(
-            ["rulebooks", "set-logic", "rb_x", "-f", str(logic_path)]
-        )
+        result = _runner_invoke(["rulebooks", "set-logic", "rb_x", "-f", str(logic_path)])
 
     assert result.exit_code == 0, result.output
     sent = client.update_rulebook.call_args.kwargs["outcome_logic"]
@@ -460,9 +456,7 @@ def test_set_logic_rejects_non_object_payload(tmp_path, monkeypatch):
     bad_path.write_text(json.dumps(["not", "an", "expr"]))
     client = MagicMock()
     with patch("aethis_cli.client.AethisClient", return_value=client):
-        result = _runner_invoke(
-            ["rulebooks", "set-logic", "rb_x", "-f", str(bad_path)]
-        )
+        result = _runner_invoke(["rulebooks", "set-logic", "rb_x", "-f", str(bad_path)])
     assert result.exit_code != 0
     client.update_rulebook.assert_not_called()
 
@@ -472,9 +466,7 @@ def test_set_logic_inline_json_invalid(tmp_path, monkeypatch):
     monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
     client = MagicMock()
     with patch("aethis_cli.client.AethisClient", return_value=client):
-        result = _runner_invoke(
-            ["rulebooks", "set-logic", "rb_x", "--logic", "{not-json}"]
-        )
+        result = _runner_invoke(["rulebooks", "set-logic", "rb_x", "--logic", "{not-json}"])
     assert result.exit_code != 0
     client.update_rulebook.assert_not_called()
 
