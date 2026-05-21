@@ -29,13 +29,44 @@ def publish(
             "namespace is reserved for official rulesets."
         ),
     ),
+    rulebook: Optional[str] = typer.Option(
+        None,
+        "--rulebook",
+        help=(
+            "Rulebook ID or slug to publish this ruleset into "
+            "(converged 2-term model). Requires --ruleset-name. "
+            "The produced ruleset lands in state='testing' rather than "
+            "being flipped to status='active'; promotion to live then "
+            "flows via `aethis rulesets promote-to-live`. Requires "
+            "aethis-core v0.21.0+."
+        ),
+    ),
+    ruleset_name: Optional[str] = typer.Option(
+        None,
+        "--ruleset-name",
+        help=(
+            "Identifier-style name within the parent rulebook (e.g. "
+            "'child_eligibility'). Required when --rulebook is set."
+        ),
+    ),
 ) -> None:
     """Publish the latest generated ruleset (make it active for /decide).
 
     Runs the project's test suite first and refuses to publish if any test
     fails or errors. Use --force to override (for example, when you're
     publishing an intentionally draft ruleset).
+
+    Pass --rulebook + --ruleset-name to publish into a Rulebook (the
+    converged 2-term model). The produced ruleset gets stamped with
+    those FKs and lands in state='testing'; promote it to live with
+    `aethis rulesets promote-to-live <rulebook> <ruleset_name> <rs_id>`.
     """
+    if (rulebook is None) != (ruleset_name is None):
+        console.print(
+            "[red]--rulebook and --ruleset-name must be set together "
+            "(or both omitted for legacy publish-to-active).[/red]"
+        )
+        raise typer.Exit(code=1)
     cfg = load_project_config()
     api_key = resolve_api_key(cfg)
     client = make_authed_client(api_key, cfg.base_url)
@@ -79,7 +110,13 @@ def publish(
         # Older engines ignore the field; newer ones refuse a publish over
         # failing tests unless force_unsafe=True is explicit, in which case
         # they record a publish_force_bypass audit event.
-        result = client.publish(pid, slug=slug, force_unsafe=force)
+        result = client.publish(
+            pid,
+            slug=slug,
+            force_unsafe=force,
+            rulebook_id=rulebook,
+            ruleset_name=ruleset_name,
+        )
     except AethisAPIError as e:
         error_panel(e)
         raise typer.Exit(code=1)
@@ -88,3 +125,17 @@ def publish(
     if result.get("slug"):
         msg += f" — slug: {result['slug']}"
     success(msg)
+    if result.get("state") == "testing" and result.get("rulebook_id"):
+        # Rulebook-mode publish: surface the next step explicitly so
+        # users don't wonder why /decide doesn't return their ruleset
+        # yet — the ruleset is in `testing`, not `live`.
+        console.print(
+            f"  rulebook: [cyan]{result['rulebook_id']}[/cyan] · "
+            f"ruleset_name: [cyan]{result.get('ruleset_name')}[/cyan] · "
+            f"state: [yellow]testing[/yellow]"
+        )
+        console.print(
+            f"  [dim]promote with: aethis rulesets promote-to-live "
+            f"{result['rulebook_id']} {result.get('ruleset_name')} "
+            f"{result.get('ruleset_id')}[/dim]"
+        )
