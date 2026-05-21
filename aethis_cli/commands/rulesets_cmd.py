@@ -1,4 +1,13 @@
-"""aethis rulesets — list and archive rulesets."""
+"""aethis rulesets — list, create, show, promote, archive rulesets.
+
+In the converged 2-term authoring model (`docs/RULEBOOK_AUTHORING_MODEL.md`
+in the workspace), a Ruleset is the named, versioned part of a Rulebook.
+The lifecycle commands added in Phase B.1b — ``create``, ``show``,
+``promote-to-live`` — scope to a rulebook explicitly (positional first
+argument). The legacy ``-p <project_id>`` and ``--public`` modes of
+``list`` are preserved while the project-scoped authoring pipeline is
+retired in a future phase.
+"""
 
 from __future__ import annotations
 
@@ -15,7 +24,7 @@ from aethis_cli.output import console, error_panel, success, warn
 
 rulesets_app = typer.Typer(
     name="rulesets",
-    help="List and archive rulesets.",
+    help="List, create, show, promote, archive rulesets.",
     no_args_is_help=True,
     pretty_exceptions_enable=False,
 )
@@ -65,8 +74,14 @@ def _list_public(limit: int, offset: int) -> None:
 
 @rulesets_app.command(name="list")
 def list_rulesets(
-    project_id: Optional[str] = typer.Option(None, "--project-id", "-p", help="Project ID"),
-    status: Optional[str] = typer.Option(None, "--status", "-s", help="Filter by status (comma-separated)"),
+    rulebook: Optional[str] = typer.Argument(
+        None,
+        help=("Rulebook ID or slug to list rulesets for. When given, takes precedence over --project-id and --public."),
+    ),
+    project_id: Optional[str] = typer.Option(None, "--project-id", "-p", help="Legacy: list rulesets for a project."),
+    status: Optional[str] = typer.Option(
+        None, "--status", "-s", help="Filter by status (comma-separated; project mode only)."
+    ),
     public: bool = typer.Option(
         False,
         "--public",
@@ -75,15 +90,20 @@ def list_rulesets(
     limit: int = typer.Option(20, "--limit", min=1, max=50, help="Max rulesets to return (public mode)."),
     offset: int = typer.Option(0, "--offset", min=0, help="Pagination offset (public mode)."),
 ) -> None:
-    """List rulesets for a project, or the public showcase catalogue.
+    """List rulesets — by rulebook (new), by project (legacy), or the public showcase.
 
     Examples:
 
-        aethis rulesets list                                  # auto: showcase if no project context
+        aethis rulesets list aethis/uk-fsm                    # rulebook-scoped (new)
+        aethis rulesets list rb_abc123                        # by rulebook_id
         aethis rulesets list --public                         # explicit: anonymous catalogue
-        aethis rulesets list -p proj_i1HyinBtFJniayUC         # tenant-scoped
-        aethis rulesets list -p proj_i1HyinBtFJniayUC -s active,archived
+        aethis rulesets list                                  # auto: showcase if no project context
+        aethis rulesets list -p proj_i1HyinBtFJniayUC         # tenant-scoped (legacy)
     """
+    if rulebook:
+        _list_rulebook_rulesets(rulebook)
+        return
+
     if public:
         _list_public(limit=limit, offset=offset)
         return
@@ -104,7 +124,8 @@ def list_rulesets(
 
     if not pid:
         console.print(
-            "[dim]No project context — showing public showcase rulesets. Pass --project-id <id> to list your own.[/dim]"
+            "[dim]No project context — showing public showcase rulesets. "
+            "Pass <rulebook> or --project-id <id> to list your own.[/dim]"
         )
         _list_public(limit=limit, offset=offset)
         return
@@ -145,6 +166,177 @@ def list_rulesets(
         )
 
     console.print(table)
+
+
+def _list_rulebook_rulesets(rulebook: str) -> None:
+    """List rulesets in a rulebook using the Phase A.8 endpoint."""
+    _cfg, client = load_client_or_fallback()
+    try:
+        resp = client.list_rulesets_in_rulebook(rulebook)
+    except AethisAPIError as e:
+        error_panel(e)
+        raise typer.Exit(code=1)
+
+    rulesets = resp.get("rulesets", [])
+    if not rulesets:
+        console.print(
+            f"[dim]No rulesets in rulebook {rulebook!r} yet. "
+            "Create one with `aethis rulesets create <rulebook> <name>`.[/dim]"
+        )
+        return
+
+    table = Table(title=f"Rulesets in {rulebook}")
+    table.add_column("Ruleset name", style="cyan")
+    table.add_column("Display name")
+    table.add_column("Versions", justify="right")
+    table.add_column("Live version")
+    table.add_column("States seen")
+    for r in rulesets:
+        table.add_row(
+            r.get("ruleset_name", ""),
+            r.get("display_name") or "[dim]—[/dim]",
+            str(r.get("version_count", 0)),
+            r.get("live_version") or "[dim]—[/dim]",
+            ", ".join(r.get("states", [])) or "[dim]—[/dim]",
+        )
+    console.print(table)
+
+
+# ============================================================================
+# Phase B.1b — ruleset lifecycle commands scoped to a rulebook.
+# ============================================================================
+
+
+@rulesets_app.command(name="create")
+def create_ruleset(
+    rulebook: str = typer.Argument(..., help="Rulebook ID or slug to create the ruleset in."),
+    ruleset_name: str = typer.Argument(..., help="Identifier-style name (lower_snake_case)."),
+    display_name: Optional[str] = typer.Option(
+        None,
+        "--name",
+        "-n",
+        help=(
+            "Human-readable display name. Defaults to a titlecased version "
+            "of ruleset_name (`child_eligibility` → `Child Eligibility`)."
+        ),
+    ),
+) -> None:
+    """Create a new draft Ruleset within a Rulebook.
+
+    The ruleset starts in `draft` state with no compiled DSL. Authoring
+    (sources, guidance, generate, test) flows through the project-scoped
+    endpoints today; a future phase wires those to the new ruleset path.
+
+    Examples::
+
+        aethis rulesets create aethis/uk-fsm child_eligibility
+        aethis rulesets create rb_abc household_criteria \\
+            -n "Household qualifying criteria"
+    """
+    if display_name is None:
+        display_name = ruleset_name.replace("_", " ").title()
+
+    _cfg, client = load_client_or_fallback()
+    try:
+        rs = client.create_ruleset_in_rulebook(rulebook, ruleset_name=ruleset_name, name=display_name)
+    except AethisAPIError as e:
+        error_panel(e)
+        raise typer.Exit(code=1)
+
+    success(
+        f"Created draft ruleset {rs['ruleset_name']!r} (bundle_id: {rs['bundle_id']}) in rulebook {rs['rulebook_id']}"
+    )
+    console.print_json(data=rs)
+
+
+@rulesets_app.command(name="show")
+def show_ruleset(
+    rulebook: str = typer.Argument(..., help="Rulebook ID or slug."),
+    ruleset_name: str = typer.Argument(..., help="Ruleset name within the rulebook."),
+) -> None:
+    """Show the version history for one ruleset_name in a rulebook."""
+    _cfg, client = load_client_or_fallback()
+    try:
+        resp = client.show_ruleset_in_rulebook(rulebook, ruleset_name)
+    except AethisAPIError as e:
+        error_panel(e)
+        raise typer.Exit(code=1)
+
+    versions = resp.get("versions", [])
+    live_version = resp.get("live_version")
+    display_name = resp.get("display_name")
+    console.print(
+        f"[bold]{ruleset_name}[/bold]  in  [cyan]{rulebook}[/cyan]"
+        + (f"  · [dim]{display_name}[/dim]" if display_name else "")
+    )
+    if live_version:
+        console.print(f"  live version: [green]{live_version}[/green]")
+    else:
+        console.print("  [dim]no live version (never promoted)[/dim]")
+
+    if not versions:
+        return
+
+    table = Table(title="Versions")
+    table.add_column("bundle_id", style="cyan")
+    table.add_column("Version")
+    table.add_column("State")
+    table.add_column("Created")
+    for v in versions:
+        state = v.get("state") or "[dim]—[/dim]"
+        style = "dim" if state == "archived" else None
+        table.add_row(
+            v.get("bundle_id", ""),
+            v.get("version", ""),
+            state,
+            (v.get("created_at") or "")[:10],
+            style=style,
+        )
+    console.print(table)
+
+
+@rulesets_app.command(name="promote-to-live")
+def promote_ruleset(
+    rulebook: str = typer.Argument(..., help="Rulebook ID or slug."),
+    ruleset_name: str = typer.Argument(..., help="Ruleset name within the rulebook."),
+    ruleset_id: str = typer.Argument(..., help="Specific ruleset version (bundle_id) to promote."),
+    note: Optional[str] = typer.Option(
+        None,
+        "--note",
+        help="Optional human-readable note recorded on the resulting RulebookVersion.",
+    ),
+) -> None:
+    """Atomically promote a `testing`-state ruleset version to `live`.
+
+    The candidate ruleset must already be in `testing` state. The
+    operation atomically (1) demotes any prior live ruleset of the same
+    name to `archived`, (2) promotes the candidate to `live`,
+    (3) updates the rulebook's live_ruleset_pins, and (4) cuts a new
+    Rulebook version.
+
+    Example::
+
+        aethis rulesets promote-to-live aethis/uk-fsm child_eligibility rs_abc \\
+            --note "post-2026-04 statutory update"
+    """
+    _cfg, client = load_client_or_fallback()
+    try:
+        resp = client.promote_ruleset_to_live(
+            rulebook,
+            ruleset_name,
+            ruleset_id=ruleset_id,
+            note=note,
+        )
+    except AethisAPIError as e:
+        error_panel(e)
+        raise typer.Exit(code=1)
+
+    success(f"Promoted ruleset {ruleset_name!r} version {ruleset_id} → live in rulebook {rulebook}")
+    console.print(f"  new rulebook version: [green]v{resp.get('new_rulebook_version')}[/green]")
+    prior = resp.get("prior_live_archived_id")
+    if prior:
+        console.print(f"  prior live archived: [dim]{prior}[/dim]")
+    console.print(f"  cut reason: [dim]{resp.get('cut_reason')}[/dim]")
 
 
 @rulesets_app.command(name="archive")
