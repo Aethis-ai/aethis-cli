@@ -250,6 +250,146 @@ class AethisClient:
     def archive_ruleset(self, ruleset_id: str) -> dict:
         return self._request("POST", f"/api/v1/public/rulesets/{ruleset_id}/archive")
 
+    # -- Rulebooks API (Phase B.1 — converged 2-term model) --
+
+    def create_rulebook(
+        self,
+        name: str,
+        *,
+        domain: str = "",
+        description: Optional[str] = None,
+        slug: Optional[str] = None,
+        ruleset_refs: Optional[list[dict]] = None,
+        outcome_logic: Optional[dict] = None,
+    ) -> dict:
+        body: dict[str, Any] = {
+            "name": name,
+            "domain": domain,
+            "ruleset_refs": ruleset_refs or [],
+        }
+        if description is not None:
+            body["description"] = description
+        if slug is not None:
+            body["slug"] = slug
+        if outcome_logic is not None:
+            body["outcome_logic"] = outcome_logic
+        return self._request("POST", "/api/v1/public/rulebooks/", json=body)
+
+    def list_rulebooks(self) -> list[dict]:
+        return self._request("GET", "/api/v1/public/rulebooks/")
+
+    def get_rulebook(self, rulebook_id_or_slug: str) -> dict:
+        return self._request("GET", f"/api/v1/public/rulebooks/{rulebook_id_or_slug}")
+
+    def update_rulebook(
+        self,
+        rulebook_id_or_slug: str,
+        *,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        ruleset_refs: Optional[list[dict]] = None,
+        outcome_logic: Optional[dict] = None,
+        slug: Optional[str] = None,
+    ) -> dict:
+        body: dict[str, Any] = {}
+        if name is not None:
+            body["name"] = name
+        if description is not None:
+            body["description"] = description
+        if ruleset_refs is not None:
+            body["ruleset_refs"] = ruleset_refs
+        if outcome_logic is not None:
+            body["outcome_logic"] = outcome_logic
+        if slug is not None:
+            body["slug"] = slug
+        return self._request(
+            "PATCH",
+            f"/api/v1/public/rulebooks/{rulebook_id_or_slug}",
+            json=body,
+        )
+
+    def activate_rulebook(self, rulebook_id_or_slug: str) -> dict:
+        return self._request("POST", f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/activate")
+
+    def archive_rulebook(self, rulebook_id_or_slug: str) -> dict:
+        return self._request("POST", f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/archive")
+
+    def get_rulebook_schema(self, rulebook_id_or_slug: str) -> dict:
+        return self._request("GET", f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/schema")
+
+    def explain_rulebook(self, rulebook_id_or_slug: str) -> dict:
+        return self._request("GET", f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/explain")
+
+    # -- Rulebook fields (Phase A.6) --
+
+    def set_rulebook_fields(self, rulebook_id_or_slug: str, fields: list[dict]) -> dict:
+        return self._request(
+            "POST",
+            f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/fields",
+            json={"fields": fields},
+        )
+
+    def lock_rulebook_fields(self, rulebook_id_or_slug: str) -> dict:
+        return self._request(
+            "POST",
+            f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/fields/lock",
+        )
+
+    def unlock_rulebook_fields(self, rulebook_id_or_slug: str) -> dict:
+        return self._request(
+            "POST",
+            f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/fields/unlock",
+        )
+
+    def get_rulebook_fields(self, rulebook_id_or_slug: str) -> dict:
+        return self._request("GET", f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/fields")
+
+    # -- Rulebook-level test cases (Phase A.6) --
+
+    def add_rulebook_test_case(
+        self,
+        rulebook_id_or_slug: str,
+        *,
+        name: str,
+        field_values: dict,
+        expected_outcome: str,
+    ) -> dict:
+        return self._request(
+            "POST",
+            f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/tests",
+            json={
+                "name": name,
+                "field_values": field_values,
+                "expected_outcome": expected_outcome,
+            },
+        )
+
+    def list_rulebook_test_cases(self, rulebook_id_or_slug: str) -> dict:
+        return self._request("GET", f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/tests")
+
+    def delete_rulebook_test_case(self, rulebook_id_or_slug: str, tc_id: str) -> None:
+        self._request(
+            "DELETE",
+            f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/tests/{tc_id}",
+        )
+
+    def decide_rulebook(self, rulebook_id_or_slug: str, field_values: dict, **opts: Any) -> dict:
+        """Evaluate a rulebook against field_values.
+
+        Same endpoint as :py:meth:`decide` but passes ``rulebook_id`` instead
+        of ``ruleset_id``. The engine resolves the rulebook's live ruleset
+        pins and runs the composed evaluation.
+        """
+        return self._request(
+            "POST",
+            "/api/v1/public/decide",
+            json={
+                "rulebook_id": rulebook_id_or_slug,
+                "field_values": field_values,
+                **opts,
+            },
+        )
+
     # -- Domain guidance API --
 
     def add_domain_guidance(

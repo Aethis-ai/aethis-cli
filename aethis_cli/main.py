@@ -14,6 +14,7 @@ from aethis_cli.auth_helpers import RUNTIME
 from aethis_cli.errors import AethisAPIError, AuthenticationError, AuthRequired, ConfigError
 from aethis_cli.output import console
 from aethis_cli.commands.account_cmd import account_app
+from aethis_cli.commands.rulebooks_cmd import rulebooks_app
 from aethis_cli.commands.rulesets_cmd import rulesets_app
 from aethis_cli.commands.guidance_cmd import guidance_app
 from aethis_cli.commands.mcp_cmd import mcp_app
@@ -135,6 +136,7 @@ def main(
 
 
 app.add_typer(account_app, name="account")
+app.add_typer(rulebooks_app, name="rulebooks")
 app.add_typer(rulesets_app, name="rulesets")
 app.add_typer(guidance_app, name="guidance")
 app.add_typer(mcp_app, name="mcp")

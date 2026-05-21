@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.14.0 (2026-05-21)
+
+- **feat(rulebooks): new `aethis rulebooks` command group.** First user-facing surface for the converged 2-term authoring model (workspace PR #64, aethis-core PRs #133-139). A Rulebook is the whole form — the execution unit — that owns a locked field vocabulary, composition logic, rulebook-level test cases, and an integer version history.
+  - `aethis rulebooks list` — list tenant rulebooks
+  - `aethis rulebooks show <id-or-slug>` — full configuration
+  - `aethis rulebooks create <name> --domain <d> [--slug ...]` — create draft
+  - `aethis rulebooks set-fields <id> -f fields.yaml` — replace locked vocabulary
+  - `aethis rulebooks lock-fields <id>` / `unlock-fields <id>` / `get-fields <id>`
+  - `aethis rulebooks tests add <id> -f scenario.yaml` — embed full-form test case
+  - `aethis rulebooks tests list <id>` / `delete <id> <tc_id>`
+  - `aethis rulebooks activate <id>` / `archive <id>` — lifecycle
+  - `aethis rulebooks decide <id> -i '{...}' [--explain]` — evaluate composed rulebook
+  - `aethis rulebooks schema <id>` / `explain <id>` — combined schema + explanations
+- feat(client): new `AethisClient` methods for every rulebook REST endpoint (create / list / show / update / activate / archive / set-fields / lock-fields / unlock-fields / get-fields / add-test / list-tests / delete-test / decide-rulebook / get-rulebook-schema / explain-rulebook).
+- Requires aethis-core v0.19.0+ live on the target API (the Phase A.6 endpoints).
+- The legacy `aethis projects` / `aethis generate` / `aethis test` / `aethis publish` command tree is unchanged in this release — replacement lands in the next minor (Phase B.1b: ruleset lifecycle + project retirement). No backward-compat shims are planned past public release.
+
 ## 0.13.1 (2026-05-20)
 
 - feat(rulesets): show the human-readable section `name` column in `aethis rulesets list` output (both the public showcase and project-scoped tables). Surfaces the new field from aethis-core v0.18.0.
