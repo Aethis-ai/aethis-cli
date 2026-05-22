@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.16.1 (2026-05-22)
+
+- **docs(rulebooks set-logic):** the docstring example for `field_ref.key` now matches engine behaviour. Phase A.16 (aethis-core v0.26.0+) added per-section aggregate group synthesis, so `field_ref.key = <ruleset_name>` resolves to the AND of that ruleset's groups. The unscoped group-name and scoped `<ruleset_name>.<group>` forms remain available for advanced compositions. Requires aethis-core v0.26.0+ live on the target API.
+
 ## 0.16.0 (2026-05-21)
 
 - **feat(rulebooks): `aethis rulebooks set-logic` — set the composition expression on a rulebook.** The composition expression (server field `outcome_logic`) is an Expr AST that combines per-ruleset outcomes into the rulebook's final decision. Previously settable only via raw PATCH; now exposed via the CLI for multi-ruleset rulebooks (e.g. UK FSM's `child_eligibility AND (household_criteria OR universal_infant)`).
