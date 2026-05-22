@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.16.2 (2026-05-22)
+
+- **docs(readme): v0.27.0 accuracy pass.** Three fixes for fresh-developer accuracy:
+  - Install block: removed the `pip install` fallback (uv and pipx are the recommended forms per workspace policy). Development section: `pip install -e ".[dev]"` → `uv pip install -e ".[dev]"`.
+  - Added **Rulebooks** command-group section documenting the converged 2-term model surface shipped in v0.14.0–v0.16.1 (`aethis rulebooks` + `aethis rulesets` promote-to-live).
+  - Updated engine_version example to `aethis-core@0.27.0` (was absent; clarified to current production version).
+
 ## 0.16.1 (2026-05-22)
 
 - **docs(rulebooks set-logic):** the docstring example for `field_ref.key` now matches engine behaviour. Phase A.16 (aethis-core v0.26.0+) added per-section aggregate group synthesis, so `field_ref.key = <ruleset_name>` resolves to the AND of that ruleset's groups. The unscoped group-name and scoped `<ruleset_name>.<group>` forms remain available for advanced compositions. Requires aethis-core v0.26.0+ live on the target API.

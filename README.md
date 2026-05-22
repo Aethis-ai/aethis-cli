@@ -14,10 +14,6 @@ uv tool install aethis-cli
 
 # Or, with pipx:
 pipx install aethis-cli
-
-# Or in a venv:
-python -m venv .venv && source .venv/bin/activate
-pip install aethis-cli
 ```
 
 ## Quick start
@@ -161,6 +157,25 @@ Project guidance lives in `.aethis/guidance/hints.yaml` and is uploaded by `aeth
 | `aethis projects archive <project_id>` | Archive a project |
 | `aethis rulesets list` | List published rulesets |
 | `aethis rulesets archive <ruleset_id>` | Archive a ruleset |
+
+### Rulebooks (the converged 2-term model, login required)
+
+A Rulebook is the whole form — the unit `/decide` evaluates against. It owns a locked field vocabulary, an `outcome_logic` composition expression, rulebook-level test cases, and an integer version history. Rulesets are named, versioned members of a Rulebook.
+
+| Command | Description |
+|---------|-------------|
+| `aethis rulebooks list` | List your tenant's rulebooks |
+| `aethis rulebooks show <id-or-slug>` | Full configuration including outcome_logic |
+| `aethis rulebooks create <name> --domain <d> [--slug ...]` | Create a draft rulebook |
+| `aethis rulebooks set-fields <id> -f fields.yaml` | Replace the locked field vocabulary |
+| `aethis rulebooks lock-fields <id>` / `unlock-fields <id>` / `get-fields <id>` | Manage the field-lock state |
+| `aethis rulebooks set-logic <id> -f logic.yaml` | Set the composition expression (Expr AST) |
+| `aethis rulebooks decide <id-or-slug> -i '<json>'` | Evaluate the composed rulebook (requires API key) |
+| `aethis rulebooks activate <id>` / `archive <id>` | Lifecycle |
+| `aethis rulesets create <rulebook> <ruleset_name>` | Create a draft ruleset inside a rulebook |
+| `aethis rulesets list <rulebook>` | List rulesets in a rulebook |
+| `aethis rulesets show <rulebook> <ruleset_name>` | Full version history for one ruleset name |
+| `aethis rulesets promote-to-live <rulebook> <ruleset_name> <ruleset_id>` | Atomic promotion: demote prior live → archived, promote candidate, cut new Rulebook version |
 
 ### Account
 
@@ -320,7 +335,7 @@ Staff-only tools (DSL source viewer, IAM registry, domain-guidance management, `
 ```bash
 git clone https://github.com/aethis-ai/aethis-cli.git
 cd aethis-cli
-pip install -e ".[dev]"
+uv pip install -e ".[dev]"
 pytest tests/ -v
 ```
 
