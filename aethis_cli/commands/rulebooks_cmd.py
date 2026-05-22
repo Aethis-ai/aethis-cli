@@ -344,9 +344,14 @@ def set_logic(
           ]
         }
 
-    ``field_ref.key`` values are ruleset names within the rulebook. Pass
-    the expression as either a file (``--file logic.yaml``) or inline
-    JSON (``--logic '{...}'``). Exactly one of the two is required.
+    ``field_ref.key`` values are ruleset names within the rulebook (e.g.
+    ``"child_eligibility"``); the engine resolves each name to the AND of
+    that ruleset's compiled groups (requires aethis-core v0.26.0+). For
+    advanced compositions you may also use an unscoped group name or the
+    scoped ``<ruleset_name>.<group>`` form — both remain accepted for
+    backwards compatibility. Pass the expression as either a file
+    (``--file logic.yaml``) or inline JSON (``--logic '{...}'``). Exactly
+    one of the two is required.
     """
     if (file is None) == (logic is None):
         # Either both supplied or both missing — neither is valid.
