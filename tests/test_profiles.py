@@ -10,7 +10,7 @@ import yaml
 from typer.testing import CliRunner
 
 from aethis_cli import config
-from aethis_cli.auth_helpers import RUNTIME, _resolve_cached_key, is_anonymous_active
+from aethis_cli.auth_helpers import RUNTIME, resolve_cached_key, is_anonymous_active
 from aethis_cli.main import app
 
 runner = CliRunner()
@@ -54,7 +54,7 @@ def test_legacy_single_key_loads_as_default_profile(tmp_path: Path) -> None:
 def test_legacy_single_key_resolves_for_default_profile(tmp_path: Path) -> None:
     _write_legacy_single_key(tmp_path, "ak_legacy_xyz")
 
-    assert _resolve_cached_key() == "ak_legacy_xyz"
+    assert resolve_cached_key() == "ak_legacy_xyz"
 
 
 def test_save_upgrades_legacy_to_multi_profile(tmp_path: Path) -> None:
@@ -72,7 +72,7 @@ def test_anonymous_profile_yields_no_key(tmp_path: Path) -> None:
     config.set_active_profile("anonymous")
 
     assert is_anonymous_active() is True
-    assert _resolve_cached_key() is None
+    assert resolve_cached_key() is None
 
 
 def test_profile_override_beats_sticky_default(tmp_path: Path) -> None:
@@ -83,7 +83,7 @@ def test_profile_override_beats_sticky_default(tmp_path: Path) -> None:
     RUNTIME.profile_override = "new-dev"
     try:
         assert config.active_profile_name() == "new-dev"
-        assert _resolve_cached_key() == "ak_dev"
+        assert resolve_cached_key() == "ak_dev"
     finally:
         RUNTIME.profile_override = None
 
@@ -94,7 +94,7 @@ def test_env_api_key_beats_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     monkeypatch.setenv("AETHIS_API_KEY", "ak_env_override")
 
     # AETHIS_API_KEY remains the absolute override, even with a configured profile.
-    assert _resolve_cached_key() == "ak_env_override"
+    assert resolve_cached_key() == "ak_env_override"
 
 
 def test_reserved_anonymous_name_rejected_at_set(tmp_path: Path) -> None:

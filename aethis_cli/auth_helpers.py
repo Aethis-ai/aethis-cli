@@ -56,7 +56,7 @@ def _is_interactive() -> bool:
         return False
 
 
-def _resolve_cached_key() -> Optional[str]:
+def resolve_cached_key() -> Optional[str]:
     """Return the cached key for the active profile, or None if none is found.
 
     Resolution order:
@@ -185,7 +185,7 @@ def require_auth_or_login_inline(
         raise AuthRequired(message)
 
     if not force_browser:
-        cached = _resolve_cached_key()
+        cached = resolve_cached_key()
         if cached:
             return cached
 

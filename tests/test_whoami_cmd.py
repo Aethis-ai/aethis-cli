@@ -7,18 +7,21 @@ from unittest.mock import MagicMock, patch
 from typer.testing import CliRunner
 
 
-def _run(env=None, client_mock=None):
+def _run(env=None, client_mock=None, api_key="ak_test"):
     from aethis_cli.main import app
 
     runner = CliRunner()
     patches = []
     if client_mock is not None:
         patches.append(patch("aethis_cli.commands.whoami_cmd.AethisClient", return_value=client_mock))
-    # Short-circuit the resolve helper so we don't touch keychain in tests
+    # Short-circuit the resolvers so the test never touches keychain or disk.
+    patches.append(
+        patch("aethis_cli.commands.whoami_cmd.resolve_cached_key", return_value=api_key),
+    )
     patches.append(
         patch(
-            "aethis_cli.commands.whoami_cmd._resolve_api_key_lax",
-            return_value=("ak_test", "http://localhost:8080"),
+            "aethis_cli.commands.whoami_cmd.resolve_base_url_with_source",
+            return_value=("http://localhost:8080", "default"),
         ),
     )
     _env = {"AETHIS_BASE_URL": "http://localhost:8080"}
@@ -68,14 +71,6 @@ def test_whoami_without_authoring_scope_points_to_signup():
 
 
 def test_whoami_without_api_key_exits_with_hint():
-    # Override the resolver to return (None, base_url)
-    from aethis_cli.main import app
-
-    runner = CliRunner()
-    with patch(
-        "aethis_cli.commands.whoami_cmd._resolve_api_key_lax",
-        return_value=(None, "http://localhost:8080"),
-    ):
-        result = runner.invoke(app, ["whoami"], catch_exceptions=False)
+    result = _run(api_key=None)
     assert result.exit_code == 1
     assert "No Aethis API key" in result.output

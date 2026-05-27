@@ -2,9 +2,21 @@
 
 from __future__ import annotations
 
+import os
+import re
+from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+import yaml
 from typer.testing import CliRunner
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(s: str) -> str:
+    """Strip ANSI escape sequences so substring checks survive Rich's auto-highlighting."""
+    return _ANSI_RE.sub("", s)
 
 
 def _run_status(args=None, env=None):
@@ -25,12 +37,10 @@ def test_status_no_config_no_key_shows_defaults(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("AETHIS_API_KEY", raising=False)
     monkeypatch.delenv("AETHIS_BASE_URL", raising=False)
-    # Neutralise keyring + credentials fallback
+    # Point credentials lookup at an empty temp dir so no real key is found.
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "empty_xdg"))
 
-    with patch("aethis_cli.commands.status_cmd.keyring", create=True) as kr:
-        kr.get_password.return_value = None
-        result = _run_status()
+    result = _run_status()
 
     assert result.exit_code == 0, result.output
     assert "aethis v" in result.output
@@ -47,9 +57,7 @@ def test_status_with_base_url_env_shows_override(tmp_path, monkeypatch):
     monkeypatch.delenv("AETHIS_API_KEY", raising=False)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "empty_xdg"))
 
-    with patch("aethis_cli.commands.status_cmd.keyring", create=True) as kr:
-        kr.get_password.return_value = None
-        result = _run_status()
+    result = _run_status()
 
     assert result.exit_code == 0, result.output
     assert "http://localhost:8080" in result.output
@@ -102,6 +110,95 @@ def test_status_with_yaml_shows_project_context(tmp_project, monkeypatch):
     assert "from aethis.yaml" in result.output
 
 
+def _write_multi_profile_credentials(tmp_path: Path, profile: str, api_key: str) -> Path:
+    """Write the multi-profile credentials YAML the way `aethis login` does."""
+    creds_dir = tmp_path / "aethis"
+    creds_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    creds = creds_dir / "credentials"
+    payload = {"active_profile": profile, "profiles": {profile: {"api_key": api_key}}}
+    fd = os.open(str(creds), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(yaml.dump(payload))
+    return creds
+
+
+def _reset_runtime() -> None:
+    """Clear the auth-helpers RUNTIME singleton so prior tests don't leak overrides."""
+    from aethis_cli.auth_helpers import RUNTIME
+
+    RUNTIME.no_prompt = False
+    RUNTIME.api_key_override = None
+    RUNTIME.base_url_override = None
+    RUNTIME.profile_override = None
+
+
+@pytest.mark.parametrize("profile", ["default", "staging"])
+def test_status_reads_multi_profile_credentials_file(tmp_path, monkeypatch, profile):
+    """Regression: `aethis login` writes profiles.<name>.api_key but status used
+    to look for a flat top-level `api_key` and reported "no API key" while
+    other commands worked fine.
+
+    Parametrized over `default` and a non-default profile (`staging`): the
+    keyring fallback in `resolve_cached_key` only fires for `default`, so the
+    non-default case is the stricter exercise of the profile-aware file read.
+
+    Trip-wire so the asymmetry doesn't reappear.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("AETHIS_API_KEY", raising=False)
+    monkeypatch.delenv("AETHIS_BASE_URL", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    _reset_runtime()
+    api_key = f"ak_live_regression_canary_{profile}"
+    _write_multi_profile_credentials(tmp_path, profile, api_key)
+
+    fake_me = {
+        "key_id": api_key,
+        "tenant_id": "tenant_x",
+        "rate_limit_tier": "internal",
+        "scopes": ["decide", "rulesets:write"],
+        "can_author": True,
+    }
+    with patch("aethis_cli.client.AethisClient.whoami", return_value=fake_me):
+        result = _run_status()
+
+    assert result.exit_code == 0, result.output
+    assert api_key in result.output, (
+        f"status read the credentials file but didn't surface the resolved key for profile={profile} — "
+        "check the call site to resolve_cached_key()"
+    )
+    assert "no API key" not in result.output
+
+
+@pytest.mark.parametrize("profile", ["default", "staging"])
+def test_whoami_reads_multi_profile_credentials_file(tmp_path, monkeypatch, profile):
+    """Regression mirror of the status test above, for `aethis whoami`."""
+    from aethis_cli.main import app
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("AETHIS_API_KEY", raising=False)
+    monkeypatch.delenv("AETHIS_BASE_URL", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    _reset_runtime()
+    api_key = f"ak_live_whoami_canary_{profile}"
+    _write_multi_profile_credentials(tmp_path, profile, api_key)
+
+    fake_me = {
+        "key_id": api_key,
+        "tenant_id": "tenant_x",
+        "rate_limit_tier": "internal",
+        "scopes": ["decide", "rulesets:write"],
+        "can_author": True,
+    }
+    runner = CliRunner()
+    with patch("aethis_cli.client.AethisClient.whoami", return_value=fake_me):
+        result = runner.invoke(app, ["whoami"], catch_exceptions=False)
+
+    assert result.exit_code == 0, result.output
+    assert api_key in result.output, f"whoami didn't surface the resolved key for profile={profile}"
+    assert "No Aethis API key" not in result.output
+
+
 def test_status_with_project_id_shows_generation_progress(tmp_project, monkeypatch):
     """--project-id adds a generation progress section after the global summary."""
     monkeypatch.chdir(tmp_project)
@@ -128,7 +225,8 @@ def test_status_with_project_id_shows_generation_progress(tmp_project, monkeypat
         result = _run_status(args=["-p", "proj_abc"])
 
     assert result.exit_code == 0, result.output
-    assert "Generation" in result.output
-    assert "proj_abc" in result.output
-    assert "ready" in result.output
-    assert "test:20260419-abc1234" in result.output
+    clean = _strip_ansi(result.output)
+    assert "Generation" in clean
+    assert "proj_abc" in clean
+    assert "ready" in clean
+    assert "test:20260419-abc1234" in clean
