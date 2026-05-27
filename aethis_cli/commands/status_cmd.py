@@ -259,8 +259,9 @@ def _emit_json_status(project_id: Optional[str]) -> None:
             except AethisAPIError as e:
                 state["identity"] = {
                     "key_present": True,
+                    "error": str(e.detail),
+                    "status_code": e.status_code,
                     "key_rejected": e.status_code in (401, 403, 404),
-                    "error_status": e.status_code,
                 }
 
     # Generation section — only when we have a project id

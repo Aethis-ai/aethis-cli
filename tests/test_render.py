@@ -14,12 +14,9 @@ from aethis_cli import render
 from aethis_cli.render import LIST_FIELDS_SENTINEL, OutputFormat, RenderOpts, emit
 
 
-@pytest.fixture(autouse=True)
-def _reset_runtime() -> None:
-    """Make sure no test leaks RenderOpts state into the next one."""
-    render.RUNTIME.reset()
-    yield
-    render.RUNTIME.reset()
+# Note: RenderOpts state is reset between tests by the autouse
+# ``_reset_render_runtime`` fixture in ``tests/conftest.py``. No file-level
+# fixture needed here.
 
 
 SAMPLE_LIST = [

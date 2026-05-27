@@ -14,14 +14,20 @@ This module is the single emit point. Each list/show command:
 3. Calls :func:`emit`, which respects ``--output / --json / --jq``
    global flags (set on :data:`RUNTIME` at the root callback).
 
-The flag surface mirrors GitHub's ``gh`` CLI:
+The flag surface partly mirrors GitHub's ``gh`` CLI:
 
 * ``--output table|json`` — pick the format. Default: ``table`` on a
   TTY, ``json`` when stdout is piped (gh's "pipe-friendly by default").
-* ``--json`` — alias for ``--output json``; with an optional CSV value
-  (``--json id,name``) limits the emitted object to those fields. With
-  no value (``--json`` alone) prints the available fields and exits 0
-  (gh's introspection trick — invaluable for discovering schema).
+* ``--json FIELDS`` — implies ``--output json``; takes a required
+  comma-separated value (``--json id,name``) that limits the emitted
+  object to those fields. ``gh`` additionally treats ``--json`` with no
+  value as a schema introspection request; we don't expose that today
+  because Click/Typer's option parser can't cleanly distinguish "flag
+  with no value" from "flag followed by positional argument" without
+  the deprecated ``is_flag=False, flag_value=...`` pattern. The
+  underlying machinery (:data:`LIST_FIELDS_SENTINEL`,
+  :func:`_emit_field_list`) is kept for a future revival via a separate
+  flag — see the v0.18 milestone.
 * ``--jq EXPR`` — pipe JSON output through ``jq`` before printing.
   Requires the ``jq`` binary on PATH; fails with a clear hint if not.
 

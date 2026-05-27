@@ -71,7 +71,12 @@ def list_hints(
 @guidance_app.command("export")
 def export_hints(
     project_id: Optional[str] = typer.Option(None, "--project-id", "-p"),
-    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Write to file instead of stdout"),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output-file",
+        "-o",
+        help="Write to file instead of stdout. (Renamed from --output in v0.17.0 to avoid clashing with the new global --output flag.)",
+    ),
 ) -> None:
     """Export active guidance hints as YAML."""
     try:

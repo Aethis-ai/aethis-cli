@@ -4,11 +4,12 @@
 
 - **feat(output): gh-style machine-readable output mode (`--output json`, `--json fields`, `--jq`).** Every list/show command (and the decision commands) now emit structured JSON on demand, so `aethis rulesets list --output json | jq '.[0].slug'` just works instead of trying to scrape ANSI-coloured Rich tables.
   - `--output table|json` — pick the format. Default: `table` on a TTY, `json` when piped (matches gh's pipe-friendly autodetect).
-  - `--json` — implies `--output json`. With a comma-separated value (`--json id,name`) limits the payload to those fields. With no value, prints the available fields and exits (gh's introspection trick).
+  - `--json FIELDS` — implies `--output json`; takes a required comma-separated value (`--json id,name`) that limits the payload to those fields. (gh's bare-`--json` introspection trick is not yet exposed — Click/Typer's option parser can't cleanly distinguish "flag with no value" from "flag followed by positional", so it's deferred to a future `--list-fields` flag.)
   - `--jq EXPR` — pipe JSON output through `jq` before printing. Requires the `jq` binary on PATH; clear error with install hint if missing.
   - Commands migrated: `rulesets list/show`, `rulebooks list/show/get-fields/tests list/schema/explain/decide`, `projects list/show`, `account keys`, `profile list`, `guidance list`, `fields`, `explain`, `decide`, `status`. Each command has a sensible JSON shape — `status --output json | jq .identity.key_id` returns the live key id without rooting through any prose.
   - Footer hints (`Try: aethis ...`) are suppressed in JSON mode so pipes get clean output.
   - New module `aethis_cli/render.py` is the single emit point; new test file `tests/test_render.py` covers the matrix.
+- **breaking(guidance export): `--output` renamed to `--output-file`** to avoid clashing with the new global `--output` flag. Short form `-o` unchanged. Affects scripts that pipe to a named file: `aethis guidance export --output foo.yaml` → `aethis guidance export --output-file foo.yaml` (or `-o foo.yaml`).
 
 ## 0.16.3 (2026-05-27)
 
