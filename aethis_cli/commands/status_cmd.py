@@ -193,5 +193,3 @@ def _print_generation_section(project_id: str) -> None:
     bid = result.get("latest_ruleset_id")
     if bid:
         console.print(f"  Ruleset:  {bid}")
-
-
