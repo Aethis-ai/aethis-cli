@@ -152,7 +152,7 @@ def load_client_or_anon() -> tuple["ProjectConfig", "AethisClient"]:
     get access to their private rulesets. If no key is found, fall back to
     an unsigned client so public rulesets work with zero setup.
     """
-    from aethis_cli.auth_helpers import RUNTIME, _resolve_cached_key, is_anonymous_active
+    from aethis_cli.auth_helpers import RUNTIME, resolve_cached_key, is_anonymous_active
     from aethis_cli.client import make_anonymous_client
 
     try:
@@ -176,7 +176,7 @@ def load_client_or_anon() -> tuple["ProjectConfig", "AethisClient"]:
         # anonymous just because one isn't present.
         return cfg, make_authed_client("", cfg.base_url, profile=profile)
 
-    api_key = _resolve_cached_key()
+    api_key = resolve_cached_key()
     if api_key is None:
         return cfg, make_anonymous_client(cfg.base_url)
 
@@ -217,18 +217,18 @@ def load_project_config(path: Optional[Path] = None) -> ProjectConfig:
 def resolve_api_key(config: ProjectConfig) -> str:
     """Resolve API key: env var → active profile → keychain (default only) → lazy-auth.
 
-    See :func:`aethis_cli.auth_helpers._resolve_cached_key` for the resolution
+    See :func:`aethis_cli.auth_helpers.resolve_cached_key` for the resolution
     chain. When no cached key is found we delegate to the lazy-auth helper,
     which will offer an inline browser sign-in on a TTY or raise
     ``AuthRequired`` on non-interactive shells / ``--no-prompt``.
     """
-    from aethis_cli.auth_helpers import _resolve_cached_key, require_auth_or_login_inline
+    from aethis_cli.auth_helpers import resolve_cached_key, require_auth_or_login_inline
 
-    cached = _resolve_cached_key()
+    cached = resolve_cached_key()
     if cached:
         # Honour the project's ``api_key_env`` override only when set to the
         # non-default name — the standard ``AETHIS_API_KEY`` path is already
-        # covered by ``_resolve_cached_key``.
+        # covered by ``resolve_cached_key``.
         if config.api_key_env != "AETHIS_API_KEY":
             override = os.environ.get(config.api_key_env)
             if override:

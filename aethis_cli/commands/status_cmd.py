@@ -8,6 +8,7 @@ from typing import Optional
 import typer
 
 from aethis_cli._version import __version__
+from aethis_cli.auth_helpers import resolve_cached_key
 from aethis_cli.client import AethisClient
 from aethis_cli.config import (
     DEFAULT_BASE_URL,
@@ -126,7 +127,7 @@ def _print_identity_section() -> None:
         console.print(f"[bold]Identity:[/bold]    [dim]{auth_mode} (provider-minted at request time)[/dim]")
         return
 
-    api_key = _resolve_key_silent()
+    api_key = resolve_cached_key()
     if api_key is None:
         console.print(
             "[bold]Identity:[/bold]    [yellow]no API key[/yellow]  "
@@ -168,7 +169,7 @@ def _print_generation_section(project_id: str) -> None:
     except ConfigError:
         base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
 
-    api_key = _resolve_key_silent()
+    api_key = resolve_cached_key()
     if api_key is None:
         console.print("[bold]Generation:[/bold]  [dim]skipped — no API key[/dim]")
         return
@@ -194,31 +195,3 @@ def _print_generation_section(project_id: str) -> None:
         console.print(f"  Ruleset:  {bid}")
 
 
-def _resolve_key_silent() -> Optional[str]:
-    """Resolve API key without raising. Returns None if not found."""
-    key = os.environ.get("AETHIS_API_KEY")
-    if key:
-        return key
-    try:
-        import keyring  # type: ignore[import-not-found]
-
-        key = keyring.get_password("aethis-cli", "api_key")
-        if key:
-            return key
-    except Exception:
-        pass
-    from pathlib import Path
-
-    import yaml  # type: ignore[import-untyped]
-
-    creds_xdg = os.environ.get("XDG_CONFIG_HOME")
-    creds_path = (
-        Path(creds_xdg) / "aethis" / "credentials" if creds_xdg else Path.home() / ".config" / "aethis" / "credentials"
-    )
-    if creds_path.exists():
-        try:
-            raw = yaml.safe_load(creds_path.read_text()) or {}
-            return raw.get("api_key")
-        except Exception:
-            pass
-    return None

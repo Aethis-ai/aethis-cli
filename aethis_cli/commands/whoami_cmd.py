@@ -4,44 +4,11 @@ from __future__ import annotations
 
 import typer
 
-import os
-
+from aethis_cli.auth_helpers import resolve_cached_key
 from aethis_cli.client import AethisClient
-from aethis_cli.config import DEFAULT_BASE_URL
+from aethis_cli.config import resolve_base_url_with_source
 from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel
-
-
-def _resolve_api_key_lax() -> tuple[str | None, str]:
-    """Resolve an API key using the same fallback chain as other commands,
-    but don't raise when no key is found — return (None, base_url) instead.
-    """
-    base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
-    key = os.environ.get("AETHIS_API_KEY")
-    if key:
-        return key, base_url
-    try:
-        import keyring  # type: ignore[import-not-found]
-
-        key = keyring.get_password("aethis-cli", "api_key")
-        if key:
-            return key, base_url
-    except Exception:
-        pass
-    # Plaintext credentials file
-    from pathlib import Path
-    import yaml  # type: ignore[import-untyped]
-
-    creds = Path.home() / ".config" / "aethis" / "credentials.yaml"
-    if creds.exists():
-        try:
-            raw = yaml.safe_load(creds.read_text()) or {}
-            key = raw.get("api_key")
-            if key:
-                return key, base_url
-        except Exception:
-            pass
-    return None, base_url
 
 
 def whoami() -> None:
@@ -49,7 +16,8 @@ def whoami() -> None:
 
     Answers "can I author rules with this key?" before you try and get a 403.
     """
-    api_key, base_url = _resolve_api_key_lax()
+    api_key = resolve_cached_key()
+    base_url, _ = resolve_base_url_with_source()
     if api_key is None:
         console.print(
             "[yellow]No Aethis API key configured.[/yellow]\n"

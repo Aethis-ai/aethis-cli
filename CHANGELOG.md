@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.16.3 (2026-05-27)
+
+- **fix(status, whoami): read the multi-profile credentials file the same way every other command does.** `aethis login --api-key ...` writes `profiles.<name>.api_key` to `~/.config/aethis/credentials` (the multi-profile schema introduced in v0.10), but `aethis status` and `aethis whoami` had stale local resolvers that only looked for a flat top-level `api_key` (and `whoami` was looking at the wrong filename, `credentials.yaml`). Result: after a fresh `aethis login`, `aethis status` reported `no API key` and `aethis whoami` reported `No Aethis API key configured`, even though the same key worked for `aethis projects list`, `aethis generate`, and every other authoring command.
+  - Both commands now route through the canonical `resolve_cached_key()` helper in `auth_helpers.py`, which honours `AETHIS_API_KEY` env → active profile → keychain → legacy `.yaml` file.
+  - The `_resolve_cached_key` symbol is renamed to `resolve_cached_key` (public). The legacy `_resolve_key_silent` (status_cmd) and `_resolve_api_key_lax` (whoami_cmd) are removed.
+  - Regression test in `tests/test_status_cmd.py` writes a real multi-profile credentials YAML to a temp `XDG_CONFIG_HOME` and asserts both commands surface the key.
+
 ## 0.16.2 (2026-05-22)
 
 - **docs(readme): v0.27.0 accuracy pass.** Three fixes for fresh-developer accuracy:
