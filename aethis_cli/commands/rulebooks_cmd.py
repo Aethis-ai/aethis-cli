@@ -37,6 +37,7 @@ from rich.table import Table
 from aethis_cli.config import load_client_or_fallback
 from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel, success
+from aethis_cli.render import emit, is_json_requested
 
 rulebooks_app = typer.Typer(
     name="rulebooks",
@@ -89,27 +90,32 @@ def list_rulebooks() -> None:
         raise typer.Exit(code=1)
 
     if not rulebooks:
-        console.print("[dim]No rulebooks yet. Create one with `aethis rulebooks create`.[/dim]")
+        if is_json_requested():
+            emit([])
+        else:
+            console.print("[dim]No rulebooks yet. Create one with `aethis rulebooks create`.[/dim]")
         return
 
-    table = Table(title="Rulebooks")
-    table.add_column("Slug", style="cyan")
-    table.add_column("Rulebook ID", style="dim")
-    table.add_column("Name")
-    table.add_column("Domain")
-    table.add_column("Status")
-    table.add_column("Rulesets", justify="right")
+    def _build_rulebooks_table() -> Table:
+        table = Table(title="Rulebooks")
+        table.add_column("Slug", style="cyan")
+        table.add_column("Rulebook ID", style="dim")
+        table.add_column("Name")
+        table.add_column("Domain")
+        table.add_column("Status")
+        table.add_column("Rulesets", justify="right")
+        for rb in rulebooks:
+            table.add_row(
+                rb.get("slug") or "[dim]—[/dim]",
+                rb.get("rulebook_id", ""),
+                rb.get("name") or "[dim]—[/dim]",
+                rb.get("domain") or "[dim]—[/dim]",
+                rb.get("status", ""),
+                str(len(rb.get("ruleset_refs", []) or [])),
+            )
+        return table
 
-    for rb in rulebooks:
-        table.add_row(
-            rb.get("slug") or "[dim]—[/dim]",
-            rb.get("rulebook_id", ""),
-            rb.get("name") or "[dim]—[/dim]",
-            rb.get("domain") or "[dim]—[/dim]",
-            rb.get("status", ""),
-            str(len(rb.get("ruleset_refs", []) or [])),
-        )
-    console.print(table)
+    emit(rulebooks, table=_build_rulebooks_table)
 
 
 # ============================================================================
@@ -129,7 +135,7 @@ def show_rulebook(
         error_panel(e)
         raise typer.Exit(code=1)
 
-    console.print_json(data=rb)
+    emit(rb)
 
 
 # ============================================================================
@@ -281,24 +287,33 @@ def get_fields(
     except AethisAPIError as e:
         error_panel(e)
         raise typer.Exit(code=1)
+
+    if is_json_requested():
+        emit(result)
+        return
+
     console.print(f"Lock state: [cyan]{result['field_lock_state']}[/cyan]")
     fields = result.get("fields", [])
     if not fields:
         console.print("[dim]No fields locked yet.[/dim]")
         return
-    table = Table(title=f"Fields — {rulebook}")
-    table.add_column("Key", style="cyan")
-    table.add_column("Sort")
-    table.add_column("Enum values")
-    table.add_column("Description")
-    for f in fields:
-        table.add_row(
-            f.get("key", ""),
-            f.get("sort", ""),
-            ", ".join(f.get("enum_values") or []) or "[dim]—[/dim]",
-            f.get("description") or "[dim]—[/dim]",
-        )
-    console.print(table)
+
+    def _build_fields_table() -> Table:
+        table = Table(title=f"Fields — {rulebook}")
+        table.add_column("Key", style="cyan")
+        table.add_column("Sort")
+        table.add_column("Enum values")
+        table.add_column("Description")
+        for f in fields:
+            table.add_row(
+                f.get("key", ""),
+                f.get("sort", ""),
+                ", ".join(f.get("enum_values") or []) or "[dim]—[/dim]",
+                f.get("description") or "[dim]—[/dim]",
+            )
+        return table
+
+    emit(fields, table=_build_fields_table)
 
 
 # ============================================================================
@@ -477,7 +492,7 @@ def decide_rulebook(
         error_panel(e)
         raise typer.Exit(code=1)
 
-    console.print_json(data=result)
+    emit(result)
 
 
 # ============================================================================
@@ -496,7 +511,7 @@ def schema_rulebook(
     except AethisAPIError as e:
         error_panel(e)
         raise typer.Exit(code=1)
-    console.print_json(data=result)
+    emit(result)
 
 
 @rulebooks_app.command(name="explain")
@@ -510,7 +525,7 @@ def explain_rulebook(
     except AethisAPIError as e:
         error_panel(e)
         raise typer.Exit(code=1)
-    console.print_json(data=result)
+    emit(result)
 
 
 # ============================================================================
@@ -589,21 +604,28 @@ def tests_list(
         raise typer.Exit(code=1)
     cases = result.get("test_cases", [])
     if not cases:
-        console.print("[dim]No test cases yet.[/dim]")
+        if is_json_requested():
+            emit([])
+        else:
+            console.print("[dim]No test cases yet.[/dim]")
         return
-    table = Table(title=f"Rulebook test cases — {rulebook}")
-    table.add_column("tc_id", style="cyan")
-    table.add_column("Name")
-    table.add_column("Expected outcome")
-    table.add_column("Fields", justify="right")
-    for tc in cases:
-        table.add_row(
-            tc.get("tc_id", ""),
-            tc.get("name", ""),
-            tc.get("expected_outcome", ""),
-            str(len(tc.get("field_values", {}) or {})),
-        )
-    console.print(table)
+
+    def _build_tests_table() -> Table:
+        table = Table(title=f"Rulebook test cases — {rulebook}")
+        table.add_column("tc_id", style="cyan")
+        table.add_column("Name")
+        table.add_column("Expected outcome")
+        table.add_column("Fields", justify="right")
+        for tc in cases:
+            table.add_row(
+                tc.get("tc_id", ""),
+                tc.get("name", ""),
+                tc.get("expected_outcome", ""),
+                str(len(tc.get("field_values", {}) or {})),
+            )
+        return table
+
+    emit(cases, table=_build_tests_table)
 
 
 @tests_app.command(name="delete")

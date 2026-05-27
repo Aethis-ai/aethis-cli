@@ -13,6 +13,7 @@ from aethis_cli.commands.login_cmd import save_api_key
 from aethis_cli.config import DEFAULT_BASE_URL
 from aethis_cli.errors import AuthenticationError
 from aethis_cli.output import console, info, success
+from aethis_cli.render import emit, is_json_requested
 
 CLERK_DOMAIN = os.environ.get("AETHIS_CLERK_DOMAIN", "clerk.aethis.ai")
 CLERK_CLIENT_ID = os.environ.get("AETHIS_CLERK_CLIENT_ID", "gEiHOxoeLgZJifjf")
@@ -212,30 +213,34 @@ def keys(
 
     data = resp.json()
     if not data:
-        info("No API keys found.")
+        if is_json_requested():
+            emit([])
+        else:
+            info("No API keys found.")
         return
 
     from rich.table import Table
 
-    table = Table(title="API Keys")
-    table.add_column("Key ID", style="bold")
-    table.add_column("Name")
-    table.add_column("Scopes")
-    table.add_column("Tier")
-    table.add_column("Created")
-    table.add_column("Revoked")
+    def _build_keys_table() -> Table:
+        table = Table(title="API Keys")
+        table.add_column("Key ID", style="bold")
+        table.add_column("Name")
+        table.add_column("Scopes")
+        table.add_column("Tier")
+        table.add_column("Created")
+        table.add_column("Revoked")
+        for key in data:
+            table.add_row(
+                key.get("key_id", ""),
+                key.get("name", ""),
+                ", ".join(key.get("scopes", [])),
+                key.get("rate_limit_tier", ""),
+                key.get("created_at", "")[:10] if key.get("created_at") else "",
+                "yes" if key.get("revoked") else "",
+            )
+        return table
 
-    for key in data:
-        table.add_row(
-            key.get("key_id", ""),
-            key.get("name", ""),
-            ", ".join(key.get("scopes", [])),
-            key.get("rate_limit_tier", ""),
-            key.get("created_at", "")[:10] if key.get("created_at") else "",
-            "yes" if key.get("revoked") else "",
-        )
-
-    console.print(table)
+    emit(data, table=_build_keys_table)
 
 
 @account_app.command()

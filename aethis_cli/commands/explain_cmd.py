@@ -11,6 +11,7 @@ from aethis_cli.commands._id_utils import require_ruleset_id
 from aethis_cli.config import load_client_or_anon, read_state
 from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel
+from aethis_cli.render import emit, is_json_requested
 
 
 def explain(
@@ -53,12 +54,19 @@ def explain(
         error_panel(e)
         raise typer.Exit(code=1)
 
-    table = Table(title=f"Rules — {ruleset_id}")
-    table.add_column("Group", style="cyan")
-    table.add_column("Title")
-    table.add_column("Rule")
+    criteria = result.get("criteria", [])
 
-    for c in result.get("criteria", []):
-        table.add_row(c.get("group", ""), c["title"], c["rule_text"])
+    if is_json_requested():
+        emit(criteria)
+        return
 
-    console.print(table)
+    def _build_rules_table() -> Table:
+        table = Table(title=f"Rules — {ruleset_id}")
+        table.add_column("Group", style="cyan")
+        table.add_column("Title")
+        table.add_column("Rule")
+        for c in criteria:
+            table.add_row(c.get("group", ""), c["title"], c["rule_text"])
+        return table
+
+    emit(criteria, table=_build_rules_table)

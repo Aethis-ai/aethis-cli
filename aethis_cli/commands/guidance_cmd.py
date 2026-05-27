@@ -11,6 +11,7 @@ import yaml
 from aethis_cli.config import load_project_config, make_authed_client, resolve_api_key
 from aethis_cli.errors import AethisAPIError, ConfigError
 from aethis_cli.output import console, error_panel, success
+from aethis_cli.render import emit, is_json_requested
 
 guidance_app = typer.Typer(
     help="Manage guidance hints for rule authoring.",
@@ -44,7 +45,14 @@ def list_hints(
         raise typer.Exit(code=1)
 
     if not hints:
-        console.print("[dim]No guidance hints found.[/dim]")
+        if is_json_requested():
+            emit([])
+        else:
+            console.print("[dim]No guidance hints found.[/dim]")
+        return
+
+    if is_json_requested():
+        emit(hints)
         return
 
     for h in hints:

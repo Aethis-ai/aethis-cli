@@ -28,6 +28,7 @@ from aethis_cli.config import (
 )
 from aethis_cli.errors import ConfigError
 from aethis_cli.output import console, success
+from aethis_cli.render import emit, is_json_requested
 
 profile_app = typer.Typer(
     name="profile",
@@ -56,24 +57,39 @@ def list_profiles() -> None:
     # even before they configure a real profile.
     names = sorted(set(profiles.keys()) | {DEFAULT_PROFILE, ANONYMOUS_PROFILE})
 
-    table = Table(title="Profiles")
-    table.add_column("", width=1)
-    table.add_column("Name", style="cyan")
-    table.add_column("API Key")
-    table.add_column("Base URL")
+    # Structured form used by --output json. Never leaks the raw key.
+    structured = [
+        {
+            "name": name,
+            "active": name == active,
+            "has_key": bool(profiles.get(name, {}).get("api_key")) and name != ANONYMOUS_PROFILE,
+            "key_preview": (None if name == ANONYMOUS_PROFILE else _mask_key(profiles.get(name, {}).get("api_key"))),
+            "base_url": profiles.get(name, {}).get("base_url"),
+            "auth_mode": profiles.get(name, {}).get("auth_mode") or "api_key",
+        }
+        for name in names
+    ]
 
-    for name in names:
-        profile = profiles.get(name, {})
-        marker = "*" if name == active else ""
-        if name == ANONYMOUS_PROFILE:
-            key_display = "[dim](no key — anonymous mode)[/dim]"
-        else:
-            key_display = _mask_key(profile.get("api_key"))
-        base_display = profile.get("base_url", "[dim](default)[/dim]")
-        table.add_row(marker, name, key_display, base_display)
+    def _build_profile_table() -> Table:
+        table = Table(title="Profiles")
+        table.add_column("", width=1)
+        table.add_column("Name", style="cyan")
+        table.add_column("API Key")
+        table.add_column("Base URL")
+        for name in names:
+            profile = profiles.get(name, {})
+            marker = "*" if name == active else ""
+            if name == ANONYMOUS_PROFILE:
+                key_display = "[dim](no key — anonymous mode)[/dim]"
+            else:
+                key_display = _mask_key(profile.get("api_key"))
+            base_display = profile.get("base_url", "[dim](default)[/dim]")
+            table.add_row(marker, name, key_display, base_display)
+        return table
 
-    console.print(table)
-    console.print(f"\nActive: [cyan]{active}[/cyan]")
+    emit(structured, table=_build_profile_table)
+    if not is_json_requested():
+        console.print(f"\nActive: [cyan]{active}[/cyan]")
 
 
 @profile_app.command(name="use")

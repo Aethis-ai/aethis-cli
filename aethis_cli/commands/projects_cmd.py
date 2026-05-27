@@ -8,6 +8,7 @@ from rich.table import Table
 from aethis_cli.config import load_client_or_fallback
 from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel, success
+from aethis_cli.render import emit, is_json_requested
 
 projects_app = typer.Typer(
     name="projects",
@@ -37,33 +38,38 @@ def list_projects(
         raise typer.Exit(code=1)
 
     if not projects:
-        console.print("[dim]No projects found.[/dim]")
+        if is_json_requested():
+            emit([])
+        else:
+            console.print("[dim]No projects found.[/dim]")
         return
 
-    table = Table(title="Projects")
-    table.add_column("Project ID", style="cyan")
-    table.add_column("Name")
-    table.add_column("Status")
-    table.add_column("Ruleset")
-    table.add_column("Created")
+    def _build_projects_table() -> Table:
+        table = Table(title="Projects")
+        table.add_column("Project ID", style="cyan")
+        table.add_column("Name")
+        table.add_column("Status")
+        table.add_column("Ruleset")
+        table.add_column("Created")
+        for p in projects:
+            status = p.get("status", "")
+            style = "dim" if status == "archived" else None
+            table.add_row(
+                p["project_id"],
+                p["name"],
+                status,
+                p.get("latest_ruleset_id") or "",
+                p.get("created_at", "")[:10] if p.get("created_at") else "",
+                style=style,
+            )
+        return table
 
-    for p in projects:
-        status = p.get("status", "")
-        style = "dim" if status == "archived" else None
-        table.add_row(
-            p["project_id"],
-            p["name"],
-            status,
-            p.get("latest_ruleset_id") or "",
-            p.get("created_at", "")[:10] if p.get("created_at") else "",
-            style=style,
+    emit(projects, table=_build_projects_table)
+    if not is_json_requested():
+        console.print(
+            "[dim]Tip: copy a Ruleset value and run "
+            "`aethis explain -b <ruleset>` or `aethis decide -b <ruleset> -i '{...}'`.[/dim]"
         )
-
-    console.print(table)
-    console.print(
-        "[dim]Tip: copy a Ruleset value and run "
-        "`aethis explain -b <ruleset>` or `aethis decide -b <ruleset> -i '{...}'`.[/dim]"
-    )
 
 
 @projects_app.command(name="show")
@@ -78,6 +84,10 @@ def show_project(
     except AethisAPIError as e:
         error_panel(e)
         raise typer.Exit(code=1)
+
+    if is_json_requested():
+        emit(p)
+        return
 
     console.print(f"[bold]{p['name']}[/bold] ({p['project_id']})")
     console.print(f"  Section:  {p.get('section_id', '')}")

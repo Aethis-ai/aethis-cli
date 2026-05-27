@@ -11,6 +11,7 @@ from aethis_cli.commands._id_utils import require_ruleset_id
 from aethis_cli.config import load_client_or_anon, read_state
 from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel
+from aethis_cli.render import emit, is_json_requested
 
 
 def decide(
@@ -73,6 +74,10 @@ def decide(
     except AethisAPIError as e:
         error_panel(e)
         raise typer.Exit(code=1)
+
+    if is_json_requested():
+        emit(result)
+        return
 
     decision = result["decision"]
     color = {"eligible": "green", "not_eligible": "red"}.get(decision, "yellow")

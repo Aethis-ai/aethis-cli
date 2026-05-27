@@ -21,6 +21,7 @@ from aethis_cli.commands._id_utils import require_ruleset_id
 from aethis_cli.config import load_client_or_fallback, resolve_base_url_with_source
 from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel, success, warn
+from aethis_cli.render import emit, is_json_requested
 
 rulesets_app = typer.Typer(
     name="rulesets",
@@ -30,7 +31,7 @@ rulesets_app = typer.Typer(
 )
 
 
-def _print_public_table(rulesets: list[dict]) -> None:
+def _build_public_table(rulesets: list[dict]) -> Table:
     table = Table(title="Public showcase rulesets")
     table.add_column("Slug", style="cyan")
     table.add_column("Ruleset ID", style="dim")
@@ -48,8 +49,7 @@ def _print_public_table(rulesets: list[dict]) -> None:
             str(r.get("field_count", 0)),
             str(r.get("rule_count", 0)),
         )
-
-    console.print(table)
+    return table
 
 
 def _list_public(limit: int, offset: int) -> None:
@@ -63,13 +63,17 @@ def _list_public(limit: int, offset: int) -> None:
             raise typer.Exit(code=1)
 
     if not rulesets:
-        console.print("[dim]No public rulesets published yet.[/dim]")
+        if is_json_requested():
+            emit([])
+        else:
+            console.print("[dim]No public rulesets published yet.[/dim]")
         return
 
-    _print_public_table(rulesets)
-    console.print(
-        "\n[dim]Try: aethis fields -b <slug>  ·  aethis explain -b <slug>  ·  aethis decide -b <slug> -i '{...}'[/dim]"
-    )
+    emit(rulesets, table=lambda: _build_public_table(rulesets))
+    if not is_json_requested():
+        console.print(
+            "\n[dim]Try: aethis fields -b <slug>  ·  aethis explain -b <slug>  ·  aethis decide -b <slug> -i '{...}'[/dim]"
+        )
 
 
 @rulesets_app.command(name="list")
@@ -123,10 +127,11 @@ def list_rulesets(
             pid = None
 
     if not pid:
-        console.print(
-            "[dim]No project context — showing public showcase rulesets. "
-            "Pass <rulebook> or --project-id <id> to list your own.[/dim]"
-        )
+        if not is_json_requested():
+            console.print(
+                "[dim]No project context — showing public showcase rulesets. "
+                "Pass <rulebook> or --project-id <id> to list your own.[/dim]"
+            )
         _list_public(limit=limit, offset=offset)
         return
 
@@ -139,33 +144,37 @@ def list_rulesets(
         raise typer.Exit(code=1)
 
     if not rulesets:
-        console.print("[dim]No rulesets found.[/dim]")
+        if is_json_requested():
+            emit([])
+        else:
+            console.print("[dim]No rulesets found.[/dim]")
         return
 
-    table = Table(title=f"Rulesets — {pid}")
-    table.add_column("Ruleset ID", style="cyan")
-    table.add_column("Name")
-    table.add_column("Status")
-    table.add_column("Fields", justify="right")
-    table.add_column("Rules", justify="right")
-    table.add_column("Version")
-    table.add_column("Created")
+    def _build_project_table() -> Table:
+        table = Table(title=f"Rulesets — {pid}")
+        table.add_column("Ruleset ID", style="cyan")
+        table.add_column("Name")
+        table.add_column("Status")
+        table.add_column("Fields", justify="right")
+        table.add_column("Rules", justify="right")
+        table.add_column("Version")
+        table.add_column("Created")
+        for b in rulesets:
+            s = b.get("status", "")
+            style = "dim" if s == "archived" else None
+            table.add_row(
+                b["ruleset_id"],
+                b.get("name") or "[dim]—[/dim]",
+                s,
+                str(b.get("total_fields", 0)),
+                str(b.get("total_rules", 0)),
+                b.get("version", ""),
+                b.get("created_at", "")[:10] if b.get("created_at") else "",
+                style=style,
+            )
+        return table
 
-    for b in rulesets:
-        s = b.get("status", "")
-        style = "dim" if s == "archived" else None
-        table.add_row(
-            b["ruleset_id"],
-            b.get("name") or "[dim]—[/dim]",
-            s,
-            str(b.get("total_fields", 0)),
-            str(b.get("total_rules", 0)),
-            b.get("version", ""),
-            b.get("created_at", "")[:10] if b.get("created_at") else "",
-            style=style,
-        )
-
-    console.print(table)
+    emit(rulesets, table=_build_project_table)
 
 
 def _list_rulebook_rulesets(rulebook: str) -> None:
@@ -179,27 +188,33 @@ def _list_rulebook_rulesets(rulebook: str) -> None:
 
     rulesets = resp.get("rulesets", [])
     if not rulesets:
-        console.print(
-            f"[dim]No rulesets in rulebook {rulebook!r} yet. "
-            "Create one with `aethis rulesets create <rulebook> <name>`.[/dim]"
-        )
+        if is_json_requested():
+            emit([])
+        else:
+            console.print(
+                f"[dim]No rulesets in rulebook {rulebook!r} yet. "
+                "Create one with `aethis rulesets create <rulebook> <name>`.[/dim]"
+            )
         return
 
-    table = Table(title=f"Rulesets in {rulebook}")
-    table.add_column("Ruleset name", style="cyan")
-    table.add_column("Display name")
-    table.add_column("Versions", justify="right")
-    table.add_column("Live version")
-    table.add_column("States seen")
-    for r in rulesets:
-        table.add_row(
-            r.get("ruleset_name", ""),
-            r.get("display_name") or "[dim]—[/dim]",
-            str(r.get("version_count", 0)),
-            r.get("live_version") or "[dim]—[/dim]",
-            ", ".join(r.get("states", [])) or "[dim]—[/dim]",
-        )
-    console.print(table)
+    def _build_rulebook_table() -> Table:
+        table = Table(title=f"Rulesets in {rulebook}")
+        table.add_column("Ruleset name", style="cyan")
+        table.add_column("Display name")
+        table.add_column("Versions", justify="right")
+        table.add_column("Live version")
+        table.add_column("States seen")
+        for r in rulesets:
+            table.add_row(
+                r.get("ruleset_name", ""),
+                r.get("display_name") or "[dim]—[/dim]",
+                str(r.get("version_count", 0)),
+                r.get("live_version") or "[dim]—[/dim]",
+                ", ".join(r.get("states", [])) or "[dim]—[/dim]",
+            )
+        return table
+
+    emit(rulesets, table=_build_rulebook_table)
 
 
 # ============================================================================
@@ -265,6 +280,11 @@ def show_ruleset(
     versions = resp.get("versions", [])
     live_version = resp.get("live_version")
     display_name = resp.get("display_name")
+
+    if is_json_requested():
+        emit(resp)
+        return
+
     console.print(
         f"[bold]{ruleset_name}[/bold]  in  [cyan]{rulebook}[/cyan]"
         + (f"  · [dim]{display_name}[/dim]" if display_name else "")
@@ -277,22 +297,25 @@ def show_ruleset(
     if not versions:
         return
 
-    table = Table(title="Versions")
-    table.add_column("bundle_id", style="cyan")
-    table.add_column("Version")
-    table.add_column("State")
-    table.add_column("Created")
-    for v in versions:
-        state = v.get("state") or "[dim]—[/dim]"
-        style = "dim" if state == "archived" else None
-        table.add_row(
-            v.get("bundle_id", ""),
-            v.get("version", ""),
-            state,
-            (v.get("created_at") or "")[:10],
-            style=style,
-        )
-    console.print(table)
+    def _build_versions_table() -> Table:
+        table = Table(title="Versions")
+        table.add_column("bundle_id", style="cyan")
+        table.add_column("Version")
+        table.add_column("State")
+        table.add_column("Created")
+        for v in versions:
+            state = v.get("state") or "[dim]—[/dim]"
+            style = "dim" if state == "archived" else None
+            table.add_row(
+                v.get("bundle_id", ""),
+                v.get("version", ""),
+                state,
+                (v.get("created_at") or "")[:10],
+                style=style,
+            )
+        return table
+
+    emit(versions, table=_build_versions_table)
 
 
 @rulesets_app.command(name="promote-to-live")
