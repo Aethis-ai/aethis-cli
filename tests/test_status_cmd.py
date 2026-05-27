@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 import yaml
 from typer.testing import CliRunner
 
@@ -36,7 +37,7 @@ def test_status_no_config_no_key_shows_defaults(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("AETHIS_API_KEY", raising=False)
     monkeypatch.delenv("AETHIS_BASE_URL", raising=False)
-    # Neutralise keyring + credentials fallback
+    # Point credentials lookup at an empty temp dir so no real key is found.
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "empty_xdg"))
 
     result = _run_status()
@@ -121,10 +122,25 @@ def _write_multi_profile_credentials(tmp_path: Path, profile: str, api_key: str)
     return creds
 
 
-def test_status_reads_multi_profile_credentials_file(tmp_path, monkeypatch):
+def _reset_runtime() -> None:
+    """Clear the auth-helpers RUNTIME singleton so prior tests don't leak overrides."""
+    from aethis_cli.auth_helpers import RUNTIME
+
+    RUNTIME.no_prompt = False
+    RUNTIME.api_key_override = None
+    RUNTIME.base_url_override = None
+    RUNTIME.profile_override = None
+
+
+@pytest.mark.parametrize("profile", ["default", "staging"])
+def test_status_reads_multi_profile_credentials_file(tmp_path, monkeypatch, profile):
     """Regression: `aethis login` writes profiles.<name>.api_key but status used
     to look for a flat top-level `api_key` and reported "no API key" while
     other commands worked fine.
+
+    Parametrized over `default` and a non-default profile (`staging`): the
+    keyring fallback in `resolve_cached_key` only fires for `default`, so the
+    non-default case is the stricter exercise of the profile-aware file read.
 
     Trip-wire so the asymmetry doesn't reappear.
     """
@@ -132,10 +148,12 @@ def test_status_reads_multi_profile_credentials_file(tmp_path, monkeypatch):
     monkeypatch.delenv("AETHIS_API_KEY", raising=False)
     monkeypatch.delenv("AETHIS_BASE_URL", raising=False)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    _write_multi_profile_credentials(tmp_path, "default", "ak_live_regression_canary")
+    _reset_runtime()
+    api_key = f"ak_live_regression_canary_{profile}"
+    _write_multi_profile_credentials(tmp_path, profile, api_key)
 
     fake_me = {
-        "key_id": "ak_live_regression_canary",
+        "key_id": api_key,
         "tenant_id": "tenant_x",
         "rate_limit_tier": "internal",
         "scopes": ["decide", "rulesets:write"],
@@ -145,14 +163,15 @@ def test_status_reads_multi_profile_credentials_file(tmp_path, monkeypatch):
         result = _run_status()
 
     assert result.exit_code == 0, result.output
-    assert "ak_live_regression_canary" in result.output, (
-        "status read the credentials file but didn't surface the resolved key — "
+    assert api_key in result.output, (
+        f"status read the credentials file but didn't surface the resolved key for profile={profile} — "
         "check the call site to resolve_cached_key()"
     )
     assert "no API key" not in result.output
 
 
-def test_whoami_reads_multi_profile_credentials_file(tmp_path, monkeypatch):
+@pytest.mark.parametrize("profile", ["default", "staging"])
+def test_whoami_reads_multi_profile_credentials_file(tmp_path, monkeypatch, profile):
     """Regression mirror of the status test above, for `aethis whoami`."""
     from aethis_cli.main import app
 
@@ -160,10 +179,12 @@ def test_whoami_reads_multi_profile_credentials_file(tmp_path, monkeypatch):
     monkeypatch.delenv("AETHIS_API_KEY", raising=False)
     monkeypatch.delenv("AETHIS_BASE_URL", raising=False)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    _write_multi_profile_credentials(tmp_path, "default", "ak_live_whoami_canary")
+    _reset_runtime()
+    api_key = f"ak_live_whoami_canary_{profile}"
+    _write_multi_profile_credentials(tmp_path, profile, api_key)
 
     fake_me = {
-        "key_id": "ak_live_whoami_canary",
+        "key_id": api_key,
         "tenant_id": "tenant_x",
         "rate_limit_tier": "internal",
         "scopes": ["decide", "rulesets:write"],
@@ -174,7 +195,7 @@ def test_whoami_reads_multi_profile_credentials_file(tmp_path, monkeypatch):
         result = runner.invoke(app, ["whoami"], catch_exceptions=False)
 
     assert result.exit_code == 0, result.output
-    assert "ak_live_whoami_canary" in result.output
+    assert api_key in result.output, f"whoami didn't surface the resolved key for profile={profile}"
     assert "No Aethis API key" not in result.output
 
 
