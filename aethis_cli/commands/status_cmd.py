@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Optional
+from typing import Any, Optional
 
 import typer
 
@@ -20,6 +20,7 @@ from aethis_cli.config import (
 )
 from aethis_cli.errors import AethisAPIError, ConfigError
 from aethis_cli.output import console, error_panel
+from aethis_cli.render import emit, is_json_requested
 
 
 STATUS_HELP = """
@@ -36,6 +37,7 @@ Examples:
     aethis status
     aethis status -p proj_i1HyinBtFJniayUC
     aethis --base-url http://localhost:8080 status
+    aethis status --output json | jq .identity.key_id
 """
 
 
@@ -48,6 +50,10 @@ def status(
     ),
 ) -> None:
     """Show CLI context and optional project generation progress."""
+    if is_json_requested():
+        _emit_json_status(project_id)
+        return
+
     _print_cli_section()
     _print_server_section()
     cfg, state_ruleset = _print_project_section()
@@ -193,3 +199,82 @@ def _print_generation_section(project_id: str) -> None:
     bid = result.get("latest_ruleset_id")
     if bid:
         console.print(f"  Ruleset:  {bid}")
+
+
+def _emit_json_status(project_id: Optional[str]) -> None:
+    """Build and emit a structured status dict for --output json consumers.
+
+    Scriptable view of the same context the human view shows. Keys mirror the
+    section titles so `--json server,identity` gives a clean projection.
+    """
+    base_url, source = resolve_base_url_with_source()
+    profile_name = active_profile_name()
+    profile = get_profile(profile_name)
+
+    state: dict[str, Any] = {
+        "cli": {"version": __version__},
+        "server": {"base_url": base_url, "source": source},
+        "profile": {
+            "name": profile_name,
+            "auth_mode": profile.get("auth_mode") or "api_key",
+            "audience": profile.get("audience"),
+        },
+    }
+
+    # Project section
+    cfg = None
+    try:
+        cfg = load_project_config()
+        ruleset_id = read_state(cfg.config_path).get("ruleset_id")
+        state["project"] = {
+            "name": cfg.project,
+            "config_path": str(cfg.config_path / "aethis.yaml"),
+            "project_id": cfg.project_id,
+            "ruleset_id": ruleset_id,
+        }
+    except ConfigError:
+        state["project"] = None
+
+    # Identity section
+    auth_mode = profile.get("auth_mode") or "api_key"
+    identity_base_url = cfg.base_url if cfg else base_url
+    if auth_mode != "api_key":
+        state["identity"] = {"auth_mode": auth_mode, "provider_minted": True}
+    else:
+        api_key = resolve_cached_key()
+        if api_key is None:
+            state["identity"] = {"key_present": False}
+        else:
+            client = AethisClient(api_key, identity_base_url)
+            try:
+                me = client.whoami()
+                state["identity"] = {
+                    "key_present": True,
+                    "key_id": me.get("key_id"),
+                    "tenant_id": me.get("tenant_id"),
+                    "rate_limit_tier": me.get("rate_limit_tier"),
+                    "scopes": me.get("scopes") or [],
+                    "can_author": me.get("can_author"),
+                }
+            except AethisAPIError as e:
+                state["identity"] = {
+                    "key_present": True,
+                    "error": str(e.detail),
+                    "status_code": e.status_code,
+                    "key_rejected": e.status_code in (401, 403, 404),
+                }
+
+    # Generation section — only when we have a project id
+    pid = project_id or (cfg.project_id if cfg else None)
+    if pid:
+        api_key = resolve_cached_key()
+        if api_key is None:
+            state["generation"] = {"skipped": "no_api_key"}
+        else:
+            client = AethisClient(api_key, identity_base_url)
+            try:
+                state["generation"] = client.get_status(pid)
+            except AethisAPIError as e:
+                state["generation"] = {"error": str(e.detail), "status_code": e.status_code}
+
+    emit(state)

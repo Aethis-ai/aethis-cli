@@ -10,6 +10,7 @@ from rich.table import Table
 from aethis_cli.config import load_client_or_anon, read_state
 from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel
+from aethis_cli.render import emit, is_json_requested
 
 
 def fields(
@@ -46,14 +47,21 @@ def fields(
         error_panel(e)
         raise typer.Exit(code=1)
 
-    table = Table(title=f"Fields — {ruleset_id}")
-    table.add_column("Field ID", style="cyan")
-    table.add_column("Type")
-    table.add_column("Description")
-    table.add_column("Enum values")
+    field_specs = result.get("fields", [])
 
-    for f in result.get("fields", []):
-        enum_vals = ", ".join(f["enum_values"]) if f.get("enum_values") else ""
-        table.add_row(f["field_id"], f["field_type"], f.get("description") or "", enum_vals)
+    if is_json_requested():
+        emit(field_specs)
+        return
 
-    console.print(table)
+    def _build_fields_table() -> Table:
+        table = Table(title=f"Fields — {ruleset_id}")
+        table.add_column("Field ID", style="cyan")
+        table.add_column("Type")
+        table.add_column("Description")
+        table.add_column("Enum values")
+        for f in field_specs:
+            enum_vals = ", ".join(f["enum_values"]) if f.get("enum_values") else ""
+            table.add_row(f["field_id"], f["field_type"], f.get("description") or "", enum_vals)
+        return table
+
+    emit(field_specs, table=_build_fields_table)

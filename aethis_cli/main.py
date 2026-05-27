@@ -13,6 +13,7 @@ from aethis_cli._version import __version__
 from aethis_cli.auth_helpers import RUNTIME
 from aethis_cli.errors import AethisAPIError, AuthenticationError, AuthRequired, ConfigError
 from aethis_cli.output import console
+from aethis_cli.render import RUNTIME as RENDER_RUNTIME, OutputFormat
 from aethis_cli.commands.account_cmd import account_app
 from aethis_cli.commands.rulebooks_cmd import rulebooks_app
 from aethis_cli.commands.rulesets_cmd import rulesets_app
@@ -116,6 +117,33 @@ def main(
             "unsigned mode. Manage with `aethis profile`."
         ),
     ),
+    output: Optional[OutputFormat] = typer.Option(
+        None,
+        "--output",
+        case_sensitive=False,
+        help=(
+            "Output format for list/show commands: `table` (default on a TTY) "
+            "or `json` (default when piped). JSON is pipe-friendly: no ANSI, "
+            "no banners, no progress text."
+        ),
+    ),
+    json_fields: Optional[str] = typer.Option(
+        None,
+        "--json",
+        help=(
+            "Emit JSON with only the named comma-separated fields "
+            "(e.g. --json id,name). Implies --output json. To see the raw "
+            "payload (all fields), use --output json instead."
+        ),
+    ),
+    jq_expr: Optional[str] = typer.Option(
+        None,
+        "--jq",
+        help=(
+            "Pipe JSON output through `jq` before printing. Requires the `jq` "
+            "binary on PATH (`brew install jq` / `apt install jq`)."
+        ),
+    ),
 ) -> None:
     """CLI for the Aethis developer API — author, test, and publish rulesets."""
     # Stash root-level flags on the lazy-auth runtime so commands and the
@@ -133,6 +161,11 @@ def main(
         os.environ["AETHIS_BASE_URL"] = base_url
     if api_key:
         os.environ["AETHIS_API_KEY"] = api_key
+
+    # Mirror rendering flags onto the renderer's RUNTIME singleton.
+    RENDER_RUNTIME.output = output
+    RENDER_RUNTIME.json_fields = json_fields
+    RENDER_RUNTIME.jq_expr = jq_expr
 
 
 app.add_typer(account_app, name="account")
