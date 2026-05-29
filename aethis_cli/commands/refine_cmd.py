@@ -11,12 +11,11 @@ from aethis_cli.commands.generate_cmd import _run_generate
 
 
 def refine(
-    hint: Optional[str] = typer.Option(
-        None, "--hint", help="Guidance hint to add before refining"
-    ),
+    hint: Optional[str] = typer.Option(None, "--hint", help="Guidance hint to add before refining"),
     project_id: Optional[str] = typer.Option(None, "--project-id", "-p"),
     seed_ruleset_id: Optional[str] = typer.Option(
-        None, "--seed-ruleset-id",
+        None,
+        "--seed-ruleset-id",
         help="Ruleset to seed from (defaults to the section's active ruleset)",
     ),
     poll: bool = typer.Option(True, "--poll/--no-poll", help="Poll until refinement completes"),
@@ -28,6 +27,10 @@ def refine(
     from-scratch build.
     """
     _run_generate(
-        project_id=project_id, poll=poll, timeout=timeout,
-        mode="refine", seed_ruleset_id=seed_ruleset_id, extra_hint=hint,
+        project_id=project_id,
+        poll=poll,
+        timeout=timeout,
+        mode="refine",
+        seed_ruleset_id=seed_ruleset_id,
+        extra_hint=hint,
     )

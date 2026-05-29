@@ -32,18 +32,23 @@ def generate(
     poll: bool = typer.Option(True, "--poll/--no-poll", help="Poll until generation completes"),
     timeout: int = typer.Option(600, "--timeout", "-t", help="Polling timeout in seconds"),
     mode: str = typer.Option(
-        "fresh", "--mode",
+        "fresh",
+        "--mode",
         help="fresh = author from scratch; refine = minimal edit seeded from the active ruleset",
     ),
     seed_ruleset_id: Optional[str] = typer.Option(
-        None, "--seed-ruleset-id",
+        None,
+        "--seed-ruleset-id",
         help="Ruleset to seed a refine from (defaults to the section's active ruleset)",
     ),
 ) -> None:
     """Upload sources + guidance, trigger ruleset generation, and poll until done."""
     _run_generate(
-        project_id=project_id, poll=poll, timeout=timeout,
-        mode=mode, seed_ruleset_id=seed_ruleset_id,
+        project_id=project_id,
+        poll=poll,
+        timeout=timeout,
+        mode=mode,
+        seed_ruleset_id=seed_ruleset_id,
     )
 
 
@@ -173,10 +178,7 @@ def _run_generate(
 
         # Trigger generation
         if mode == "refine":
-            info(
-                "Refining: seeding from the active ruleset and making the minimal "
-                "edit to fix failing tests"
-            )
+            info("Refining: seeding from the active ruleset and making the minimal edit to fix failing tests")
         job = client.generate(pid, mode=mode, seed_ruleset_id=seed_ruleset_id)
         write_state(project_dir, {"project_id": pid, "job_id": job["job_id"]})
         info(f"Generation queued (job={job['job_id']})")
