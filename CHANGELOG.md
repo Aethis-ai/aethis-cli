@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.18.0 (2026-05-29)
+
+- **feat(refine): `aethis refine` + `aethis generate --mode refine` for incremental, seed-from-existing re-authoring.** Instead of re-authoring a whole section from scratch, refine seeds generation from the section's active ruleset and makes the **minimal edit** to fix failing tests while keeping passing tests green.
+  - `aethis refine [--hint "..."] [--seed-ruleset-id <id>]` — the phase-3 TDD-loop command: optionally add a guidance hint, then refine. Defaults to seeding from the section's active ruleset.
+  - `aethis generate --mode refine [--seed-ruleset-id <id>]` — the same capability via a flag on `generate`; `--mode fresh` (default) is unchanged from-scratch authoring.
+  - `AethisClient.generate()` gains optional `mode` / `seed_ruleset_id`; a no-arg call still sends no body, so it stays backwards-compatible against engines without the parameter.
+  - Requires aethis-core with the `mode` parameter on `/generate` (live on `api.aethis.ai`). Against an older engine the flags no-op (empty body = fresh).
+
 ## 0.17.0 (2026-05-27)
 
 - **feat(output): gh-style machine-readable output mode (`--output json`, `--json fields`, `--jq`).** Every list/show command (and the decision commands) now emit structured JSON on demand, so `aethis rulesets list --output json | jq '.[0].slug'` just works instead of trying to scrape ANSI-coloured Rich tables.

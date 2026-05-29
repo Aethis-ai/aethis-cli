@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 import httpx
 import respx
@@ -207,6 +209,28 @@ def test_generate(respx_mock):
     result = AethisClient("ak", BASE).generate("proj_abc")
     assert result["job_id"] == "job_1"
     assert result["status"] == "queued"
+
+
+@respx.mock(base_url=BASE)
+def test_generate_refine_mode(respx_mock):
+    route = respx_mock.post("/api/v1/public/projects/proj_abc/generate").mock(
+        return_value=httpx.Response(202, json={"job_id": "job_2", "status": "queued"})
+    )
+    result = AethisClient("ak", BASE).generate("proj_abc", mode="refine", seed_ruleset_id="rs_xyz")
+    assert result["job_id"] == "job_2"
+    body = json.loads(route.calls.last.request.content)
+    assert body == {"mode": "refine", "seed_ruleset_id": "rs_xyz"}
+
+
+@respx.mock(base_url=BASE)
+def test_generate_fresh_sends_no_body(respx_mock):
+    # Backwards compatible: a no-arg generate() sends no body (engine treats absent
+    # body as fresh), so it still works against engines without the mode parameter.
+    route = respx_mock.post("/api/v1/public/projects/proj_abc/generate").mock(
+        return_value=httpx.Response(202, json={"job_id": "job_3", "status": "queued"})
+    )
+    AethisClient("ak", BASE).generate("proj_abc")
+    assert route.calls.last.request.content in (b"", None)
 
 
 @respx.mock(base_url=BASE)
