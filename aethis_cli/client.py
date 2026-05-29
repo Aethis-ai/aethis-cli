@@ -192,8 +192,24 @@ class AethisClient:
             },
         )
 
-    def generate(self, project_id: str) -> dict:
-        return self._request("POST", f"/api/v1/public/projects/{project_id}/generate")
+    def generate(
+        self,
+        project_id: str,
+        mode: Optional[str] = None,
+        seed_ruleset_id: Optional[str] = None,
+    ) -> dict:
+        """Trigger generation. ``mode="refine"`` seeds from the section's active
+        ruleset and makes the minimal edit to fix failing tests; omitting ``mode``
+        (or ``mode="fresh"``) authors from scratch. A no-arg call sends no body, so
+        it stays backwards-compatible against engines without the ``mode`` parameter.
+        """
+        body: dict = {}
+        if mode is not None:
+            body["mode"] = mode
+        if seed_ruleset_id is not None:
+            body["seed_ruleset_id"] = seed_ruleset_id
+        kwargs = {"json": body} if body else {}
+        return self._request("POST", f"/api/v1/public/projects/{project_id}/generate", **kwargs)
 
     def get_status(self, project_id: str) -> dict:
         return self._request("GET", f"/api/v1/public/projects/{project_id}/status")

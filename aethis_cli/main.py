@@ -24,6 +24,7 @@ from aethis_cli.commands.projects_cmd import projects_app
 from aethis_cli.commands.init_cmd import init
 from aethis_cli.commands.login_cmd import login
 from aethis_cli.commands.generate_cmd import generate
+from aethis_cli.commands.refine_cmd import refine
 from aethis_cli.commands.status_cmd import status
 from aethis_cli.commands.test_cmd import test
 from aethis_cli.commands.publish_cmd import publish
@@ -178,6 +179,7 @@ app.add_typer(projects_app, name="projects")
 app.command()(init)
 app.command()(login)
 app.command()(generate)
+app.command()(refine)
 app.command()(status)
 app.command(name="test")(test)
 app.command()(publish)
