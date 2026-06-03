@@ -729,29 +729,73 @@ def test_tests_delete_with_yes(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# rulebooks list — anonymous (no API key)
+# rulebooks list — anonymous fallthrough (no API key)
 # ---------------------------------------------------------------------------
 
 
-def test_rulebooks_list_no_key_does_not_prompt_login(tmp_path, monkeypatch):
-    """A fresh user with no key gets a pointer to the public catalogue —
+def _patch_anonymous(rulebooks):
+    """Patch the no-key path: resolver returns None, anonymous client returns
+    the given catalogue, lazy-auth client construction is observable."""
+    anon_client = MagicMock()
+    anon_client.__enter__ = MagicMock(return_value=anon_client)
+    anon_client.__exit__ = MagicMock(return_value=False)
+    anon_client.list_public_rulebooks.return_value = rulebooks
+    return anon_client
+
+
+def test_rulebooks_list_no_key_falls_through_to_public_catalogue(tmp_path, monkeypatch):
+    """A fresh user with no key gets the anonymous public catalogue —
     never a browser sign-in prompt — from a read-only browse command."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("AETHIS_API_KEY", raising=False)
+    monkeypatch.setenv("COLUMNS", "200")
 
+    anon_client = _patch_anonymous(
+        [
+            {
+                "rulebook_id": "rb_pub",
+                "slug": "aethis/uk-fsm",
+                "name": "UK Free School Meals",
+                "domain": "uk_fsm",
+                "status": "active",
+                "visibility": "public",
+                "ruleset_refs": [],
+            }
+        ]
+    )
     with (
         patch("aethis_cli.commands.rulebooks_cmd.resolve_cached_key", return_value=None),
+        patch("aethis_cli.commands.rulebooks_cmd.make_anonymous_client", return_value=anon_client),
         patch("aethis_cli.commands.rulebooks_cmd.load_client_or_fallback") as load_client,
     ):
         result = _runner_invoke(["rulebooks", "list"])
 
-    assert result.exit_code == 1
+    assert result.exit_code == 0, result.output
     out = _strip(result.output)
-    assert "No API key found" in out
-    assert "aethis rulesets list" in out
-    assert "aethis login" in out
+    assert "showing public rulebooks" in out
+    assert "aethis/uk-fsm" in out
     # The lazy-auth client (and therefore the browser login hook) must never
     # be constructed on this path.
+    load_client.assert_not_called()
+
+
+def test_rulebooks_list_no_key_empty_catalogue_points_at_rulesets(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("AETHIS_API_KEY", raising=False)
+    monkeypatch.setenv("COLUMNS", "200")
+
+    anon_client = _patch_anonymous([])
+    with (
+        patch("aethis_cli.commands.rulebooks_cmd.resolve_cached_key", return_value=None),
+        patch("aethis_cli.commands.rulebooks_cmd.make_anonymous_client", return_value=anon_client),
+        patch("aethis_cli.commands.rulebooks_cmd.load_client_or_fallback") as load_client,
+    ):
+        result = _runner_invoke(["rulebooks", "list"])
+
+    assert result.exit_code == 0, result.output
+    out = _strip(result.output)
+    assert "No public rulebooks published yet" in out
+    assert "aethis rulesets list" in out
     load_client.assert_not_called()
 
 

@@ -35,7 +35,8 @@ import typer
 from rich.table import Table
 
 from aethis_cli.auth_helpers import resolve_cached_key
-from aethis_cli.config import load_client_or_fallback
+from aethis_cli.client import make_anonymous_client
+from aethis_cli.config import load_client_or_fallback, resolve_base_url_with_source
 from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel, success
 from aethis_cli.render import emit, is_json_requested
@@ -75,24 +76,67 @@ def _load_yaml_or_json(path: Path) -> Any:
 # ============================================================================
 
 
+def _build_rulebooks_table(rulebooks: list[dict], title: str = "Rulebooks") -> Table:
+    table = Table(title=title)
+    table.add_column("Slug", style="cyan")
+    table.add_column("Rulebook ID", style="dim")
+    table.add_column("Name")
+    table.add_column("Domain")
+    table.add_column("Status")
+    table.add_column("Rulesets", justify="right")
+    for rb in rulebooks:
+        table.add_row(
+            rb.get("slug") or "[dim]—[/dim]",
+            rb.get("rulebook_id", ""),
+            rb.get("name") or "[dim]—[/dim]",
+            rb.get("domain") or "[dim]—[/dim]",
+            rb.get("status", ""),
+            str(len(rb.get("ruleset_refs", []) or [])),
+        )
+    return table
+
+
+def _list_public_rulebooks() -> None:
+    """Hit the anonymous rulebook catalogue and render the result.
+
+    Mirrors the anonymous fallthrough on ``aethis rulesets list``. Requires
+    aethis-core v0.29.0+ on the target API (live on api.aethis.ai).
+    """
+    base_url, _ = resolve_base_url_with_source()
+    with make_anonymous_client(base_url) as client:
+        try:
+            rulebooks = client.list_public_rulebooks()
+        except AethisAPIError as e:
+            error_panel(e)
+            raise typer.Exit(code=1)
+
+    if not is_json_requested():
+        console.print("[dim]No API key — showing public rulebooks. Run `aethis login` to see yours.[/dim]")
+    if not rulebooks:
+        if is_json_requested():
+            emit([])
+        else:
+            console.print(
+                "[dim]No public rulebooks published yet. Browse public rulesets with `aethis rulesets list`.[/dim]"
+            )
+        return
+    emit(rulebooks, table=lambda: _build_rulebooks_table(rulebooks, title="Public rulebooks"))
+
+
 @rulebooks_app.command(name="list")
 def list_rulebooks() -> None:
-    """List rulebooks visible to the current tenant.
+    """List rulebooks — your tenant's (with an API key) or the public catalogue.
 
     Example::
 
         aethis rulebooks list
     """
-    # Rulebooks are tenant-scoped, so an anonymous caller has nothing to
-    # list — don't drag a brand-new user through the browser sign-in for a
-    # read-only browse. Point them at the anonymous public catalogue instead.
+    # Rulebooks are tenant-scoped; with no key cached, fall through to the
+    # anonymous cross-tenant public catalogue instead of dragging a
+    # brand-new user through the browser sign-in for a read-only browse.
     if resolve_cached_key() is None:
-        console.print(
-            "[yellow]No API key found — rulebooks are private to your tenant.[/yellow]\n"
-            "[dim]Browse the public catalogue without an account: `aethis rulesets list`\n"
-            "Or sign in to list your own rulebooks: `aethis login`[/dim]"
-        )
-        raise typer.Exit(code=1)
+        _list_public_rulebooks()
+        return
 
     _cfg, client = load_client_or_fallback()
     try:
@@ -108,26 +152,7 @@ def list_rulebooks() -> None:
             console.print("[dim]No rulebooks yet. Create one with `aethis rulebooks create`.[/dim]")
         return
 
-    def _build_rulebooks_table() -> Table:
-        table = Table(title="Rulebooks")
-        table.add_column("Slug", style="cyan")
-        table.add_column("Rulebook ID", style="dim")
-        table.add_column("Name")
-        table.add_column("Domain")
-        table.add_column("Status")
-        table.add_column("Rulesets", justify="right")
-        for rb in rulebooks:
-            table.add_row(
-                rb.get("slug") or "[dim]—[/dim]",
-                rb.get("rulebook_id", ""),
-                rb.get("name") or "[dim]—[/dim]",
-                rb.get("domain") or "[dim]—[/dim]",
-                rb.get("status", ""),
-                str(len(rb.get("ruleset_refs", []) or [])),
-            )
-        return table
-
-    emit(rulebooks, table=_build_rulebooks_table)
+    emit(rulebooks, table=lambda: _build_rulebooks_table(rulebooks))
 
 
 # ============================================================================

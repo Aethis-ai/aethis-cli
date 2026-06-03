@@ -306,6 +306,18 @@ class AethisClient:
     def list_rulebooks(self) -> list[dict]:
         return self._request("GET", "/api/v1/public/rulebooks/")
 
+    def list_public_rulebooks(self) -> list[dict]:
+        """List rulebooks visible to anonymous callers.
+
+        Hits the cross-tenant catalogue (``visibility="public"`` AND
+        ``status="active"``) on the same route as :meth:`list_rulebooks` —
+        the server keys the behaviour on the absence of an API key. Use
+        with :func:`make_anonymous_client` so a cached key doesn't promote
+        the call to an authenticated tenant listing. Requires aethis-core
+        v0.29.0+ on the target API.
+        """
+        return self._request("GET", "/api/v1/public/rulebooks/")
+
     def get_rulebook(self, rulebook_id_or_slug: str) -> dict:
         return self._request("GET", f"/api/v1/public/rulebooks/{rulebook_id_or_slug}")
 

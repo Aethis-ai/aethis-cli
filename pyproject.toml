@@ -1,6 +1,6 @@
 [project]
 name = "aethis-cli"
-version = "0.19.1"
+version = "0.20.0"
 description = "CLI for the Aethis developer API — author, test, and publish rulesets"
 readme = "README.md"
 requires-python = ">=3.11"
