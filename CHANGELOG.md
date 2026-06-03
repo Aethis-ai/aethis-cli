@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.19.1 (2026-06-03)
+
+- **fix(rulebooks list): stop prompting browser sign-in for anonymous users.** `aethis rulebooks list` with no cached API key used to trigger the lazy-auth browser login — bad first-contact DX for a read-only browse command. Rulebooks are tenant-scoped, so an anonymous caller has nothing to list; the command now prints a pointer to the anonymous public catalogue (`aethis rulesets list`) and to `aethis login`, and exits 1 without ever opening a browser.
+  - True anonymous fallthrough (listing public rulebooks without an account, mirroring `aethis rulesets list`) needs engine support for a public rulebook catalogue and is tracked separately; this release removes the login prompt in the meantime.
+
 ## 0.19.0 (2026-06-03)
 
 - **feat(update): `aethis update` — self-update the CLI to the latest release.** Detects how the CLI was installed (uv tool, pipx, or pip) and runs the matching upgrade command. `aethis update --check` reports whether a newer release exists without installing anything.

@@ -726,3 +726,51 @@ def test_tests_delete_with_yes(tmp_path, monkeypatch):
         result = _runner_invoke(["rulebooks", "tests", "delete", "rb_x", "tc_abc", "--yes"])
     assert result.exit_code == 0, result.output
     client.delete_rulebook_test_case.assert_called_once_with("rb_x", "tc_abc")
+
+
+# ---------------------------------------------------------------------------
+# rulebooks list — anonymous (no API key)
+# ---------------------------------------------------------------------------
+
+
+def test_rulebooks_list_no_key_does_not_prompt_login(tmp_path, monkeypatch):
+    """A fresh user with no key gets a pointer to the public catalogue —
+    never a browser sign-in prompt — from a read-only browse command."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("AETHIS_API_KEY", raising=False)
+
+    with (
+        patch("aethis_cli.commands.rulebooks_cmd.resolve_cached_key", return_value=None),
+        patch("aethis_cli.commands.rulebooks_cmd.load_client_or_fallback") as load_client,
+    ):
+        result = _runner_invoke(["rulebooks", "list"])
+
+    assert result.exit_code == 1
+    out = _strip(result.output)
+    assert "No API key found" in out
+    assert "aethis rulesets list" in out
+    assert "aethis login" in out
+    # The lazy-auth client (and therefore the browser login hook) must never
+    # be constructed on this path.
+    load_client.assert_not_called()
+
+
+def test_rulebooks_list_with_cached_key_lists_normally(tmp_path, monkeypatch):
+    """A cached key (no env var) goes straight to the normal listing path."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("AETHIS_API_KEY", raising=False)
+    monkeypatch.setenv("COLUMNS", "200")
+
+    client = MagicMock()
+    client.list_rulebooks.return_value = []
+    with (
+        patch("aethis_cli.commands.rulebooks_cmd.resolve_cached_key", return_value="ak_cached"),
+        patch(
+            "aethis_cli.commands.rulebooks_cmd.load_client_or_fallback",
+            return_value=(MagicMock(), client),
+        ),
+    ):
+        result = _runner_invoke(["rulebooks", "list"])
+
+    assert result.exit_code == 0
+    assert "No rulebooks yet" in _strip(result.output)
