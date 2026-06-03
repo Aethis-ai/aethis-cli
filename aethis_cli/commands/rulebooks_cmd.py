@@ -34,6 +34,7 @@ from typing import Any, Optional
 import typer
 from rich.table import Table
 
+from aethis_cli.auth_helpers import resolve_cached_key
 from aethis_cli.config import load_client_or_fallback
 from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel, success
@@ -82,6 +83,17 @@ def list_rulebooks() -> None:
 
         aethis rulebooks list
     """
+    # Rulebooks are tenant-scoped, so an anonymous caller has nothing to
+    # list — don't drag a brand-new user through the browser sign-in for a
+    # read-only browse. Point them at the anonymous public catalogue instead.
+    if resolve_cached_key() is None:
+        console.print(
+            "[yellow]No API key found — rulebooks are private to your tenant.[/yellow]\n"
+            "[dim]Browse the public catalogue without an account: `aethis rulesets list`\n"
+            "Or sign in to list your own rulebooks: `aethis login`[/dim]"
+        )
+        raise typer.Exit(code=1)
+
     _cfg, client = load_client_or_fallback()
     try:
         rulebooks = client.list_rulebooks()
