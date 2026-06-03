@@ -100,8 +100,7 @@ def update(
         result = subprocess.run(argv)
     except FileNotFoundError:
         console.print(
-            f"[red]Error:[/red] `{argv[0]}` not found on PATH. "
-            f"Upgrade manually with your installer of choice."
+            f"[red]Error:[/red] `{argv[0]}` not found on PATH. Upgrade manually with your installer of choice."
         )
         raise typer.Exit(code=1)
     if result.returncode != 0:
