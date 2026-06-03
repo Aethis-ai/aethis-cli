@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.20.0 (2026-06-03)
+
+- **feat(rulebooks list): anonymous fallthrough to the public rulebook catalogue.** With no cached API key, `aethis rulebooks list` now lists the cross-tenant public catalogue (rulebooks with public visibility, active status) instead of printing the v0.19.1 pointer message — completing the parity with `aethis rulesets list`. A dim one-liner ("No API key — showing public rulebooks…") distinguishes the anonymous view; with a key, the tenant listing is unchanged.
+  - New `AethisClient.list_public_rulebooks()`; use with `make_anonymous_client` so a cached key doesn't promote the call to an authenticated tenant listing.
+  - Requires aethis-core v0.29.0+ on the target API (live on api.aethis.ai). Against an older engine the anonymous path surfaces the server's 401 cleanly.
+
 ## 0.19.1 (2026-06-03)
 
 - **fix(rulebooks list): stop prompting browser sign-in for anonymous users.** `aethis rulebooks list` with no cached API key used to trigger the lazy-auth browser login — bad first-contact DX for a read-only browse command. Rulebooks are tenant-scoped, so an anonymous caller has nothing to list; the command now prints a pointer to the anonymous public catalogue (`aethis rulesets list`) and to `aethis login`, and exits 1 without ever opening a browser.

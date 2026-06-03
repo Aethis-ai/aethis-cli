@@ -161,13 +161,13 @@ Project guidance lives in `.aethis/guidance/hints.yaml` and is uploaded by `aeth
 | `aethis rulesets list` | List published rulesets |
 | `aethis rulesets archive <ruleset_id>` | Archive a ruleset |
 
-### Rulebooks (the converged 2-term model, login required)
+### Rulebooks (the converged 2-term model, login required for authoring)
 
 A Rulebook is the whole form — the unit `/decide` evaluates against. It owns a locked field vocabulary, an `outcome_logic` composition expression, rulebook-level test cases, and an integer version history. Rulesets are named, versioned members of a Rulebook.
 
 | Command | Description |
 |---------|-------------|
-| `aethis rulebooks list` | List your tenant's rulebooks |
+| `aethis rulebooks list` | List your tenant's rulebooks (or, with no key, the public catalogue) |
 | `aethis rulebooks show <id-or-slug>` | Full configuration including outcome_logic |
 | `aethis rulebooks create <name> --domain <d> [--slug ...]` | Create a draft rulebook |
 | `aethis rulebooks set-fields <id> -f fields.yaml` | Replace the locked field vocabulary |
