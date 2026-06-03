@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.19.0 (2026-06-03)
+
+- **feat(update): `aethis update` — self-update the CLI to the latest release.** Detects how the CLI was installed (uv tool, pipx, or pip) and runs the matching upgrade command. `aethis update --check` reports whether a newer release exists without installing anything.
+  - Editable (development) installs are refused with a pointer to `git pull && uv sync` instead of clobbering the checkout.
+  - The exit-time "new release available" banner now points at `aethis update` rather than a method-specific command.
+  - **fix:** the banner's uv upgrade hint was `uv tool install --upgrade aethis-cli`, which re-resolves from scratch and silently drops any extra `--with` requirements (e.g. plugin packages installed alongside the CLI). Both the banner's install-method detection and `aethis update` now use `uv tool upgrade aethis-cli`, which honours the original install receipt.
+  - A successful (or no-op) `aethis update` refreshes the banner's 24h cache, so the notice goes quiet immediately after updating.
+
 ## 0.18.0 (2026-05-29)
 
 - **feat(refine): `aethis refine` + `aethis generate --mode refine` for incremental, seed-from-existing re-authoring.** Instead of re-authoring a whole section from scratch, refine seeds generation from the section's active ruleset and makes the **minimal edit** to fix failing tests while keeping passing tests green.

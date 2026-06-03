@@ -16,6 +16,9 @@ uv tool install aethis-cli
 pipx install aethis-cli
 ```
 
+Already installed? `aethis update` upgrades to the latest release in place
+(it detects how the CLI was installed and runs the matching upgrade command).
+
 ## Quick start
 
 > **Authoring is in private beta.** Decision tools (`decide`, `fields`, `explain`) are public — no key required. Authoring tools (rule generation, test refinement, publishing) require an invite. Request access at [aethis.ai/developer-access](https://aethis.ai/developer-access).
@@ -186,6 +189,7 @@ A Rulebook is the whole form — the unit `/decide` evaluates against. It owns a
 | `aethis account generate` | Mint an additional API key (rotation, multi-machine, scoped access) |
 | `aethis account keys` | List your API keys (masked) |
 | `aethis account revoke <key_id>` | Revoke a key |
+| `aethis update [--check]` | Update the CLI to the latest release (`--check` only reports) |
 
 ### Profiles
 

@@ -42,7 +42,7 @@ def test_detect_install_method_uv() -> None:
     with patch.object(uc.sys, "executable", "/Users/x/.local/share/uv/tools/aethis-cli/bin/python"):
         method, cmd = uc._detect_install_method("aethis-cli")
     assert method == "uv"
-    assert cmd == "uv tool install --upgrade aethis-cli"
+    assert cmd == "uv tool upgrade aethis-cli"
 
 
 def test_detect_install_method_pipx() -> None:
@@ -153,7 +153,7 @@ def test_print_banner_writes_to_stderr(capsys: pytest.CaptureFixture[str]) -> No
     uc._print_banner("aethis-cli", "0.10.0", "0.11.0")
     captured = capsys.readouterr()
     assert "A new release of aethis-cli is available: 0.10.0 → 0.11.0" in captured.err
-    assert "To upgrade, run:" in captured.err
+    assert "To upgrade, run: aethis update" in captured.err
     assert captured.out == ""
 
 

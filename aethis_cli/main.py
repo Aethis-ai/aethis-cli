@@ -32,6 +32,7 @@ from aethis_cli.commands.fields_cmd import fields
 from aethis_cli.commands.explain_cmd import explain
 from aethis_cli.commands.decide_cmd import decide
 from aethis_cli.commands.whoami_cmd import whoami
+from aethis_cli.commands.update_cmd import update
 
 
 PLUGIN_GROUP = "aethis_cli.plugins"
@@ -187,6 +188,7 @@ app.command()(fields)
 app.command()(explain)
 app.command()(decide)
 app.command()(whoami)
+app.command()(update)
 
 
 def _load_plugins(target: typer.Typer) -> None:

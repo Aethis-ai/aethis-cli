@@ -110,15 +110,16 @@ def _detect_install_method(package: str) -> tuple[str, str]:
     exe = (sys.executable or "").lower()
     prefix = (sys.prefix or "").lower()
     if "/uv/tools/" in exe or "/uv/tools/" in prefix:
-        return ("uv", f"uv tool install --upgrade {package}")
+        # `uv tool upgrade` honours the install receipt (extra `--with`
+        # requirements survive); `install --upgrade` would drop them.
+        return ("uv", f"uv tool upgrade {package}")
     if "/pipx/venvs/" in exe or "/pipx/venvs/" in prefix:
         return ("pipx", f"pipx upgrade {package}")
     return ("pip", f"pip install --upgrade {package}")
 
 
 def _print_banner(package: str, current: str, latest: str) -> None:
-    _, command = _detect_install_method(package)
-    msg = f"\nA new release of {package} is available: {current} → {latest}\nTo upgrade, run: {command}\n"
+    msg = f"\nA new release of {package} is available: {current} → {latest}\nTo upgrade, run: aethis update\n"
     try:
         sys.stderr.write(msg)
         sys.stderr.flush()
