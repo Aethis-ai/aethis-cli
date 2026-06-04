@@ -70,9 +70,13 @@ def test_rulebooks_list_renders_table(tmp_path, monkeypatch):
 
     assert result.exit_code == 0, result.output
     out = _strip(result.output)
-    assert "rb_abc" in out
+    # Slugged rulebooks show the slug as their identifier; the raw id stays
+    # in `--json` / `rulebooks show`.
     assert "aethis/uk-fsm" in out
+    assert "rb_abc" not in out
     assert "UK Free School Meals" in out
+    # Unslugged rulebooks fall back to the rulebook_id.
+    assert "rb_def" in out
     assert "Spacecraft Crew" in out
 
 
@@ -147,7 +151,7 @@ def test_rulebooks_list_keyed_includes_public_catalogue(tmp_path, monkeypatch):
     assert "aethis/uk-fsm" in out
     assert "yours" in out
     assert "public" in out
-    assert out.count("rb_mine") == 1
+    assert out.count("acme/my-draft") == 1
 
 
 def test_rulebooks_list_keyed_empty_tenant_still_shows_public(tmp_path, monkeypatch):

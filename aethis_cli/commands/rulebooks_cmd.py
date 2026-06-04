@@ -83,21 +83,22 @@ def _load_yaml_or_json(path: Path) -> Any:
 def _build_rulebooks_table(
     rulebooks: list[dict], title: str = "Rulebooks", with_catalogue: bool = False
 ) -> Table:
+    """Lean table: one identifier column (slug, falling back to rulebook_id).
+
+    Domain and the raw rulebook_id stay available via `rulebooks show` and
+    `--json`; every command accepts slug or id interchangeably.
+    """
     table = Table(title=title)
-    table.add_column("Slug", style="cyan")
-    table.add_column("Rulebook ID", style="dim")
+    table.add_column("ID", style="cyan")
     table.add_column("Name")
-    table.add_column("Domain")
     table.add_column("Status")
     table.add_column("Rulesets", justify="right")
     if with_catalogue:
         table.add_column("Catalogue")
     for rb in rulebooks:
         row = [
-            rb.get("slug") or "[dim]—[/dim]",
-            rb.get("rulebook_id", ""),
+            rb.get("slug") or rb.get("rulebook_id", ""),
             rb.get("name") or "[dim]—[/dim]",
-            rb.get("domain") or "[dim]—[/dim]",
             rb.get("status", ""),
             str(len(rb.get("ruleset_refs", []) or [])),
         ]
