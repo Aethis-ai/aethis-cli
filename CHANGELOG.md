@@ -8,6 +8,7 @@
   - A public-catalogue fetch failure warns on stderr and still renders the tenant listing, instead of failing the whole command.
   - New `--public` flag lists only the anonymous catalogue (parity with `aethis rulesets list --public`), even with a key cached.
 - **feat(rulebooks list): leaner table.** Columns reduced to `ID` (slug, falling back to `rb_…` when unslugged), `Name`, `Status`, `Rulesets`, `Catalogue`. The separate `Slug`/`Rulebook ID` pair and `Domain` are gone from the table — both remain in `--json` and `rulebooks show`, and every command accepts slug or id interchangeably.
+- **feat(rulesets list): same lean identifier column for the public showcase table.** `Slug`/`Ruleset ID` merge into one `ID` column (slug preferred, id fallback), matching `rulebooks list`. The project-scoped (legacy) table is unchanged.
 
 ## 0.20.0 (2026-06-03)
 

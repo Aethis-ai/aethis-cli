@@ -32,9 +32,10 @@ rulesets_app = typer.Typer(
 
 
 def _build_public_table(rulesets: list[dict]) -> Table:
+    """Lean table: one identifier column (slug, falling back to ruleset_id),
+    matching `rulebooks list`. The raw id stays available via `--json`."""
     table = Table(title="Public showcase rulesets")
-    table.add_column("Slug", style="cyan")
-    table.add_column("Ruleset ID", style="dim")
+    table.add_column("ID", style="cyan")
     table.add_column("Name")
     table.add_column("Description")
     table.add_column("Fields", justify="right")
@@ -42,8 +43,7 @@ def _build_public_table(rulesets: list[dict]) -> Table:
 
     for r in rulesets:
         table.add_row(
-            r.get("slug") or "[dim]—[/dim]",
-            r.get("ruleset_id", ""),
+            r.get("slug") or r.get("ruleset_id", ""),
             r.get("name") or "[dim]—[/dim]",
             r.get("description", "") or "[dim]—[/dim]",
             str(r.get("field_count", 0)),
