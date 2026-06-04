@@ -59,8 +59,13 @@ def test_rulebooks_list_renders_table(tmp_path, monkeypatch):
             "ruleset_refs": [],
         },
     ]
-
-    with patch("aethis_cli.client.AethisClient", return_value=client):
+    with (
+        patch("aethis_cli.client.AethisClient", return_value=client),
+        patch(
+            "aethis_cli.commands.rulebooks_cmd.make_anonymous_client",
+            return_value=_patch_anonymous([]),
+        ),
+    ):
         result = _runner_invoke(["rulebooks", "list"])
 
     assert result.exit_code == 0, result.output
@@ -76,10 +81,169 @@ def test_rulebooks_list_empty_state(tmp_path, monkeypatch):
     monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
     client = MagicMock()
     client.list_rulebooks.return_value = []
-    with patch("aethis_cli.client.AethisClient", return_value=client):
+    with (
+        patch("aethis_cli.client.AethisClient", return_value=client),
+        patch(
+            "aethis_cli.commands.rulebooks_cmd.make_anonymous_client",
+            return_value=_patch_anonymous([]),
+        ),
+    ):
         result = _runner_invoke(["rulebooks", "list"])
     assert result.exit_code == 0
     assert "No rulebooks yet" in _strip(result.output)
+
+
+def test_rulebooks_list_keyed_includes_public_catalogue(tmp_path, monkeypatch):
+    """A keyed user still sees public rulebooks — the catalogue is part of
+    the product surface, not an anonymous-only fallback. Entries the tenant
+    already owns are deduped out of the public section."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
+    monkeypatch.setenv("COLUMNS", "200")
+
+    client = MagicMock()
+    client.list_rulebooks.return_value = [
+        {
+            "rulebook_id": "rb_mine",
+            "slug": "acme/my-draft",
+            "name": "My Draft",
+            "domain": "acme",
+            "status": "draft",
+            "ruleset_refs": [],
+        },
+    ]
+    anon_client = _patch_anonymous(
+        [
+            {
+                "rulebook_id": "rb_pub",
+                "slug": "aethis/uk-fsm",
+                "name": "UK Free School Meals",
+                "domain": "uk_fsm",
+                "status": "active",
+                "visibility": "public",
+                "ruleset_refs": [],
+            },
+            # Duplicate of a tenant-owned rulebook — must not render twice.
+            {
+                "rulebook_id": "rb_mine",
+                "slug": "acme/my-draft",
+                "name": "My Draft",
+                "domain": "acme",
+                "status": "draft",
+                "ruleset_refs": [],
+            },
+        ]
+    )
+
+    with (
+        patch("aethis_cli.client.AethisClient", return_value=client),
+        patch("aethis_cli.commands.rulebooks_cmd.make_anonymous_client", return_value=anon_client),
+    ):
+        result = _runner_invoke(["rulebooks", "list"])
+
+    assert result.exit_code == 0, result.output
+    out = _strip(result.output)
+    assert "acme/my-draft" in out
+    assert "aethis/uk-fsm" in out
+    assert "yours" in out
+    assert "public" in out
+    assert out.count("rb_mine") == 1
+
+
+def test_rulebooks_list_keyed_empty_tenant_still_shows_public(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
+    monkeypatch.setenv("COLUMNS", "200")
+
+    client = MagicMock()
+    client.list_rulebooks.return_value = []
+    anon_client = _patch_anonymous(
+        [
+            {
+                "rulebook_id": "rb_pub",
+                "slug": "aethis/uk-fsm",
+                "name": "UK Free School Meals",
+                "domain": "uk_fsm",
+                "status": "active",
+                "ruleset_refs": [],
+            },
+        ]
+    )
+
+    with (
+        patch("aethis_cli.client.AethisClient", return_value=client),
+        patch("aethis_cli.commands.rulebooks_cmd.make_anonymous_client", return_value=anon_client),
+    ):
+        result = _runner_invoke(["rulebooks", "list"])
+
+    assert result.exit_code == 0, result.output
+    out = _strip(result.output)
+    assert "No rulebooks in your tenant yet" in out
+    assert "aethis/uk-fsm" in out
+
+
+def test_rulebooks_list_public_flag_skips_auth(tmp_path, monkeypatch):
+    """`--public` shows only the anonymous catalogue, even with a key cached."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
+    monkeypatch.setenv("COLUMNS", "200")
+
+    anon_client = _patch_anonymous(
+        [
+            {
+                "rulebook_id": "rb_pub",
+                "slug": "aethis/uk-fsm",
+                "name": "UK Free School Meals",
+                "domain": "uk_fsm",
+                "status": "active",
+                "ruleset_refs": [],
+            }
+        ]
+    )
+    with (
+        patch("aethis_cli.commands.rulebooks_cmd.make_anonymous_client", return_value=anon_client),
+        patch("aethis_cli.commands.rulebooks_cmd.load_client_or_fallback") as load_client,
+    ):
+        result = _runner_invoke(["rulebooks", "list", "--public"])
+
+    assert result.exit_code == 0, result.output
+    assert "aethis/uk-fsm" in _strip(result.output)
+    load_client.assert_not_called()
+
+
+def test_rulebooks_list_keyed_survives_public_catalogue_error(tmp_path, monkeypatch):
+    """A catalogue outage must not take down the tenant listing — warn and
+    render what we have."""
+    from aethis_cli.errors import AethisAPIError
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
+    monkeypatch.setenv("COLUMNS", "200")
+
+    client = MagicMock()
+    client.list_rulebooks.return_value = [
+        {
+            "rulebook_id": "rb_mine",
+            "slug": "acme/my-draft",
+            "name": "My Draft",
+            "domain": "acme",
+            "status": "draft",
+            "ruleset_refs": [],
+        },
+    ]
+    anon_client = _patch_anonymous([])
+    anon_client.list_public_rulebooks.side_effect = AethisAPIError(status_code=503, detail="upstream down")
+
+    with (
+        patch("aethis_cli.client.AethisClient", return_value=client),
+        patch("aethis_cli.commands.rulebooks_cmd.make_anonymous_client", return_value=anon_client),
+    ):
+        result = _runner_invoke(["rulebooks", "list"])
+
+    assert result.exit_code == 0, result.output
+    out = _strip(result.output)
+    assert "acme/my-draft" in out
+    assert "Could not fetch the public catalogue" in out
 
 
 # ---------------------------------------------------------------------------
@@ -812,6 +976,10 @@ def test_rulebooks_list_with_cached_key_lists_normally(tmp_path, monkeypatch):
         patch(
             "aethis_cli.commands.rulebooks_cmd.load_client_or_fallback",
             return_value=(MagicMock(), client),
+        ),
+        patch(
+            "aethis_cli.commands.rulebooks_cmd.make_anonymous_client",
+            return_value=_patch_anonymous([]),
         ),
     ):
         result = _runner_invoke(["rulebooks", "list"])

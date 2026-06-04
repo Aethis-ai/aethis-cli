@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.21.0 (2026-06-04)
+
+- **feat(rulebooks list): public catalogue is always visible — no longer keyed on the API key.** With a key, `aethis rulebooks list` now shows your tenant's rulebooks *and* the cross-tenant public catalogue in one view, with a `Catalogue` column (`yours` / `public`). Previously logging in made public rulebooks (e.g. `aethis/uk-fsm`) disappear from the listing entirely.
+  - Public entries the tenant already owns are deduped out of the public section.
+  - `--json` output annotates each item with `"catalogue": "tenant" | "public"`.
+  - A public-catalogue fetch failure warns on stderr and still renders the tenant listing, instead of failing the whole command.
+  - New `--public` flag lists only the anonymous catalogue (parity with `aethis rulesets list --public`), even with a key cached.
+
 ## 0.20.0 (2026-06-03)
 
 - **feat(rulebooks list): anonymous fallthrough to the public rulebook catalogue.** With no cached API key, `aethis rulebooks list` now lists the cross-tenant public catalogue (rulebooks with public visibility, active status) instead of printing the v0.19.1 pointer message — completing the parity with `aethis rulesets list`. A dim one-liner ("No API key — showing public rulebooks…") distinguishes the anonymous view; with a key, the tenant listing is unchanged.
