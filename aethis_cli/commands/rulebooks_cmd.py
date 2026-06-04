@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import typer
+from rich.console import Console
 from rich.table import Table
 
 from aethis_cli.auth_helpers import resolve_cached_key
@@ -40,6 +41,9 @@ from aethis_cli.config import load_client_or_fallback, resolve_base_url_with_sou
 from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel, success
 from aethis_cli.render import emit, is_json_requested
+
+# Warnings must never land on stdout — `--json` consumers pipe it.
+_stderr_console = Console(stderr=True)
 
 rulebooks_app = typer.Typer(
     name="rulebooks",
@@ -76,31 +80,41 @@ def _load_yaml_or_json(path: Path) -> Any:
 # ============================================================================
 
 
-def _build_rulebooks_table(rulebooks: list[dict], title: str = "Rulebooks") -> Table:
+def _build_rulebooks_table(
+    rulebooks: list[dict], title: str = "Rulebooks", with_catalogue: bool = False
+) -> Table:
+    """Lean table: one identifier column (slug, falling back to rulebook_id).
+
+    Domain and the raw rulebook_id stay available via `rulebooks show` and
+    `--json`; every command accepts slug or id interchangeably.
+    """
     table = Table(title=title)
-    table.add_column("Slug", style="cyan")
-    table.add_column("Rulebook ID", style="dim")
+    table.add_column("ID", style="cyan")
     table.add_column("Name")
-    table.add_column("Domain")
     table.add_column("Status")
     table.add_column("Rulesets", justify="right")
+    if with_catalogue:
+        table.add_column("Catalogue")
     for rb in rulebooks:
-        table.add_row(
-            rb.get("slug") or "[dim]—[/dim]",
-            rb.get("rulebook_id", ""),
+        row = [
+            rb.get("slug") or rb.get("rulebook_id", ""),
             rb.get("name") or "[dim]—[/dim]",
-            rb.get("domain") or "[dim]—[/dim]",
             rb.get("status", ""),
             str(len(rb.get("ruleset_refs", []) or [])),
-        )
+        ]
+        if with_catalogue:
+            row.append("yours" if rb.get("catalogue") == "tenant" else "[dim]public[/dim]")
+        table.add_row(*row)
     return table
 
 
-def _list_public_rulebooks() -> None:
+def _list_public_rulebooks(explicit: bool = False) -> None:
     """Hit the anonymous rulebook catalogue and render the result.
 
     Mirrors the anonymous fallthrough on ``aethis rulesets list``. Requires
     aethis-core v0.29.0+ on the target API (live on api.aethis.ai).
+    ``explicit`` suppresses the no-key hint when the user asked for the
+    catalogue via ``--public`` (where "No API key" may be untrue).
     """
     base_url, _ = resolve_base_url_with_source()
     with make_anonymous_client(base_url) as client:
@@ -110,7 +124,7 @@ def _list_public_rulebooks() -> None:
             error_panel(e)
             raise typer.Exit(code=1)
 
-    if not is_json_requested():
+    if not explicit and not is_json_requested():
         console.print("[dim]No API key — showing public rulebooks. Run `aethis login` to see yours.[/dim]")
     if not rulebooks:
         if is_json_requested():
@@ -123,27 +137,65 @@ def _list_public_rulebooks() -> None:
     emit(rulebooks, table=lambda: _build_rulebooks_table(rulebooks, title="Public rulebooks"))
 
 
+def _fetch_public_rulebooks() -> list[dict]:
+    """Best-effort fetch of the anonymous public catalogue.
+
+    Used to supplement an authenticated listing, so a catalogue outage must
+    not take down `rulebooks list` — warn on stderr (never stdout, which may
+    be JSON) and return an empty list instead of exiting.
+    """
+    base_url, _ = resolve_base_url_with_source()
+    with make_anonymous_client(base_url) as client:
+        try:
+            return client.list_public_rulebooks()
+        except AethisAPIError as e:
+            _stderr_console.print(
+                f"[yellow]![/yellow] Could not fetch the public catalogue: {e.detail} (HTTP {e.status_code})"
+            )
+            return []
+
+
 @rulebooks_app.command(name="list")
-def list_rulebooks() -> None:
-    """List rulebooks — your tenant's (with an API key) or the public catalogue.
+def list_rulebooks(
+    public: bool = typer.Option(
+        False,
+        "--public",
+        help="List only the cross-tenant public catalogue (no auth required).",
+    ),
+) -> None:
+    """List rulebooks — your tenant's plus the public catalogue.
+
+    With an API key, shows your tenant's rulebooks and the cross-tenant
+    public catalogue in one view (Catalogue column: yours / public). With
+    no key — or with ``--public`` — shows only the public catalogue.
 
     Example::
 
         aethis rulebooks list
+        aethis rulebooks list --public
     """
-    # Rulebooks are tenant-scoped; with no key cached, fall through to the
-    # anonymous cross-tenant public catalogue instead of dragging a
-    # brand-new user through the browser sign-in for a read-only browse.
-    if resolve_cached_key() is None:
-        _list_public_rulebooks()
+    # With no key cached, fall through to the anonymous cross-tenant public
+    # catalogue instead of dragging a brand-new user through the browser
+    # sign-in for a read-only browse.
+    if public or resolve_cached_key() is None:
+        _list_public_rulebooks(explicit=public)
         return
 
     _cfg, client = load_client_or_fallback()
     try:
-        rulebooks = client.list_rulebooks()
+        mine = client.list_rulebooks()
     except AethisAPIError as e:
         error_panel(e)
         raise typer.Exit(code=1)
+
+    # Public rulebooks must stay visible to keyed users too — the catalogue
+    # is part of the product surface, not an anonymous-only fallback.
+    own_ids = {rb.get("rulebook_id") for rb in mine}
+    public_rbs = [rb for rb in _fetch_public_rulebooks() if rb.get("rulebook_id") not in own_ids]
+
+    rulebooks = [{**rb, "catalogue": "tenant"} for rb in mine] + [
+        {**rb, "catalogue": "public"} for rb in public_rbs
+    ]
 
     if not rulebooks:
         if is_json_requested():
@@ -152,7 +204,13 @@ def list_rulebooks() -> None:
             console.print("[dim]No rulebooks yet. Create one with `aethis rulebooks create`.[/dim]")
         return
 
-    emit(rulebooks, table=lambda: _build_rulebooks_table(rulebooks))
+    if not mine and not is_json_requested():
+        console.print(
+            "[dim]No rulebooks in your tenant yet — showing the public catalogue. "
+            "Create one with `aethis rulebooks create`.[/dim]"
+        )
+
+    emit(rulebooks, table=lambda: _build_rulebooks_table(rulebooks, with_catalogue=True))
 
 
 # ============================================================================
