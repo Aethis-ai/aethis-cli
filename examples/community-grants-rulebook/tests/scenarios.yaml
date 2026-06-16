@@ -1,0 +1,2 @@
+tests:
+  # Rulebook-level tests are optional; member rulesets carry their own scenarios.

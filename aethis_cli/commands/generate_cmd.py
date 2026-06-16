@@ -476,6 +476,14 @@ def _poll_until_done(client: AethisClient, pid: str, project_dir: Path, timeout:
             if job_status == "success":
                 progress.update(task, completed=100)
                 ruleset_id = result.get("latest_ruleset_id")
+                # The engine can report success a beat before latest_ruleset_id
+                # is populated. Re-poll briefly so the state write — and the
+                # `fields pull` / field-diff steps that read it — don't miss it.
+                for _ in range(5):
+                    if ruleset_id:
+                        break
+                    time.sleep(2)
+                    ruleset_id = client.get_status(pid).get("latest_ruleset_id")
                 write_state(project_dir, {"ruleset_id": ruleset_id})
                 console.print()
                 # Auto-publish so the ruleset is immediately usable

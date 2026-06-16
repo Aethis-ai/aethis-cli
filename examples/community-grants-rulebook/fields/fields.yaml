@@ -1,0 +1,10 @@
+# fields/fields.yaml — the field vocabulary for this rulebook.
+# Defined once here and propagated into every member ruleset (rulebook wins on
+# shared keys), so an end user is only ever asked for this once.
+fields:
+  - key: applicant.is_borough_resident
+    type: bool
+    label: "Borough resident"
+    question: "Are you a resident of the borough?"
+    hints:
+      - "Why we ask: every community grant is restricted to residents of the borough."
