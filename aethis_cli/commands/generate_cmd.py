@@ -27,6 +27,117 @@ def _chunks(lst: list, n: int):
         yield lst[i : i + n]
 
 
+def _load_yaml_file(path: Path) -> dict:
+    """Read + parse a project YAML file, failing fast on oversize / bad YAML."""
+    if path.stat().st_size > 1_000_000:
+        console.print(f"[red]{path} exceeds 1 MB limit[/red]")
+        raise typer.Exit(code=1)
+    try:
+        return yaml.safe_load(path.read_text()) or {}
+    except yaml.YAMLError as e:
+        console.print(f"[red]Invalid YAML in {path}: {e}[/red]")
+        raise typer.Exit(code=1)
+
+
+def _parent_rulebook_dir(project_dir: Path) -> Optional[Path]:
+    """Return the enclosing rulebook directory if this project is a member ruleset.
+
+    Matches the scaffold shape ``<rulebook>/rulesets/<ruleset>/`` so rulebook-level
+    guidance + fields can be propagated down into the ruleset's generation.
+    """
+    parent = project_dir.parent
+    if parent.name == "rulesets" and (parent.parent / "aethis.yaml").exists():
+        return parent.parent
+    return None
+
+
+def _parse_fields_yaml(path: Path) -> dict:
+    """Parse a fields.yaml into an ordered ``{key: field_dict}`` map."""
+    raw = _load_yaml_file(path)
+    out: dict = {}
+    for f in raw.get("fields", []) or []:
+        if isinstance(f, dict) and f.get("key"):
+            out[f["key"]] = f
+    return out
+
+
+def _field_guidance_lines(key: str, field: dict) -> list[str]:
+    """Natural-language guidance derived from a field's label/question/hints.
+
+    The ``/fields/spec`` endpoint only fixes key + type, so the human-facing
+    phrasing and the "why we ask" notes ride along as guidance instead.
+    """
+    lines: list[str] = []
+    if field.get("question"):
+        lines.append(f'Ask field "{key}" using this question: {field["question"]}')
+    if field.get("label"):
+        lines.append(f'Label field "{key}" as: {field["label"]}')
+    for hint in field.get("hints", []) or []:
+        if hint:
+            lines.append(f'Field "{key}": {hint}')
+    return lines
+
+
+def _upload_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) -> None:
+    """Push the field vocabulary for this project (rulebook-level fields win).
+
+    Merges the enclosing rulebook's ``fields/fields.yaml`` (if any) with the
+    project's own — the rulebook definition wins on shared keys — then pins the
+    expected field keys/types via ``/fields/spec`` and routes each field's
+    label/question/hints through guidance so a shared field is defined once.
+    """
+    field_map: dict = {}
+
+    rb_dir = _parent_rulebook_dir(project_dir)
+    if rb_dir is not None:
+        rb_fields = rb_dir / "fields" / "fields.yaml"
+        if rb_fields.exists():
+            field_map.update(_parse_fields_yaml(rb_fields))
+
+    own_fields = project_dir / "fields" / "fields.yaml"
+    if own_fields.exists():
+        for key, field in _parse_fields_yaml(own_fields).items():
+            field_map.setdefault(key, field)  # rulebook wins: don't overwrite
+
+    if not field_map:
+        return
+
+    expected_fields: list[dict] = []
+    guidance_lines: list[str] = []
+    for key, field in field_map.items():
+        spec = {"key": key, "sort": field.get("type") or field.get("sort")}
+        if field.get("enum_values"):
+            spec["enum_values"] = field["enum_values"]
+        expected_fields.append(spec)
+        guidance_lines.extend(_field_guidance_lines(key, field))
+
+    client.set_field_spec(pid, expected_fields)
+    for line in guidance_lines:
+        client.add_guidance(pid, line)
+    info(f"Set field spec ({len(expected_fields)} field(s))")
+
+
+def _upload_rulebook_guidance(client: AethisClient, pid: str, project_dir: Path) -> None:
+    """Propagate the enclosing rulebook's guidance hints into this ruleset."""
+    rb_dir = _parent_rulebook_dir(project_dir)
+    if rb_dir is None:
+        return
+    rb_hints = rb_dir / "guidance" / "hints.yaml"
+    if not rb_hints.exists():
+        return
+    raw = _load_yaml_file(rb_hints)
+    count = 0
+    for hint in raw.get("hints", []) or []:
+        if not hint:
+            continue
+        text = hint if isinstance(hint, str) else hint.get("text", "")
+        if text:
+            client.add_guidance(pid, text)
+            count += 1
+    if count:
+        info(f"Propagated {count} rulebook guidance hint(s)")
+
+
 def generate(
     project_id: Optional[str] = typer.Option(None, "--project-id", "-p"),
     poll: bool = typer.Option(True, "--poll/--no-poll", help="Poll until generation completes"),
@@ -151,6 +262,12 @@ def _run_generate(
                 count += 1
             if count:
                 info(f"Added {count} guidance hint(s)")
+
+        # Propagate rulebook-level guidance + push the field vocabulary. A field
+        # (e.g. date of birth) defined once at the rulebook level flows down here
+        # so the end user is only asked for it once. Rulebook fields win.
+        _upload_rulebook_guidance(client, pid, project_dir)
+        _upload_field_vocabulary(client, pid, project_dir)
 
         # Upload test cases
         tests_path = project_dir / "tests" / "scenarios.yaml"

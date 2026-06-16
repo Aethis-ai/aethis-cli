@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.21.0 (2026-06-16)
+
+- **feat(init): field definitions get a real home (`fields/fields.yaml`).** `aethis init` now scaffolds a `fields/` directory with a `fields.yaml` for declaring the field vocabulary (key + `type` + optional `label`/`question`/`hints`). Previously fields had no dedicated home and only surfaced implicitly as the `inputs:` keys inside `tests/scenarios.yaml`. `aethis generate` reads `fields/fields.yaml`, pins the field keys/types via the project field-spec endpoint, and routes each field's label/question/hints through guidance so a field is defined once.
+- **feat(init): `--kind rulebook` scaffolds a rulebook.** `aethis init <name> --kind rulebook` lays down a rulebook directory with shared `guidance/` and `fields/` plus a `rulesets/` directory for member rulesets. When a ruleset lives under a rulebook (`<rulebook>/rulesets/<ruleset>/`), `aethis generate` propagates the rulebook's guidance hints and field vocabulary into the ruleset — **the rulebook definition wins on shared field keys** — so a common field (e.g. date of birth) is defined once at the rulebook level and the end user is asked for it only once. `--kind` defaults to `ruleset`, so existing behaviour is unchanged.
+  - New `AethisClient.set_field_spec()` (project field-spec endpoint, already served by aethis-core / used by the MCP server). No engine change required.
+
 ## 0.20.0 (2026-06-03)
 
 - **feat(rulebooks list): anonymous fallthrough to the public rulebook catalogue.** With no cached API key, `aethis rulebooks list` now lists the cross-tenant public catalogue (rulebooks with public visibility, active status) instead of printing the v0.19.1 pointer message — completing the parity with `aethis rulesets list`. A dim one-liner ("No API key — showing public rulebooks…") distinguishes the anonymous view; with a key, the tenant listing is unchanged.

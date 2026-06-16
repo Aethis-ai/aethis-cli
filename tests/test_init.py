@@ -47,6 +47,65 @@ def test_init_creates_project_structure(tmp_path, monkeypatch):
     assert (proj / "tests" / "scenarios.yaml").exists()
 
 
+# --- fields home (Part A) --------------------------------------------------
+
+
+def test_init_ruleset_creates_fields_home(tmp_path, monkeypatch):
+    """Fields get a dedicated home, not implied by tests/scenarios.yaml."""
+    monkeypatch.chdir(tmp_path)
+    with _patch_auth_present():
+        result = runner.invoke(app, ["init", "with-fields"])
+    assert result.exit_code == 0, result.output
+    proj = tmp_path / "with-fields"
+    assert (proj / "fields" / "fields.yaml").exists()
+    assert "fields:" in (proj / "fields" / "fields.yaml").read_text()
+
+
+def test_init_default_kind_is_ruleset(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    with _patch_auth_present():
+        runner.invoke(app, ["init", "default-kind"])
+    content = (tmp_path / "default-kind" / "aethis.yaml").read_text()
+    assert "kind: ruleset" in content
+
+
+# --- rulebook scaffold (Part B) --------------------------------------------
+
+
+def test_init_rulebook_scaffold(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    with _patch_auth_present():
+        result = runner.invoke(app, ["init", "my-rulebook", "--kind", "rulebook"])
+    assert result.exit_code == 0, result.output
+    rb = tmp_path / "my-rulebook"
+    assert "kind: rulebook" in (rb / "aethis.yaml").read_text()
+    assert (rb / "guidance" / "hints.yaml").exists()
+    assert (rb / "fields" / "fields.yaml").exists()
+    assert (rb / "tests" / "scenarios.yaml").exists()
+    assert (rb / "rulesets").is_dir()
+    # A rulebook composes rulesets; sources belong to the rulesets, not here.
+    assert not (rb / "sources").exists()
+
+
+def test_init_ruleset_kind_has_sources(tmp_path, monkeypatch):
+    """--kind ruleset reproduces today's flat layout (sources present)."""
+    monkeypatch.chdir(tmp_path)
+    with _patch_auth_present():
+        result = runner.invoke(app, ["init", "flat-rs", "--kind", "ruleset"])
+    assert result.exit_code == 0, result.output
+    proj = tmp_path / "flat-rs"
+    assert (proj / "sources").is_dir()
+    assert (proj / "fields" / "fields.yaml").exists()
+
+
+def test_init_rejects_invalid_kind(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    with _patch_auth_present():
+        result = runner.invoke(app, ["init", "bad-kind", "--kind", "widget"])
+    assert result.exit_code != 0
+    assert "kind" in result.output.lower()
+
+
 def test_init_yaml_has_project_name(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     with _patch_auth_present():
