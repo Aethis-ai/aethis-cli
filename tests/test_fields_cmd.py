@@ -12,7 +12,13 @@ from aethis_cli.commands import generate_cmd
 
 def _cfg(tmp_path, **over):
     """A minimal ProjectConfig-shaped object for the fields subcommands."""
-    defaults = dict(config_path=tmp_path, project_id="proj_1", base_url="https://api.aethis.ai", project="p")
+    defaults = dict(
+        config_path=tmp_path,
+        project_id="proj_1",
+        base_url="https://api.aethis.ai",
+        project="p",
+        anthropic_key_env="ANTHROPIC_API_KEY",
+    )
     defaults.update(over)
     return SimpleNamespace(**defaults)
 
@@ -140,6 +146,34 @@ def test_fields_discover_seeds_new_fields_and_preserves_existing(tmp_path, monke
     assert parsed["applicant.kind"]["enum_values"] == ["a", "b"]
     assert "Completeness" in result.output
     assert "needs a residence field" in result.output
+
+
+def test_fields_discover_missing_llm_key_gives_actionable_error(tmp_path, monkeypatch):
+    """A server 'needs LLM key' 400 surfaces as a clean, env-var-naming message."""
+    from aethis_cli.errors import AethisAPIError
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "fields").mkdir()
+    (tmp_path / "fields" / "fields.yaml").write_text("fields: []\n")
+
+    client = MagicMock()
+    client.discover_fields.side_effect = AethisAPIError(
+        400, "X-Anthropic-Key header is required. Field discovery uses Anthropic LLM calls."
+    )
+
+    with (
+        patch("aethis_cli.commands.fields_cmd.load_project_config", return_value=_cfg(tmp_path)),
+        patch("aethis_cli.commands.fields_cmd.resolve_api_key", return_value="ak"),
+        patch("aethis_cli.commands.fields_cmd.resolve_anthropic_key", return_value=None),
+        patch("aethis_cli.commands.fields_cmd.make_authed_client", return_value=client),
+    ):
+        from aethis_cli.main import app
+
+        result = CliRunner().invoke(app, ["fields", "discover"], catch_exceptions=False)
+
+    assert result.exit_code == 1
+    assert "ANTHROPIC_API_KEY" in result.output
+    assert "needs an LLM key" in result.output
 
 
 # --- fields pull -----------------------------------------------------------

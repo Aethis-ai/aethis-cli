@@ -166,6 +166,14 @@ def discover() -> None:
         pid = _ensure_project_and_sources(client, cfg)
         result = client.discover_fields(pid)
     except AethisAPIError as e:
+        # The server rejects discovery without an LLM key (unless the API key is
+        # internal). Surface the actionable fix instead of the raw header error.
+        if e.status_code == 400 and "anthropic" in e.detail.lower():
+            console.print(
+                f"[red]Field discovery needs an LLM key.[/red] Set [bold]{cfg.anthropic_key_env}[/bold] "
+                "to your Anthropic API key and re-run (e.g. `export ANTHROPIC_API_KEY=sk-ant-...`)."
+            )
+            raise typer.Exit(code=1)
         error_panel(e)
         raise typer.Exit(code=1)
 
