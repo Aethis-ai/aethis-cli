@@ -125,6 +125,21 @@ def _normalise_field_type(t: Optional[str]) -> str:
     return _SERVER_TYPE_TO_YAML.get(low, low)
 
 
+def _safe_field_type(raw_type: Optional[str], enum_values: Optional[list]) -> str:
+    """A field ``type`` guaranteed to pass validation when written to disk.
+
+    Server/discovery payloads can carry a type we don't model (it would write a
+    file the next ``validate``/``generate`` rejects) or an ``enum`` with no
+    values (not a representable enum on disk). Both fall back to ``string``.
+    """
+    t = _normalise_field_type(raw_type)
+    if t not in VALID_FIELD_TYPES:
+        return "string"
+    if t == "enum" and not enum_values:
+        return "string"
+    return t
+
+
 def validate_fields_list(fields: list) -> list[str]:
     """Return human-readable validation errors for a ``fields.yaml`` field list.
 
@@ -157,11 +172,20 @@ def validate_fields_list(fields: list) -> list[str]:
 
 
 def _field_to_yaml_dict(field: dict) -> dict:
-    """Project a field map onto the canonical key order, dropping empties."""
+    """Serialise a field in canonical key order, dropping empties.
+
+    Any key we don't model (e.g. a hand-authored ``description`` or ``weight``)
+    is preserved after the known keys so a round-trip write never silently
+    discards it. ``sort`` is folded into ``type`` and not re-emitted.
+    """
     out: dict = {}
     for k in _FIELD_KEY_ORDER:
-        v = field.get("type") or field.get("sort") if k == "type" else field.get(k)
+        v = (field.get("type") or field.get("sort")) if k == "type" else field.get(k)
         if v in (None, "", [], {}):
+            continue
+        out[k] = v
+    for k, v in field.items():
+        if k in out or k == "sort" or v in (None, "", [], {}):
             continue
         out[k] = v
     return out
@@ -198,17 +222,27 @@ def _upload_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) 
     expected field keys/types via ``/fields/spec`` and routes each field's
     label/question/hints through guidance so a shared field is defined once.
     """
+    # Fail fast on a malformed vocabulary before we mutate server state. Validate
+    # each contributing file's RAW list so duplicate keys *within a file* surface
+    # — the merged map would silently collapse them. A key shared between the
+    # rulebook and the ruleset is intentional (rulebook wins), not a duplicate.
+    rb_dir = _parent_rulebook_dir(project_dir)
+    contributing = [project_dir / "fields" / "fields.yaml"]
+    if rb_dir is not None:
+        contributing.insert(0, rb_dir / "fields" / "fields.yaml")
+    for path in contributing:
+        if not path.exists():
+            continue
+        errors = validate_fields_list(_load_yaml_file(path).get("fields") or [])
+        if errors:
+            console.print(f"[red]{path} is invalid:[/red]")
+            for e in errors:
+                console.print(f"  [red]✗[/red] {e}")
+            raise typer.Exit(code=1)
+
     field_map = _merged_field_map(project_dir)
     if not field_map:
         return
-
-    # Fail fast on a malformed vocabulary before we mutate server state.
-    errors = validate_fields_list(list(field_map.values()))
-    if errors:
-        console.print("[red]fields.yaml is invalid:[/red]")
-        for e in errors:
-            console.print(f"  [red]✗[/red] {e}")
-        raise typer.Exit(code=1)
 
     expected_fields: list[dict] = []
     guidance_lines: list[str] = []
@@ -484,14 +518,23 @@ def _poll_until_done(client: AethisClient, pid: str, project_dir: Path, timeout:
                         break
                     time.sleep(2)
                     ruleset_id = client.get_status(pid).get("latest_ruleset_id")
-                write_state(project_dir, {"ruleset_id": ruleset_id})
+                # Only record a real id — never clobber a prior good one with None
+                # if the engine was slow to surface it.
+                if ruleset_id:
+                    write_state(project_dir, {"ruleset_id": ruleset_id})
                 console.print()
                 # Auto-publish so the ruleset is immediately usable
                 try:
                     client.publish(pid)
-                    success(f"Done! Ruleset published: {ruleset_id}")
+                    if ruleset_id:
+                        success(f"Done! Ruleset published: {ruleset_id}")
+                    else:
+                        success("Done! Ruleset generated — run 'aethis status' to get its id.")
                 except AethisAPIError:
-                    success(f"Done! Ruleset: {ruleset_id} (run 'aethis publish' to activate)")
+                    if ruleset_id:
+                        success(f"Done! Ruleset: {ruleset_id} (run 'aethis publish' to activate)")
+                    else:
+                        success("Done! Ruleset generated (run 'aethis publish' to activate).")
                 return
 
             if job_status == "failed":

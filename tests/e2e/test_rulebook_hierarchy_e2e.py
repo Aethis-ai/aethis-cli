@@ -46,7 +46,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLE_DIR = REPO_ROOT / "examples" / "community-grants-rulebook"
 MEMBER_RULESETS = ["youth-activity-grant", "senior-wellbeing-grant"]
 SHARED_FIELD = "applicant.is_borough_resident"
-CLI_TIMEOUT = 360  # seconds per CLI call (generation is the slow one)
+GENERATE_TIMEOUT = 300  # passed to `aethis generate --timeout` (its poll deadline)
+# Subprocess hard-kill ceiling. Must exceed GENERATE_TIMEOUT with comfortable
+# margin: after the poll deadline, generate still does the ruleset-id re-poll
+# (~10s), the auto-publish, and the field-diff get_schema — all outside the
+# deadline. A tight margin SIGKILLs a generation that actually succeeded.
+CLI_TIMEOUT = 420
 
 
 def _require_live_backend() -> None:
@@ -108,7 +113,7 @@ def authored_rulebook(tmp_path_factory):
         val = _run_cli(["fields", "validate"], rs_dir)
         assert val.returncode == 0, f"{name}: fields validate failed"
 
-        gen = _run_cli(["generate", "--poll", "--timeout", str(CLI_TIMEOUT - 30)], rs_dir)
+        gen = _run_cli(["generate", "--poll", "--timeout", str(GENERATE_TIMEOUT)], rs_dir)
         assert gen.returncode == 0, f"{name}: generate failed"
 
         pull = _run_cli(["fields", "pull"], rs_dir)

@@ -18,8 +18,8 @@ from rich.table import Table
 from aethis_cli.commands.generate_cmd import (
     _chunks,
     _load_yaml_file,
-    _normalise_field_type,
     _parse_fields_yaml,
+    _safe_field_type,
     _write_fields_yaml,
     validate_fields_list,
 )
@@ -175,11 +175,12 @@ def discover() -> None:
         key = df.get("key")
         if not key or key in field_map:
             continue
-        entry: dict = {"key": key, "type": _normalise_field_type(df.get("field_type"))}
+        ftype = _safe_field_type(df.get("field_type"), df.get("enum_values"))
+        entry: dict = {"key": key, "type": ftype}
         question = df.get("question") or df.get("description")
         if question:
             entry["question"] = question
-        if df.get("enum_values"):
+        if ftype == "enum" and df.get("enum_values"):
             entry["enum_values"] = df["enum_values"]
         description = df.get("description")
         if description and description != entry.get("question"):
@@ -249,8 +250,8 @@ def pull(
         entry = dict(field_map.get(key, {}))  # preserve local label/hints
         existed = key in field_map
         entry["key"] = key
-        entry["type"] = _normalise_field_type(sf.get("field_type"))
-        if sf.get("enum_values"):
+        entry["type"] = _safe_field_type(sf.get("field_type"), sf.get("enum_values"))
+        if entry["type"] == "enum" and sf.get("enum_values"):
             entry["enum_values"] = sf["enum_values"]
         else:
             entry.pop("enum_values", None)

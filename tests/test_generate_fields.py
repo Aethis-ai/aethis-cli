@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+import typer
+
 from aethis_cli.commands import generate_cmd
+from aethis_cli.config import read_state, write_state
 
 
 # --- helpers ---------------------------------------------------------------
@@ -133,10 +137,10 @@ def test_validate_fields_list_accepts_valid():
 
 def test_validate_fields_list_flags_problems():
     fields = [
-        {"key": "a.income", "type": "money"},          # invalid type
-        {"key": "a.kind", "type": "enum"},              # enum without values
-        {"key": "a.income", "type": "int"},             # duplicate key
-        {"type": "string"},                              # missing key
+        {"key": "a.income", "type": "money"},  # invalid type
+        {"key": "a.kind", "type": "enum"},  # enum without values
+        {"key": "a.income", "type": "int"},  # duplicate key
+        {"type": "string"},  # missing key
     ]
     errors = generate_cmd.validate_fields_list(fields)
     joined = " ".join(errors)
@@ -178,6 +182,53 @@ def test_parent_rulebook_dir_explicit_key_wins(tmp_path):
 # --- post-generate diff ----------------------------------------------------
 
 
+def test_safe_field_type_clamps_unknown_and_valueless_enum():
+    assert generate_cmd._safe_field_type("money", None) == "string"  # unknown → safe default
+    assert generate_cmd._safe_field_type("enum", None) == "string"  # enum needs values
+    assert generate_cmd._safe_field_type("enum", ["a", "b"]) == "enum"
+    assert generate_cmd._safe_field_type("integer", None) == "int"
+
+
+def test_write_fields_yaml_preserves_unmodelled_keys(tmp_path):
+    """A round-trip write keeps hand-authored keys we don't model."""
+    path = tmp_path / "fields" / "fields.yaml"
+    field_map = {"a.x": {"key": "a.x", "type": "int", "description": "keep me", "weight": 3}}
+    generate_cmd._write_fields_yaml(path, field_map)
+    written = generate_cmd._load_yaml_file(path)["fields"][0]
+    assert written["description"] == "keep me"
+    assert written["weight"] == 3
+
+
+def test_upload_field_vocabulary_rejects_duplicate_keys(tmp_path):
+    """Duplicate keys within a file fail fast before any server mutation."""
+    _write_fields(
+        tmp_path / "fields" / "fields.yaml",
+        "fields:\n  - key: a.x\n    type: int\n  - key: a.x\n    type: bool\n",
+    )
+    client = MagicMock()
+    with pytest.raises(typer.Exit):
+        generate_cmd._upload_field_vocabulary(client, "proj_1", tmp_path)
+    client.set_field_spec.assert_not_called()
+
+
+def test_poll_success_without_ruleset_id_keeps_prior_state(tmp_path, monkeypatch):
+    """A success that never surfaces latest_ruleset_id must not clobber a prior id."""
+    monkeypatch.setattr(generate_cmd.time, "sleep", lambda *_a, **_k: None)
+    write_state(tmp_path, {"ruleset_id": "old:123"})
+    client = MagicMock()
+    client.get_status.return_value = {"job": {"status": "success", "progress_percent": 100}}
+    generate_cmd._poll_until_done(client, "proj_1", tmp_path, timeout=30)
+    assert read_state(tmp_path)["ruleset_id"] == "old:123"
+
+
+def test_poll_success_records_ruleset_id(tmp_path, monkeypatch):
+    monkeypatch.setattr(generate_cmd.time, "sleep", lambda *_a, **_k: None)
+    client = MagicMock()
+    client.get_status.return_value = {"job": {"status": "success"}, "latest_ruleset_id": "new:456"}
+    generate_cmd._poll_until_done(client, "proj_1", tmp_path, timeout=30)
+    assert read_state(tmp_path)["ruleset_id"] == "new:456"
+
+
 def test_report_field_diff_flags_drift(tmp_path, capsys):
     _write_fields(tmp_path / "fields" / "fields.yaml", RULESET_FIELDS)
     client = MagicMock()
@@ -190,4 +241,4 @@ def test_report_field_diff_flags_drift(tmp_path, capsys):
     generate_cmd._report_field_diff(client, "rs_1", tmp_path)
     out = capsys.readouterr().out
     assert "applicant.date_of_birth" in out  # pinned but not produced
-    assert "applicant.surprise" in out        # produced but not pinned
+    assert "applicant.surprise" in out  # produced but not pinned

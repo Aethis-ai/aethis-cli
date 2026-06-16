@@ -122,10 +122,12 @@ def test_fields_discover_seeds_new_fields_and_preserves_existing(tmp_path, monke
         "recommendation": "add residence",
     }
 
-    with patch("aethis_cli.commands.fields_cmd.load_project_config", return_value=_cfg(tmp_path)), \
-         patch("aethis_cli.commands.fields_cmd.resolve_api_key", return_value="ak"), \
-         patch("aethis_cli.commands.fields_cmd.resolve_anthropic_key", return_value="sk"), \
-         patch("aethis_cli.commands.fields_cmd.make_authed_client", return_value=client):
+    with (
+        patch("aethis_cli.commands.fields_cmd.load_project_config", return_value=_cfg(tmp_path)),
+        patch("aethis_cli.commands.fields_cmd.resolve_api_key", return_value="ak"),
+        patch("aethis_cli.commands.fields_cmd.resolve_anthropic_key", return_value="sk"),
+        patch("aethis_cli.commands.fields_cmd.make_authed_client", return_value=client),
+    ):
         from aethis_cli.main import app
 
         result = CliRunner().invoke(app, ["fields", "discover"], catch_exceptions=False)
@@ -160,9 +162,11 @@ def test_fields_pull_writes_server_fields_and_keeps_local_annotations(tmp_path, 
         ]
     }
 
-    with patch("aethis_cli.commands.fields_cmd.load_project_config", return_value=_cfg(tmp_path)), \
-         patch("aethis_cli.commands.fields_cmd.resolve_api_key", return_value="ak"), \
-         patch("aethis_cli.commands.fields_cmd.make_authed_client", return_value=client):
+    with (
+        patch("aethis_cli.commands.fields_cmd.load_project_config", return_value=_cfg(tmp_path)),
+        patch("aethis_cli.commands.fields_cmd.resolve_api_key", return_value="ak"),
+        patch("aethis_cli.commands.fields_cmd.make_authed_client", return_value=client),
+    ):
         from aethis_cli.main import app
 
         result = CliRunner().invoke(app, ["fields", "pull", "-b", "rs_1"], catch_exceptions=False)
@@ -171,8 +175,8 @@ def test_fields_pull_writes_server_fields_and_keeps_local_annotations(tmp_path, 
     client.get_schema.assert_called_once_with("rs_1")
     parsed = generate_cmd._parse_fields_yaml(tmp_path / "fields" / "fields.yaml")
     assert parsed["applicant.income"]["hints"] == ["keep me"]  # local annotation preserved
-    assert parsed["applicant.new"]["type"] == "bool"            # server form folded
-    assert "applicant.local_only" in parsed                     # local-only kept
+    assert parsed["applicant.new"]["type"] == "bool"  # server form folded
+    assert "applicant.local_only" in parsed  # local-only kept
     assert "local-only" in result.output
 
 
