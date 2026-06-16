@@ -1,0 +1,3 @@
+project: community-grants
+kind: rulebook
+api_key_env: AETHIS_API_KEY

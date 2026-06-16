@@ -14,6 +14,7 @@ from aethis_cli.client import AethisClient
 from aethis_cli.config import (
     load_project_config,
     make_authed_client,
+    read_state,
     resolve_anthropic_key,
     resolve_api_key,
     write_state,
@@ -25,6 +26,66 @@ from aethis_cli.output import console, error_panel, info, success
 def _chunks(lst: list, n: int):
     for i in range(0, len(lst), n):
         yield lst[i : i + n]
+
+
+def _collect_source_files(project_dir: Path) -> list[Path]:
+    """Every file under the project's ``sources/`` dir (symlink-escape guarded)."""
+    sources_dir = project_dir / "sources"
+    if not sources_dir.is_dir():
+        return []
+    root = sources_dir.resolve()
+    return sorted(f for f in sources_dir.rglob("*") if f.is_file() and f.resolve().is_relative_to(root))
+
+
+def _resolve_or_create_project(client: AethisClient, cfg, project_id: Optional[str] = None) -> str:
+    """Return the project id, creating (and persisting) a new project when there
+    is none or the recorded one is gone from the server."""
+    pid = project_id or cfg.project_id
+    if pid:
+        # Verify the project still exists (may be stale from a different server).
+        try:
+            client.get_project(pid)
+        except AethisAPIError as e:
+            if e.status_code == 404:
+                info(f"Project {pid} not found on server, creating new project")
+                pid = None
+            else:
+                raise
+    if not pid:
+        result = client.create_project(cfg.project, cfg.project, "")
+        pid = result["project_id"]
+        # Reset the uploaded-sources ledger — a fresh project has none.
+        write_state(cfg.config_path, {"project_id": pid, "uploaded_sources": {}})
+        info(f"Created project {pid}")
+    return pid
+
+
+def _upload_sources(client: AethisClient, pid: str, project_dir: Path) -> int:
+    """Upload source files new or changed since the last upload, batched in 5s.
+
+    A per-file mtime ledger in ``.aethis/state.json`` keeps this idempotent, so a
+    ``discover`` followed by a ``generate`` (or repeated generates) doesn't
+    re-push unchanged sources. Returns the number uploaded.
+    """
+    files = _collect_source_files(project_dir)
+    if not files:
+        return 0
+    root = (project_dir / "sources").resolve()
+    ledger = dict(read_state(project_dir).get("uploaded_sources") or {})
+    to_upload = []
+    for f in files:
+        rel = str(f.resolve().relative_to(root))
+        mtime = f.stat().st_mtime_ns
+        if ledger.get(rel) != mtime:
+            to_upload.append(f)
+        ledger[rel] = mtime
+    if not to_upload:
+        return 0
+    for batch in _chunks(to_upload, 5):
+        client.upload_sources(pid, batch)
+    write_state(project_dir, {"uploaded_sources": ledger})
+    info(f"Uploaded {len(to_upload)} source(s)")
+    return len(to_upload)
 
 
 def _load_yaml_file(path: Path) -> dict:
@@ -42,9 +103,28 @@ def _load_yaml_file(path: Path) -> dict:
 def _parent_rulebook_dir(project_dir: Path) -> Optional[Path]:
     """Return the enclosing rulebook directory if this project is a member ruleset.
 
-    Matches the scaffold shape ``<rulebook>/rulesets/<ruleset>/`` so rulebook-level
-    guidance + fields can be propagated down into the ruleset's generation.
+    An explicit ``rulebook:`` key in the ruleset's ``aethis.yaml`` wins — its
+    value is a path (relative to the ruleset directory) to the rulebook. Failing
+    that, falls back to the scaffold shape ``<rulebook>/rulesets/<ruleset>/`` by
+    directory position, so rulebook-level guidance + fields can be propagated
+    down into the ruleset's generation.
     """
+    cfg_file = project_dir / "aethis.yaml"
+    if cfg_file.exists():
+        try:
+            raw = yaml.safe_load(cfg_file.read_text()) or {}
+        except yaml.YAMLError:
+            raw = {}
+        declared = raw.get("rulebook")
+        if declared:
+            rb_path = (project_dir / declared).resolve()
+            if (rb_path / "aethis.yaml").exists():
+                return rb_path
+            console.print(
+                f"[yellow]aethis.yaml declares rulebook: {declared!r} but no aethis.yaml "
+                f"found at {rb_path} — falling back to directory position.[/yellow]"
+            )
+
     parent = project_dir.parent
     if parent.name == "rulesets" and (parent.parent / "aethis.yaml").exists():
         return parent.parent
@@ -78,6 +158,122 @@ def _field_guidance_lines(key: str, field: dict) -> list[str]:
     return lines
 
 
+# The set of value types a ``fields.yaml`` entry may declare. Mirrors the
+# engine's accepted sorts (it normalises case + the long forms below).
+VALID_FIELD_TYPES = {"int", "bool", "string", "enum", "date", "duration"}
+
+# The server speaks the long, public-facing type names; ``fields.yaml`` uses the
+# short canonical forms. Map server → on-disk so a pulled/discovered field reads
+# back the same way a hand-authored one does.
+_SERVER_TYPE_TO_YAML = {
+    "integer": "int",
+    "boolean": "bool",
+    "enumeration": "enum",
+    "str": "string",
+}
+
+# Field-key order written back to ``fields.yaml`` so machine-written files read
+# the same as the hand-authored template.
+_FIELD_KEY_ORDER = ("key", "type", "label", "question", "enum_values", "hints")
+
+
+def _normalise_field_type(t: Optional[str]) -> str:
+    """Fold a server/long type name into the short ``fields.yaml`` form."""
+    if not t:
+        return "string"
+    low = t.strip().lower()
+    return _SERVER_TYPE_TO_YAML.get(low, low)
+
+
+def _safe_field_type(raw_type: Optional[str], enum_values: Optional[list]) -> str:
+    """A field ``type`` guaranteed to pass validation when written to disk.
+
+    Server/discovery payloads can carry a type we don't model (it would write a
+    file the next ``validate``/``generate`` rejects) or an ``enum`` with no
+    values (not a representable enum on disk). Both fall back to ``string``.
+    """
+    t = _normalise_field_type(raw_type)
+    if t not in VALID_FIELD_TYPES:
+        return "string"
+    if t == "enum" and not enum_values:
+        return "string"
+    return t
+
+
+def validate_fields_list(fields: list) -> list[str]:
+    """Return human-readable validation errors for a ``fields.yaml`` field list.
+
+    Checks: every entry has a key, no duplicate keys, the ``type`` is one of
+    :data:`VALID_FIELD_TYPES`, and ``enum`` types declare ``enum_values``. An
+    empty return means the list is valid.
+    """
+    errors: list[str] = []
+    seen: set[str] = set()
+    for i, f in enumerate(fields or []):
+        if not isinstance(f, dict):
+            errors.append(f"Field #{i + 1} is not a mapping.")
+            continue
+        key = f.get("key")
+        if not key:
+            errors.append(f"Field #{i + 1} is missing a 'key'.")
+            continue
+        if key in seen:
+            errors.append(f"Duplicate field key: {key!r}.")
+        seen.add(key)
+        ftype = (f.get("type") or f.get("sort") or "").strip().lower()
+        if ftype not in VALID_FIELD_TYPES:
+            errors.append(
+                f"Field {key!r} has invalid type {f.get('type') or f.get('sort')!r} "
+                f"(must be one of: {', '.join(sorted(VALID_FIELD_TYPES))})."
+            )
+        if ftype == "enum" and not f.get("enum_values"):
+            errors.append(f"Field {key!r} is type 'enum' but declares no enum_values.")
+    return errors
+
+
+def _field_to_yaml_dict(field: dict) -> dict:
+    """Serialise a field in canonical key order, dropping empties.
+
+    Any key we don't model (e.g. a hand-authored ``description`` or ``weight``)
+    is preserved after the known keys so a round-trip write never silently
+    discards it. ``sort`` is folded into ``type`` and not re-emitted.
+    """
+    out: dict = {}
+    for k in _FIELD_KEY_ORDER:
+        v = (field.get("type") or field.get("sort")) if k == "type" else field.get(k)
+        if v in (None, "", [], {}):
+            continue
+        out[k] = v
+    for k, v in field.items():
+        if k in out or k == "sort" or v in (None, "", [], {}):
+            continue
+        out[k] = v
+    return out
+
+
+def _write_fields_yaml(path: Path, field_map: dict) -> None:
+    """Serialise an ordered ``{key: field}`` map back to ``fields.yaml``."""
+    payload = {"fields": [_field_to_yaml_dict(f) for f in field_map.values()]}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True, default_flow_style=False))
+
+
+def _merged_field_map(project_dir: Path) -> dict:
+    """The effective field vocabulary for a project: enclosing rulebook merged
+    with the project's own fields, rulebook winning on shared keys."""
+    field_map: dict = {}
+    rb_dir = _parent_rulebook_dir(project_dir)
+    if rb_dir is not None:
+        rb_fields = rb_dir / "fields" / "fields.yaml"
+        if rb_fields.exists():
+            field_map.update(_parse_fields_yaml(rb_fields))
+    own_fields = project_dir / "fields" / "fields.yaml"
+    if own_fields.exists():
+        for key, field in _parse_fields_yaml(own_fields).items():
+            field_map.setdefault(key, field)  # rulebook wins: don't overwrite
+    return field_map
+
+
 def _upload_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) -> None:
     """Push the field vocabulary for this project (rulebook-level fields win).
 
@@ -86,19 +282,25 @@ def _upload_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) 
     expected field keys/types via ``/fields/spec`` and routes each field's
     label/question/hints through guidance so a shared field is defined once.
     """
-    field_map: dict = {}
-
+    # Fail fast on a malformed vocabulary before we mutate server state. Validate
+    # each contributing file's RAW list so duplicate keys *within a file* surface
+    # — the merged map would silently collapse them. A key shared between the
+    # rulebook and the ruleset is intentional (rulebook wins), not a duplicate.
     rb_dir = _parent_rulebook_dir(project_dir)
+    contributing = [project_dir / "fields" / "fields.yaml"]
     if rb_dir is not None:
-        rb_fields = rb_dir / "fields" / "fields.yaml"
-        if rb_fields.exists():
-            field_map.update(_parse_fields_yaml(rb_fields))
+        contributing.insert(0, rb_dir / "fields" / "fields.yaml")
+    for path in contributing:
+        if not path.exists():
+            continue
+        errors = validate_fields_list(_load_yaml_file(path).get("fields") or [])
+        if errors:
+            console.print(f"[red]{path} is invalid:[/red]")
+            for e in errors:
+                console.print(f"  [red]✗[/red] {e}")
+            raise typer.Exit(code=1)
 
-    own_fields = project_dir / "fields" / "fields.yaml"
-    if own_fields.exists():
-        for key, field in _parse_fields_yaml(own_fields).items():
-            field_map.setdefault(key, field)  # rulebook wins: don't overwrite
-
+    field_map = _merged_field_map(project_dir)
     if not field_map:
         return
 
@@ -186,37 +388,15 @@ def _run_generate(
 
     # Fail-fast on empty sources: generation without any source documents wastes
     # 60-120s on the server and produces a cryptic LLM failure.
-    sources_dir = project_dir / "sources"
-    if sources_dir.is_dir():
-        _resolved = sources_dir.resolve()
-        _source_files = [f for f in sources_dir.rglob("*") if f.is_file() and f.resolve().is_relative_to(_resolved)]
-    else:
-        _source_files = []
-    if not _source_files:
+    if not _collect_source_files(project_dir):
         console.print(
-            f"[red]No source documents found in {sources_dir}.[/red]\n"
+            f"[red]No source documents found in {project_dir / 'sources'}.[/red]\n"
             "[dim]Add at least one source file (.md, .txt, .pdf) before running 'aethis generate'.[/dim]"
         )
         raise typer.Exit(code=1)
 
     try:
-        # Resolve or create project
-        pid = project_id or cfg.project_id
-        if pid:
-            # Verify the project still exists (may be stale from a different server)
-            try:
-                client.get_project(pid)
-            except AethisAPIError as e:
-                if e.status_code == 404:
-                    info(f"Project {pid} not found on server, creating new project")
-                    pid = None
-                else:
-                    raise
-        if not pid:
-            result = client.create_project(cfg.project, cfg.project, "")
-            pid = result["project_id"]
-            write_state(project_dir, {"project_id": pid})
-            info(f"Created project {pid}")
+        pid = _resolve_or_create_project(client, cfg, project_id)
 
         # Refinement hint (aethis refine --hint): add before regenerating so it
         # informs the minimal edit.
@@ -224,17 +404,8 @@ def _run_generate(
             client.add_guidance(pid, extra_hint)
             info("Added refinement hint")
 
-        # Upload source files (batch in groups of 5)
-        sources_dir = project_dir / "sources"
-        if sources_dir.is_dir():
-            resolved_root = sources_dir.resolve()
-            source_files = sorted(
-                f for f in sources_dir.rglob("*") if f.is_file() and f.resolve().is_relative_to(resolved_root)
-            )
-            if source_files:
-                for batch in _chunks(source_files, 5):
-                    client.upload_sources(pid, batch)
-                info(f"Uploaded {len(source_files)} source(s)")
+        # Upload new/changed source files (idempotent across invocations).
+        _upload_sources(client, pid, project_dir)
 
         # Upload guidance hints
         hints_path = project_dir / "guidance" / "hints.yaml"
@@ -307,9 +478,46 @@ def _run_generate(
         # Poll with progress spinner
         _poll_until_done(client, pid, project_dir, timeout)
 
+        # Surface how the produced field vocabulary compares to what was pinned,
+        # rather than letting any drift pass silently.
+        ruleset_id = read_state(project_dir).get("ruleset_id")
+        _report_field_diff(client, ruleset_id, project_dir)
+
     except AethisAPIError as e:
         error_panel(e)
         raise typer.Exit(code=1)
+
+
+def _report_field_diff(client: AethisClient, ruleset_id: Optional[str], project_dir: Path) -> None:
+    """After a generate, print pinned-vs-produced field drift loudly.
+
+    Compares the fields pinned locally (``fields.yaml`` + any enclosing
+    rulebook) against the fields the engine actually produced in the ruleset
+    schema. Best-effort: a fetch failure is swallowed so it never masks a
+    successful generation.
+    """
+    if not ruleset_id:
+        return
+    pinned = set(_merged_field_map(project_dir).keys())
+    if not pinned:
+        return
+    try:
+        schema = client.get_schema(ruleset_id)
+    except AethisAPIError:
+        return
+    produced = {f.get("field_id") for f in schema.get("fields", []) or [] if f.get("field_id")}
+
+    missing = sorted(pinned - produced)
+    extra = sorted(produced - pinned)
+    if not missing and not extra:
+        success(f"Fields: all {len(pinned)} pinned field(s) were produced.")
+        return
+
+    if missing:
+        console.print(f"[yellow]Pinned but not produced:[/yellow] {', '.join(missing)}")
+    if extra:
+        console.print(f"[yellow]Produced but not pinned:[/yellow] {', '.join(extra)}")
+    console.print("[dim]Run 'aethis fields pull' to sync fields.yaml with what was generated.[/dim]")
 
 
 def _poll_until_done(client: AethisClient, pid: str, project_dir: Path, timeout: int = 600) -> None:
@@ -331,14 +539,31 @@ def _poll_until_done(client: AethisClient, pid: str, project_dir: Path, timeout:
             if job_status == "success":
                 progress.update(task, completed=100)
                 ruleset_id = result.get("latest_ruleset_id")
-                write_state(project_dir, {"ruleset_id": ruleset_id})
+                # The engine can report success a beat before latest_ruleset_id
+                # is populated. Re-poll briefly so the state write — and the
+                # `fields pull` / field-diff steps that read it — don't miss it.
+                for _ in range(5):
+                    if ruleset_id:
+                        break
+                    time.sleep(2)
+                    ruleset_id = client.get_status(pid).get("latest_ruleset_id")
+                # Only record a real id — never clobber a prior good one with None
+                # if the engine was slow to surface it.
+                if ruleset_id:
+                    write_state(project_dir, {"ruleset_id": ruleset_id})
                 console.print()
                 # Auto-publish so the ruleset is immediately usable
                 try:
                     client.publish(pid)
-                    success(f"Done! Ruleset published: {ruleset_id}")
+                    if ruleset_id:
+                        success(f"Done! Ruleset published: {ruleset_id}")
+                    else:
+                        success("Done! Ruleset generated — run 'aethis status' to get its id.")
                 except AethisAPIError:
-                    success(f"Done! Ruleset: {ruleset_id} (run 'aethis publish' to activate)")
+                    if ruleset_id:
+                        success(f"Done! Ruleset: {ruleset_id} (run 'aethis publish' to activate)")
+                    else:
+                        success("Done! Ruleset generated (run 'aethis publish' to activate).")
                 return
 
             if job_status == "failed":

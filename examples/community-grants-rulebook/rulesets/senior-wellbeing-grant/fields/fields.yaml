@@ -1,0 +1,5 @@
+# fields/fields.yaml — fields specific to this ruleset.
+# The shared field (borough residency) comes from the rulebook, so it does NOT
+# need to be repeated here. `aethis fields discover` will seed any
+# ruleset-specific fields it finds in the sources.
+fields: []

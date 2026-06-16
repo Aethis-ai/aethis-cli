@@ -1,0 +1,4 @@
+tests:
+  # Golden cases are omitted in this lightweight example — the end-to-end test
+  # exercises the field-authoring loop (discover/validate/generate/pull) and the
+  # rulebook→ruleset field sharing, not /decide outcome correctness.

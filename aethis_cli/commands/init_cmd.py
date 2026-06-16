@@ -16,6 +16,9 @@ AETHIS_YAML_TEMPLATE = """\
 project: {name}
 kind: {kind}
 api_key_env: AETHIS_API_KEY
+# rulebook: ../..   # (rulesets only) path to the enclosing rulebook; declares
+#                   # membership explicitly. Defaults to directory position
+#                   # (<rulebook>/rulesets/<this>/) when omitted.
 # base_url: https://api.aethis.ai
 """
 

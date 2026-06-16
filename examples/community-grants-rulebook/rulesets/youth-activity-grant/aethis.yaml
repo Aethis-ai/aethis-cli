@@ -1,0 +1,4 @@
+project: youth-activity-grant
+kind: ruleset
+api_key_env: AETHIS_API_KEY
+rulebook: ../..   # member of the community-grants rulebook (explicit declaration)
