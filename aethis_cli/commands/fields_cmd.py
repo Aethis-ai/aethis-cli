@@ -16,10 +16,11 @@ import typer
 from rich.table import Table
 
 from aethis_cli.commands.generate_cmd import (
-    _chunks,
     _load_yaml_file,
     _parse_fields_yaml,
+    _resolve_or_create_project,
     _safe_field_type,
+    _upload_sources,
     _write_fields_yaml,
     validate_fields_list,
 )
@@ -30,10 +31,9 @@ from aethis_cli.config import (
     read_state,
     resolve_anthropic_key,
     resolve_api_key,
-    write_state,
 )
 from aethis_cli.errors import AethisAPIError, ConfigError
-from aethis_cli.output import console, error_panel, info, success
+from aethis_cli.output import console, error_panel, success
 from aethis_cli.render import emit, is_json_requested
 
 fields_app = typer.Typer(
@@ -110,32 +110,8 @@ def fields(
 def _ensure_project_and_sources(client, cfg) -> str:
     """Resolve (or create) the project and upload local sources so discovery has
     something to read. Returns the project id."""
-    pid = cfg.project_id
-    if pid:
-        try:
-            client.get_project(pid)
-        except AethisAPIError as e:
-            if e.status_code == 404:
-                info(f"Project {pid} not found on server, creating new project")
-                pid = None
-            else:
-                raise
-    if not pid:
-        result = client.create_project(cfg.project, cfg.project, "")
-        pid = result["project_id"]
-        write_state(cfg.config_path, {"project_id": pid})
-        info(f"Created project {pid}")
-
-    sources_dir = cfg.config_path / "sources"
-    if sources_dir.is_dir():
-        resolved_root = sources_dir.resolve()
-        source_files = sorted(
-            f for f in sources_dir.rglob("*") if f.is_file() and f.resolve().is_relative_to(resolved_root)
-        )
-        if source_files:
-            for batch in _chunks(source_files, 5):
-                client.upload_sources(pid, batch)
-            info(f"Uploaded {len(source_files)} source(s)")
+    pid = _resolve_or_create_project(client, cfg)
+    _upload_sources(client, pid, cfg.config_path)
     return pid
 
 

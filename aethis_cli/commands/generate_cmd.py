@@ -28,6 +28,66 @@ def _chunks(lst: list, n: int):
         yield lst[i : i + n]
 
 
+def _collect_source_files(project_dir: Path) -> list[Path]:
+    """Every file under the project's ``sources/`` dir (symlink-escape guarded)."""
+    sources_dir = project_dir / "sources"
+    if not sources_dir.is_dir():
+        return []
+    root = sources_dir.resolve()
+    return sorted(f for f in sources_dir.rglob("*") if f.is_file() and f.resolve().is_relative_to(root))
+
+
+def _resolve_or_create_project(client: AethisClient, cfg, project_id: Optional[str] = None) -> str:
+    """Return the project id, creating (and persisting) a new project when there
+    is none or the recorded one is gone from the server."""
+    pid = project_id or cfg.project_id
+    if pid:
+        # Verify the project still exists (may be stale from a different server).
+        try:
+            client.get_project(pid)
+        except AethisAPIError as e:
+            if e.status_code == 404:
+                info(f"Project {pid} not found on server, creating new project")
+                pid = None
+            else:
+                raise
+    if not pid:
+        result = client.create_project(cfg.project, cfg.project, "")
+        pid = result["project_id"]
+        # Reset the uploaded-sources ledger — a fresh project has none.
+        write_state(cfg.config_path, {"project_id": pid, "uploaded_sources": {}})
+        info(f"Created project {pid}")
+    return pid
+
+
+def _upload_sources(client: AethisClient, pid: str, project_dir: Path) -> int:
+    """Upload source files new or changed since the last upload, batched in 5s.
+
+    A per-file mtime ledger in ``.aethis/state.json`` keeps this idempotent, so a
+    ``discover`` followed by a ``generate`` (or repeated generates) doesn't
+    re-push unchanged sources. Returns the number uploaded.
+    """
+    files = _collect_source_files(project_dir)
+    if not files:
+        return 0
+    root = (project_dir / "sources").resolve()
+    ledger = dict(read_state(project_dir).get("uploaded_sources") or {})
+    to_upload = []
+    for f in files:
+        rel = str(f.resolve().relative_to(root))
+        mtime = f.stat().st_mtime_ns
+        if ledger.get(rel) != mtime:
+            to_upload.append(f)
+        ledger[rel] = mtime
+    if not to_upload:
+        return 0
+    for batch in _chunks(to_upload, 5):
+        client.upload_sources(pid, batch)
+    write_state(project_dir, {"uploaded_sources": ledger})
+    info(f"Uploaded {len(to_upload)} source(s)")
+    return len(to_upload)
+
+
 def _load_yaml_file(path: Path) -> dict:
     """Read + parse a project YAML file, failing fast on oversize / bad YAML."""
     if path.stat().st_size > 1_000_000:
@@ -328,37 +388,15 @@ def _run_generate(
 
     # Fail-fast on empty sources: generation without any source documents wastes
     # 60-120s on the server and produces a cryptic LLM failure.
-    sources_dir = project_dir / "sources"
-    if sources_dir.is_dir():
-        _resolved = sources_dir.resolve()
-        _source_files = [f for f in sources_dir.rglob("*") if f.is_file() and f.resolve().is_relative_to(_resolved)]
-    else:
-        _source_files = []
-    if not _source_files:
+    if not _collect_source_files(project_dir):
         console.print(
-            f"[red]No source documents found in {sources_dir}.[/red]\n"
+            f"[red]No source documents found in {project_dir / 'sources'}.[/red]\n"
             "[dim]Add at least one source file (.md, .txt, .pdf) before running 'aethis generate'.[/dim]"
         )
         raise typer.Exit(code=1)
 
     try:
-        # Resolve or create project
-        pid = project_id or cfg.project_id
-        if pid:
-            # Verify the project still exists (may be stale from a different server)
-            try:
-                client.get_project(pid)
-            except AethisAPIError as e:
-                if e.status_code == 404:
-                    info(f"Project {pid} not found on server, creating new project")
-                    pid = None
-                else:
-                    raise
-        if not pid:
-            result = client.create_project(cfg.project, cfg.project, "")
-            pid = result["project_id"]
-            write_state(project_dir, {"project_id": pid})
-            info(f"Created project {pid}")
+        pid = _resolve_or_create_project(client, cfg, project_id)
 
         # Refinement hint (aethis refine --hint): add before regenerating so it
         # informs the minimal edit.
@@ -366,17 +404,8 @@ def _run_generate(
             client.add_guidance(pid, extra_hint)
             info("Added refinement hint")
 
-        # Upload source files (batch in groups of 5)
-        sources_dir = project_dir / "sources"
-        if sources_dir.is_dir():
-            resolved_root = sources_dir.resolve()
-            source_files = sorted(
-                f for f in sources_dir.rglob("*") if f.is_file() and f.resolve().is_relative_to(resolved_root)
-            )
-            if source_files:
-                for batch in _chunks(source_files, 5):
-                    client.upload_sources(pid, batch)
-                info(f"Uploaded {len(source_files)} source(s)")
+        # Upload new/changed source files (idempotent across invocations).
+        _upload_sources(client, pid, project_dir)
 
         # Upload guidance hints
         hints_path = project_dir / "guidance" / "hints.yaml"

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -180,6 +182,45 @@ def test_parent_rulebook_dir_explicit_key_wins(tmp_path):
 
 
 # --- post-generate diff ----------------------------------------------------
+
+
+# --- shared project/source helpers -----------------------------------------
+
+
+def test_resolve_or_create_project_reuses_existing(tmp_path):
+    client = MagicMock()
+    cfg = SimpleNamespace(project_id="proj_9", project="p", config_path=tmp_path)
+    assert generate_cmd._resolve_or_create_project(client, cfg) == "proj_9"
+    client.create_project.assert_not_called()
+
+
+def test_resolve_or_create_project_creates_and_resets_ledger(tmp_path):
+    client = MagicMock()
+    client.create_project.return_value = {"project_id": "proj_new"}
+    cfg = SimpleNamespace(project_id=None, project="p", config_path=tmp_path)
+    assert generate_cmd._resolve_or_create_project(client, cfg) == "proj_new"
+    assert read_state(tmp_path).get("uploaded_sources") == {}  # fresh project → empty ledger
+
+
+def test_upload_sources_is_idempotent(tmp_path):
+    src = tmp_path / "sources"
+    src.mkdir()
+    (src / "a.md").write_text("hello")
+    client = MagicMock()
+
+    # First upload sends the file.
+    assert generate_cmd._upload_sources(client, "proj_1", tmp_path) == 1
+    assert client.upload_sources.call_count == 1
+
+    # Unchanged → nothing re-uploaded (the discover→generate double-upload fix).
+    assert generate_cmd._upload_sources(client, "proj_1", tmp_path) == 0
+    assert client.upload_sources.call_count == 1
+
+    # Editing the file (newer mtime) makes it upload again.
+    (src / "a.md").write_text("changed")
+    os.utime(src / "a.md", ns=(2_000_000_000, 2_000_000_000))
+    assert generate_cmd._upload_sources(client, "proj_1", tmp_path) == 1
+    assert client.upload_sources.call_count == 2
 
 
 def test_safe_field_type_clamps_unknown_and_valueless_enum():
