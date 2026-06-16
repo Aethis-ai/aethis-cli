@@ -107,3 +107,87 @@ def test_upload_field_vocabulary_noop_when_absent(tmp_path):
     client = MagicMock()
     generate_cmd._upload_field_vocabulary(client, "proj_1", tmp_path)
     client.set_field_spec.assert_not_called()
+
+
+# --- type normalisation ----------------------------------------------------
+
+
+def test_normalise_field_type_folds_long_and_server_forms():
+    assert generate_cmd._normalise_field_type("integer") == "int"
+    assert generate_cmd._normalise_field_type("Boolean") == "bool"
+    assert generate_cmd._normalise_field_type("ENUM") == "enum"
+    assert generate_cmd._normalise_field_type("date") == "date"
+    assert generate_cmd._normalise_field_type(None) == "string"
+
+
+# --- validation ------------------------------------------------------------
+
+
+def test_validate_fields_list_accepts_valid():
+    fields = [
+        {"key": "a.income", "type": "int"},
+        {"key": "a.kind", "type": "enum", "enum_values": ["x", "y"]},
+    ]
+    assert generate_cmd.validate_fields_list(fields) == []
+
+
+def test_validate_fields_list_flags_problems():
+    fields = [
+        {"key": "a.income", "type": "money"},          # invalid type
+        {"key": "a.kind", "type": "enum"},              # enum without values
+        {"key": "a.income", "type": "int"},             # duplicate key
+        {"type": "string"},                              # missing key
+    ]
+    errors = generate_cmd.validate_fields_list(fields)
+    joined = " ".join(errors)
+    assert "invalid type" in joined
+    assert "enum_values" in joined
+    assert "Duplicate" in joined
+    assert "missing a 'key'" in joined
+
+
+# --- round-trip write ------------------------------------------------------
+
+
+def test_write_fields_yaml_round_trips(tmp_path):
+    path = tmp_path / "fields" / "fields.yaml"
+    field_map = {
+        "a.income": {"key": "a.income", "type": "int", "question": "Income?"},
+        "a.kind": {"key": "a.kind", "type": "enum", "enum_values": ["x"], "hints": ["why"]},
+    }
+    generate_cmd._write_fields_yaml(path, field_map)
+    reparsed = generate_cmd._parse_fields_yaml(path)
+    assert list(reparsed) == ["a.income", "a.kind"]
+    assert reparsed["a.kind"]["enum_values"] == ["x"]
+
+
+# --- explicit rulebook: key ------------------------------------------------
+
+
+def test_parent_rulebook_dir_explicit_key_wins(tmp_path):
+    rb = tmp_path / "books" / "rb"
+    rb.mkdir(parents=True)
+    (rb / "aethis.yaml").write_text("project: rb\nkind: rulebook\n")
+    child = tmp_path / "elsewhere" / "child"
+    child.mkdir(parents=True)
+    (child / "aethis.yaml").write_text("project: child\nkind: ruleset\nrulebook: ../../books/rb\n")
+    # Not under <rulebook>/rulesets/, so only the explicit key can link it.
+    assert generate_cmd._parent_rulebook_dir(child) == rb.resolve()
+
+
+# --- post-generate diff ----------------------------------------------------
+
+
+def test_report_field_diff_flags_drift(tmp_path, capsys):
+    _write_fields(tmp_path / "fields" / "fields.yaml", RULESET_FIELDS)
+    client = MagicMock()
+    client.get_schema.return_value = {
+        "fields": [
+            {"field_id": "applicant.income"},
+            {"field_id": "applicant.surprise"},  # produced but not pinned
+        ]
+    }
+    generate_cmd._report_field_diff(client, "rs_1", tmp_path)
+    out = capsys.readouterr().out
+    assert "applicant.date_of_birth" in out  # pinned but not produced
+    assert "applicant.surprise" in out        # produced but not pinned

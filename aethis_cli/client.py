@@ -206,6 +206,15 @@ class AethisClient:
             json={"expected_fields": expected_fields},
         )
 
+    def discover_fields(self, project_id: str) -> dict:
+        """Run server-side field discovery over the project's uploaded sources.
+
+        LLM-powered: the Anthropic key rides on the ``X-Anthropic-Key`` header
+        set at client construction (same path as ``generate``). Returns the
+        discovered field candidates plus a completeness score and gaps.
+        """
+        return self._request("POST", f"/api/v1/public/projects/{project_id}/fields/discover", json={})
+
     def generate(
         self,
         project_id: str,

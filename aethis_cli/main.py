@@ -28,7 +28,7 @@ from aethis_cli.commands.refine_cmd import refine
 from aethis_cli.commands.status_cmd import status
 from aethis_cli.commands.test_cmd import test
 from aethis_cli.commands.publish_cmd import publish
-from aethis_cli.commands.fields_cmd import fields
+from aethis_cli.commands.fields_cmd import fields_app
 from aethis_cli.commands.explain_cmd import explain
 from aethis_cli.commands.decide_cmd import decide
 from aethis_cli.commands.whoami_cmd import whoami
@@ -177,6 +177,7 @@ app.add_typer(guidance_app, name="guidance")
 app.add_typer(mcp_app, name="mcp")
 app.add_typer(profile_app, name="profile")
 app.add_typer(projects_app, name="projects")
+app.add_typer(fields_app, name="fields")
 app.command()(init)
 app.command()(login)
 app.command()(generate)
@@ -184,7 +185,6 @@ app.command()(refine)
 app.command()(status)
 app.command(name="test")(test)
 app.command()(publish)
-app.command()(fields)
 app.command()(explain)
 app.command()(decide)
 app.command()(whoami)

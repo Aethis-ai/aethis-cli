@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.22.0 (2026-06-16)
+
+- **feat(fields): `aethis fields` is now a command group for the full field-authoring loop.** Bare `aethis fields [-b <ruleset>]` still shows a ruleset's field schema (unchanged); three subcommands manage the local `fields/fields.yaml`:
+  - **`aethis fields discover`** — uploads the project's `sources/` (creating the project if needed), runs server-side LLM field discovery, and merges the proposals into `fields/fields.yaml` so you start from a real draft instead of a blank file. Existing entries are preserved — only new keys are appended — so hand-authored labels/questions/hints are never clobbered. Prints the completeness score and any critical gaps. Needs an LLM key (`ANTHROPIC_API_KEY`), same as `generate`. New `AethisClient.discover_fields()`.
+  - **`aethis fields pull`** — syncs the server's authoritative produced fields (key + type + enum values) back into `fields/fields.yaml` so local matches reality after a generate. Local-only `label`/`hints` are preserved; fields absent from the server schema are kept and reported rather than silently dropped.
+  - **`aethis fields validate`** — checks `fields/fields.yaml` before upload: valid `type` (int/bool/string/enum/date/duration), no duplicate keys, `enum` requires `enum_values`. The same validation now also runs inside `aethis generate` so a malformed vocabulary fails fast before any server state changes.
+- **feat(generate): the field spec/produced diff is surfaced after generation.** After a successful `aethis generate`, the CLI compares the pinned field vocabulary against what the engine actually produced and prints pinned-but-not-produced / produced-but-not-pinned fields (with a pointer to `aethis fields pull`) instead of the drift passing silently.
+- **feat(init): rulesets can declare rulebook membership explicitly.** A `rulebook:` key in a ruleset's `aethis.yaml` (a path to the enclosing rulebook) now declares membership directly; the directory-position convention (`<rulebook>/rulesets/<ruleset>/`) remains the fallback. The `init` scaffold documents the key.
+- No engine change required — all endpoints (`/fields/discover`, `/rulesets/{id}/schema`, `/fields/spec`) are already served by aethis-core and used by the MCP server.
+
 ## 0.21.0 (2026-06-16)
 
 - **feat(init): field definitions get a real home (`fields/fields.yaml`).** `aethis init` now scaffolds a `fields/` directory with a `fields.yaml` for declaring the field vocabulary (key + `type` + optional `label`/`question`/`hints`). Previously fields had no dedicated home and only surfaced implicitly as the `inputs:` keys inside `tests/scenarios.yaml`. `aethis generate` reads `fields/fields.yaml`, pins the field keys/types via the project field-spec endpoint, and routes each field's label/question/hints through guidance so a field is defined once.
