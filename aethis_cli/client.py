@@ -192,6 +192,20 @@ class AethisClient:
             },
         )
 
+    def set_field_spec(self, project_id: str, expected_fields: list[dict]) -> dict:
+        """Pin the project's expected field vocabulary (key + type + enum values).
+
+        Each entry is ``{key, sort, enum_values?}``. This constrains generation
+        to the declared field keys so the same field (e.g. date of birth) is not
+        re-invented under a different key. Field hints / questions are carried as
+        guidance, not here — this endpoint only fixes the vocabulary.
+        """
+        return self._request(
+            "POST",
+            f"/api/v1/public/projects/{project_id}/fields/spec",
+            json={"expected_fields": expected_fields},
+        )
+
     def generate(
         self,
         project_id: str,
