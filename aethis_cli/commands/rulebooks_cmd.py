@@ -104,9 +104,7 @@ def _validate_robot_hints(raw: Any) -> dict[str, str]:
     strings only — no DSL, no field keys.
     """
     if not isinstance(raw, dict):
-        raise typer.BadParameter(
-            f"robot_hints must be a mapping of beat-name to text; got {type(raw).__name__}."
-        )
+        raise typer.BadParameter(f"robot_hints must be a mapping of beat-name to text; got {type(raw).__name__}.")
     hints: dict[str, str] = {}
     for beat, text in raw.items():
         if beat not in _KNOWN_ROBOT_HINT_BEATS:
@@ -535,9 +533,7 @@ def set_logic(
             robot_hints = _validate_robot_hints(payload["robot_hints"])
         outcome_logic = payload["outcome_logic"]
         if not isinstance(outcome_logic, dict):
-            raise typer.BadParameter(
-                "outcome_logic must be a JSON object (Expr AST), not a list or scalar."
-            )
+            raise typer.BadParameter("outcome_logic must be a JSON object (Expr AST), not a list or scalar.")
     else:
         outcome_logic = payload
 
