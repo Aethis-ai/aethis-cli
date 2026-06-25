@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.23.0 (2026-06-25)
+
+- **feat(rulebooks): declare `robot_hints:` in a rulebook file and push them to the engine.** Rulebook authors can now provide natural-language guidance for the conversational assistant alongside the rulebook's other configuration.
+  - **`aethis rulebooks create <name> --file rulebook.yaml`** — a new `--file`/`-f` option reads a `robot_hints:` block (a sibling of `name`/`domain`/`outcome_logic`) from a `rulebook.yaml`/`.json` and sends it on create. CLI flags still own `name`/`domain`/`slug`/`description`; only the hints are taken from the file. No `--file` (or a file without a `robot_hints:` key) is a clean no-op — behaviour is unchanged.
+  - **`aethis rulebooks set-logic <id> -f rulebook.yaml`** now also accepts a *wrapped* form: when the top-level object carries an `outcome_logic:` key, a sibling `robot_hints:` block is pushed in the same update. A bare Expr AST file (the prior shape) is still accepted unchanged.
+  - `robot_hints` is a mapping of beat-name to a natural-language string. Active beats: `general_context`, `preamble`, `session_start`, `postamble`, `session_end`, `stuck`. Reserved beats (accepted, not yet acted on): `persona`, `conversational_style`, `section_transition`. Unknown beat keys and non-string values are rejected client-side with a clear message before the round-trip.
+  - New optional `robot_hints` parameter on `AethisClient.create_rulebook()` / `update_rulebook()`; omitted from the request body when not supplied, so calls against an older engine are unaffected.
+  - Requires aethis-core with the rulebook `robot_hints` field (aethis-core#220); mid-deploy to staging at time of writing. Against an engine without it, the field is ignored/rejected server-side.
+
 ## 0.22.0 (2026-06-16)
 
 - **feat(fields): `aethis fields` is now a command group for the full field-authoring loop.** Bare `aethis fields [-b <ruleset>]` still shows a ruleset's field schema (unchanged); three subcommands manage the local `fields/fields.yaml`:

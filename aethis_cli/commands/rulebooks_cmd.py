@@ -71,6 +71,71 @@ def _load_yaml_or_json(path: Path) -> Any:
     return json.loads(text)
 
 
+# Robot-hint "beats" the engine consumes today, plus the reserved beats it
+# accepts but does not yet act on. Mirrors the aethis-core P1a contract
+# (aethis-core#220). Unknown keys are rejected by the engine (422); we surface
+# them client-side with a friendlier message before the round-trip.
+_ACTIVE_ROBOT_HINT_BEATS = frozenset(
+    {
+        "general_context",
+        "preamble",
+        "session_start",
+        "postamble",
+        "session_end",
+        "stuck",
+    }
+)
+_RESERVED_ROBOT_HINT_BEATS = frozenset(
+    {
+        "persona",
+        "conversational_style",
+        "section_transition",
+    }
+)
+_KNOWN_ROBOT_HINT_BEATS = _ACTIVE_ROBOT_HINT_BEATS | _RESERVED_ROBOT_HINT_BEATS
+
+
+def _validate_robot_hints(raw: Any) -> dict[str, str]:
+    """Validate a ``robot_hints:`` block: a mapping of beat-name → prose string.
+
+    Returns the validated mapping. Raises ``typer.BadParameter`` on a bad shape,
+    an unknown beat key, or a non-string value, so the CLI fails fast with a
+    clear message rather than letting the engine 422 on a typo. Natural-language
+    strings only — no DSL, no field keys.
+    """
+    if not isinstance(raw, dict):
+        raise typer.BadParameter(f"robot_hints must be a mapping of beat-name to text; got {type(raw).__name__}.")
+    hints: dict[str, str] = {}
+    for beat, text in raw.items():
+        if beat not in _KNOWN_ROBOT_HINT_BEATS:
+            known = ", ".join(sorted(_KNOWN_ROBOT_HINT_BEATS))
+            raise typer.BadParameter(f"robot_hints: unknown beat '{beat}'. Known beats: {known}.")
+        if not isinstance(text, str):
+            raise typer.BadParameter(
+                f"robot_hints['{beat}'] must be a natural-language string; got {type(text).__name__}."
+            )
+        hints[beat] = text
+    return hints
+
+
+def _robot_hints_from_file(file: Optional[Path]) -> Optional[dict[str, str]]:
+    """Read and validate a ``robot_hints:`` block from a rulebook YAML/JSON.
+
+    Returns ``None`` when no file is given or the file has no ``robot_hints:``
+    key, so the create/update payload omits the field entirely (clean no-op,
+    unchanged behaviour). The block is a sibling of ``name``/``domain``/
+    ``outcome_logic`` in a ``rulebook.yaml``.
+    """
+    if file is None:
+        return None
+    payload = _load_yaml_or_json(file)
+    if not isinstance(payload, dict):
+        raise typer.BadParameter(f"{file} must be a mapping (rulebook.yaml/.json), not a list or scalar.")
+    if "robot_hints" not in payload or payload["robot_hints"] is None:
+        return None
+    return _validate_robot_hints(payload["robot_hints"])
+
+
 # ============================================================================
 # rulebooks list
 # ============================================================================
@@ -199,6 +264,19 @@ def create_rulebook(
         ),
     ),
     description: Optional[str] = typer.Option(None, "--description", help="Optional description."),
+    file: Optional[Path] = typer.Option(
+        None,
+        "--file",
+        "-f",
+        exists=True,
+        readable=True,
+        help=(
+            "Optional rulebook.yaml/.json to read a 'robot_hints:' block from "
+            "(a mapping of beat-name to natural-language guidance for the "
+            "assistant). Other rulebook keys in the file are ignored by this "
+            "command; CLI flags own name/domain/slug/description."
+        ),
+    ),
 ) -> None:
     """Create a new Rulebook.
 
@@ -208,7 +286,20 @@ def create_rulebook(
         aethis rulebooks set-fields <id> -f fields.yaml
         aethis rulebooks tests add <id> -f scenario.yaml
         aethis rulesets create <rulebook> <ruleset_name>   # (Phase B.1b)
+
+    Robot hints (assistant guidance) can be declared in a ``rulebook.yaml``
+    and passed with ``--file``::
+
+        robot_hints:
+          preamble: "Greet the applicant and explain what you'll cover."
+          stuck: "If an answer is unclear, ask one focused follow-up question."
+
+    Active beats: general_context, preamble, session_start, postamble,
+    session_end, stuck. Use natural language only — no rule syntax or field
+    keys.
     """
+    robot_hints = _robot_hints_from_file(file)
+
     _cfg, client = load_client_or_fallback()
     try:
         rb = client.create_rulebook(
@@ -216,6 +307,7 @@ def create_rulebook(
             domain=domain,
             slug=slug,
             description=description,
+            robot_hints=robot_hints,
         )
     except AethisAPIError as e:
         error_panel(e)
@@ -404,6 +496,18 @@ def set_logic(
     backwards compatibility. Pass the expression as either a file
     (``--file logic.yaml``) or inline JSON (``--logic '{...}'``). Exactly
     one of the two is required.
+
+    A wrapped ``rulebook.yaml`` shape is also accepted: when the top-level
+    object carries an ``outcome_logic:`` key, that key is the Expr AST and a
+    sibling ``robot_hints:`` block (assistant guidance, beat-name → prose) is
+    pushed alongside it in the same update. This lets a single ``rulebook.yaml``
+    declare both composition and robot hints::
+
+        outcome_logic:
+          type: field_ref
+          key: single_ruleset_name
+        robot_hints:
+          preamble: "Greet the applicant and explain what you'll cover."
     """
     if (file is None) == (logic is None):
         # Either both supplied or both missing — neither is valid.
@@ -420,15 +524,31 @@ def set_logic(
     if not isinstance(payload, dict):
         raise typer.BadParameter("outcome_logic must be a JSON object (Expr AST), not a list or scalar.")
 
+    # Wrapped rulebook.yaml form: `outcome_logic:` (and optional sibling
+    # `robot_hints:`) at the top level. A bare Expr AST has a `type` key and no
+    # `outcome_logic`, so it stays the default — backwards compatible.
+    robot_hints: Optional[dict[str, str]] = None
+    if "outcome_logic" in payload:
+        if "robot_hints" in payload and payload["robot_hints"] is not None:
+            robot_hints = _validate_robot_hints(payload["robot_hints"])
+        outcome_logic = payload["outcome_logic"]
+        if not isinstance(outcome_logic, dict):
+            raise typer.BadParameter("outcome_logic must be a JSON object (Expr AST), not a list or scalar.")
+    else:
+        outcome_logic = payload
+
     _cfg, client = load_client_or_fallback()
     try:
-        client.update_rulebook(rulebook, outcome_logic=payload)
+        client.update_rulebook(rulebook, outcome_logic=outcome_logic, robot_hints=robot_hints)
     except AethisAPIError as e:
         error_panel(e)
         raise typer.Exit(code=1)
 
-    op = payload.get("operator") or payload.get("type")
-    success(f"Set outcome_logic on rulebook {rulebook} (top-level: {op})")
+    op = outcome_logic.get("operator") or outcome_logic.get("type")
+    msg = f"Set outcome_logic on rulebook {rulebook} (top-level: {op})"
+    if robot_hints:
+        msg += f" + {len(robot_hints)} robot hint(s)"
+    success(msg)
 
 
 # ============================================================================

@@ -140,6 +140,7 @@ def test_rulebooks_create_with_all_options(tmp_path, monkeypatch):
         domain="uk_fsm",
         slug="aethis/uk-fsm",
         description="Free school meals eligibility",
+        robot_hints=None,
     )
     assert "rb_new" in _strip(result.output)
     assert "aethis/uk-fsm" in _strip(result.output)
@@ -153,7 +154,9 @@ def test_rulebooks_create_minimal(tmp_path, monkeypatch):
     with patch("aethis_cli.client.AethisClient", return_value=client):
         result = _runner_invoke(["rulebooks", "create", "Bare bones"])
     assert result.exit_code == 0
-    client.create_rulebook.assert_called_once_with(name="Bare bones", domain="", slug=None, description=None)
+    client.create_rulebook.assert_called_once_with(
+        name="Bare bones", domain="", slug=None, description=None, robot_hints=None
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -726,6 +729,225 @@ def test_tests_delete_with_yes(tmp_path, monkeypatch):
         result = _runner_invoke(["rulebooks", "tests", "delete", "rb_x", "tc_abc", "--yes"])
     assert result.exit_code == 0, result.output
     client.delete_rulebook_test_case.assert_called_once_with("rb_x", "tc_abc")
+
+
+# ---------------------------------------------------------------------------
+# rulebooks robot_hints — create --file (P1b)
+# ---------------------------------------------------------------------------
+
+
+def _robot_hints_block() -> dict:
+    """A representative robot_hints block — natural language only, no rule
+    syntax or field keys (public-surface safe)."""
+    return {
+        "preamble": "Greet the applicant and explain what you'll cover.",
+        "stuck": "If an answer is unclear, ask one focused follow-up question.",
+    }
+
+
+def test_create_threads_robot_hints_from_yaml_file(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
+    import importlib.util
+
+    if importlib.util.find_spec("yaml") is None:
+        import pytest
+
+        pytest.skip("PyYAML not installed")
+
+    rb_path = tmp_path / "rulebook.yaml"
+    rb_path.write_text(
+        "name: Community Grants\n"
+        "domain: community_grants\n"
+        "robot_hints:\n"
+        '  preamble: "Greet the applicant and explain what you\'ll cover."\n'
+        '  stuck: "If an answer is unclear, ask one focused follow-up question."\n'
+    )
+
+    client = MagicMock()
+    client.create_rulebook.return_value = {"rulebook_id": "rb_new"}
+    with patch("aethis_cli.client.AethisClient", return_value=client):
+        result = _runner_invoke(
+            ["rulebooks", "create", "Community Grants", "--domain", "community_grants", "-f", str(rb_path)]
+        )
+
+    assert result.exit_code == 0, result.output
+    _args, kwargs = client.create_rulebook.call_args
+    assert kwargs["robot_hints"] == _robot_hints_block()
+    assert kwargs["name"] == "Community Grants"
+    assert kwargs["domain"] == "community_grants"
+
+
+def test_create_threads_robot_hints_from_json_file(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
+    rb_path = tmp_path / "rulebook.json"
+    rb_path.write_text(json.dumps({"name": "x", "robot_hints": _robot_hints_block()}))
+
+    client = MagicMock()
+    client.create_rulebook.return_value = {"rulebook_id": "rb_new"}
+    with patch("aethis_cli.client.AethisClient", return_value=client):
+        result = _runner_invoke(["rulebooks", "create", "x", "-f", str(rb_path)])
+
+    assert result.exit_code == 0, result.output
+    assert client.create_rulebook.call_args.kwargs["robot_hints"] == _robot_hints_block()
+
+
+def test_create_without_file_omits_robot_hints(tmp_path, monkeypatch):
+    """No --file -> robot_hints is omitted entirely (None), unchanged behaviour."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
+    client = MagicMock()
+    client.create_rulebook.return_value = {"rulebook_id": "rb_min"}
+    with patch("aethis_cli.client.AethisClient", return_value=client):
+        result = _runner_invoke(["rulebooks", "create", "Bare bones"])
+    assert result.exit_code == 0, result.output
+    assert client.create_rulebook.call_args.kwargs["robot_hints"] is None
+
+
+def test_create_file_without_robot_hints_is_clean_noop(tmp_path, monkeypatch):
+    """A rulebook.yaml with no robot_hints: key -> robot_hints stays None."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
+    rb_path = tmp_path / "rulebook.json"
+    rb_path.write_text(json.dumps({"name": "x", "domain": "d"}))
+    client = MagicMock()
+    client.create_rulebook.return_value = {"rulebook_id": "rb_min"}
+    with patch("aethis_cli.client.AethisClient", return_value=client):
+        result = _runner_invoke(["rulebooks", "create", "x", "-f", str(rb_path)])
+    assert result.exit_code == 0, result.output
+    assert client.create_rulebook.call_args.kwargs["robot_hints"] is None
+
+
+def test_create_rejects_unknown_robot_hint_beat(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
+    rb_path = tmp_path / "rulebook.json"
+    rb_path.write_text(json.dumps({"name": "x", "robot_hints": {"not_a_beat": "hi"}}))
+    client = MagicMock()
+    with patch("aethis_cli.client.AethisClient", return_value=client):
+        result = _runner_invoke(["rulebooks", "create", "x", "-f", str(rb_path)])
+    assert result.exit_code != 0
+    assert "unknown beat" in _strip(result.output).lower()
+    client.create_rulebook.assert_not_called()
+
+
+def test_create_accepts_reserved_robot_hint_beat(tmp_path, monkeypatch):
+    """Reserved beats (persona, conversational_style, section_transition) are
+    accepted client-side — the engine takes them even if it doesn't act yet."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
+    rb_path = tmp_path / "rulebook.json"
+    rb_path.write_text(json.dumps({"name": "x", "robot_hints": {"persona": "Warm and precise."}}))
+    client = MagicMock()
+    client.create_rulebook.return_value = {"rulebook_id": "rb_new"}
+    with patch("aethis_cli.client.AethisClient", return_value=client):
+        result = _runner_invoke(["rulebooks", "create", "x", "-f", str(rb_path)])
+    assert result.exit_code == 0, result.output
+    assert client.create_rulebook.call_args.kwargs["robot_hints"] == {"persona": "Warm and precise."}
+
+
+def test_create_rejects_non_string_robot_hint_value(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
+    rb_path = tmp_path / "rulebook.json"
+    rb_path.write_text(json.dumps({"name": "x", "robot_hints": {"preamble": ["a", "list"]}}))
+    client = MagicMock()
+    with patch("aethis_cli.client.AethisClient", return_value=client):
+        result = _runner_invoke(["rulebooks", "create", "x", "-f", str(rb_path)])
+    assert result.exit_code != 0
+    client.create_rulebook.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# rulebooks robot_hints — set-logic wrapped form (P1b)
+# ---------------------------------------------------------------------------
+
+
+def test_set_logic_wrapped_form_threads_logic_and_hints(tmp_path, monkeypatch):
+    """A wrapped rulebook.yaml ({outcome_logic, robot_hints}) sends both."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
+    wrapped = {"outcome_logic": _logic_expr(), "robot_hints": _robot_hints_block()}
+    logic_path = tmp_path / "rulebook.json"
+    logic_path.write_text(json.dumps(wrapped))
+
+    client = MagicMock()
+    client.update_rulebook.return_value = {"rulebook_id": "rb_x"}
+    with patch("aethis_cli.client.AethisClient", return_value=client):
+        result = _runner_invoke(["rulebooks", "set-logic", "rb_x", "-f", str(logic_path)])
+
+    assert result.exit_code == 0, result.output
+    kwargs = client.update_rulebook.call_args.kwargs
+    assert kwargs["outcome_logic"] == _logic_expr()
+    assert kwargs["robot_hints"] == _robot_hints_block()
+    assert "robot hint" in _strip(result.output).lower()
+
+
+def test_set_logic_bare_expr_sends_no_robot_hints(tmp_path, monkeypatch):
+    """Backwards compat: a bare Expr AST file -> robot_hints stays None."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
+    logic_path = tmp_path / "logic.json"
+    logic_path.write_text(json.dumps(_logic_expr()))
+
+    client = MagicMock()
+    client.update_rulebook.return_value = {"rulebook_id": "rb_x"}
+    with patch("aethis_cli.client.AethisClient", return_value=client):
+        result = _runner_invoke(["rulebooks", "set-logic", "rb_x", "-f", str(logic_path)])
+
+    assert result.exit_code == 0, result.output
+    kwargs = client.update_rulebook.call_args.kwargs
+    assert kwargs["outcome_logic"] == _logic_expr()
+    assert kwargs["robot_hints"] is None
+
+
+def test_set_logic_wrapped_form_rejects_unknown_beat(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
+    wrapped = {"outcome_logic": _logic_expr(), "robot_hints": {"bogus": "x"}}
+    logic_path = tmp_path / "rulebook.json"
+    logic_path.write_text(json.dumps(wrapped))
+    client = MagicMock()
+    with patch("aethis_cli.client.AethisClient", return_value=client):
+        result = _runner_invoke(["rulebooks", "set-logic", "rb_x", "-f", str(logic_path)])
+    assert result.exit_code != 0
+    client.update_rulebook.assert_not_called()
+
+
+def test_client_create_rulebook_omits_robot_hints_when_none():
+    """Unit: the client builds no robot_hints key when not supplied."""
+    from aethis_cli.client import AethisClient
+
+    client = AethisClient(base_url="http://x", api_key="k")
+    captured = {}
+
+    def fake_request(method, path, **kw):
+        captured["json"] = kw.get("json")
+        return {}
+
+    client._request = fake_request  # type: ignore[assignment]
+    client.create_rulebook(name="x")
+    assert "robot_hints" not in captured["json"]
+    client.create_rulebook(name="x", robot_hints={"preamble": "hi"})
+    assert captured["json"]["robot_hints"] == {"preamble": "hi"}
+
+
+def test_client_update_rulebook_robot_hints_roundtrip():
+    from aethis_cli.client import AethisClient
+
+    client = AethisClient(base_url="http://x", api_key="k")
+    captured = {}
+
+    def fake_request(method, path, **kw):
+        captured["json"] = kw.get("json")
+        return {}
+
+    client._request = fake_request  # type: ignore[assignment]
+    client.update_rulebook("rb_x", outcome_logic={"type": "field_ref", "key": "a"})
+    assert "robot_hints" not in captured["json"]
+    client.update_rulebook("rb_x", robot_hints={"stuck": "ask again"})
+    assert captured["json"]["robot_hints"] == {"stuck": "ask again"}
 
 
 # ---------------------------------------------------------------------------

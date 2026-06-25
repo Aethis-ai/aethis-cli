@@ -312,6 +312,7 @@ class AethisClient:
         slug: Optional[str] = None,
         ruleset_refs: Optional[list[dict]] = None,
         outcome_logic: Optional[dict] = None,
+        robot_hints: Optional[dict] = None,
     ) -> dict:
         body: dict[str, Any] = {
             "name": name,
@@ -324,6 +325,8 @@ class AethisClient:
             body["slug"] = slug
         if outcome_logic is not None:
             body["outcome_logic"] = outcome_logic
+        if robot_hints is not None:
+            body["robot_hints"] = robot_hints
         return self._request("POST", "/api/v1/public/rulebooks/", json=body)
 
     def list_rulebooks(self) -> list[dict]:
@@ -353,6 +356,7 @@ class AethisClient:
         ruleset_refs: Optional[list[dict]] = None,
         outcome_logic: Optional[dict] = None,
         slug: Optional[str] = None,
+        robot_hints: Optional[dict] = None,
     ) -> dict:
         body: dict[str, Any] = {}
         if name is not None:
@@ -365,6 +369,8 @@ class AethisClient:
             body["outcome_logic"] = outcome_logic
         if slug is not None:
             body["slug"] = slug
+        if robot_hints is not None:
+            body["robot_hints"] = robot_hints
         return self._request(
             "PATCH",
             f"/api/v1/public/rulebooks/{rulebook_id_or_slug}",
