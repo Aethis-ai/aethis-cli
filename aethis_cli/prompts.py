@@ -48,9 +48,7 @@ def confirm_or_abort(message: str, *, assume_yes: bool = False) -> None:
         return
     reason = _env_reason()
     if reason is not None:
-        console.print(
-            f"[dim]Non-interactive ({reason} set): proceeding without prompt — {message}[/dim]"
-        )
+        console.print(f"[dim]Non-interactive ({reason} set): proceeding without prompt: {message}[/dim]")
         return
     if not typer.confirm(message):
         raise typer.Abort()
