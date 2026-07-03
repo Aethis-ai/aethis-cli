@@ -8,6 +8,7 @@ from rich.table import Table
 from aethis_cli.config import load_client_or_fallback
 from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel, success
+from aethis_cli.prompts import confirm_or_abort
 from aethis_cli.render import emit, is_json_requested
 
 projects_app = typer.Typer(
@@ -104,10 +105,7 @@ def archive_project(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
 ) -> None:
     """Archive a project (soft-delete, preserves all data)."""
-    if not yes:
-        confirmed = typer.confirm(f"Archive project {project_id}? This cannot be undone")
-        if not confirmed:
-            raise typer.Abort()
+    confirm_or_abort(f"Archive project {project_id}? This cannot be undone", assume_yes=yes)
 
     _cfg, client = load_client_or_fallback()
 

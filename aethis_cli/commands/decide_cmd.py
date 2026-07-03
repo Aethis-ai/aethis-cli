@@ -32,7 +32,7 @@ def decide(
 
     Examples:
 
-        aethis decide -b aethis/uk-settlement-continuous-residence -i '{"days_outside_uk": 50}'
+        aethis decide -b aethis/spacecraft-crew-certification -i '{"space.crew.age": 34, "space.crew.flight_hours": 900}'
         aethis decide -b my_ruleset:20260401-a1b2c3d -i '{"age": 21, "country": "UK"}'
         aethis decide -b my_ruleset:20260401-a1b2c3d --input @inputs.json --explain
         aethis decide -i '{...}'         # uses ruleset from .aethis/state.json
@@ -79,7 +79,7 @@ def decide(
         emit(result)
         return
 
-    decision = result["decision"]
+    decision = result.get("decision", "unknown")
     color = {"eligible": "green", "not_eligible": "red"}.get(decision, "yellow")
     console.print(f"\nDecision: [bold {color}]{decision}[/bold {color}]")
     console.print(f"Ruleset:   {result.get('ruleset_id')}")

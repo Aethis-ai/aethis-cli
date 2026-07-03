@@ -18,7 +18,7 @@ def _run(args, **patches_kw):
         "_fetch_latest_pypi": "9.9.9",
         "_save_cache": None,
         "_is_editable_install": False,
-        "_detect_install_method": ("uv", "uv tool upgrade aethis-cli"),
+        "_detect_install_method": "uv",
         "subprocess_returncode": 0,
     }
     defaults.update(patches_kw)
@@ -53,7 +53,7 @@ def test_update_runs_uv_upgrade() -> None:
 
 
 def test_update_runs_pipx_upgrade() -> None:
-    result, sub_run, _ = _run(["update"], _detect_install_method=("pipx", "pipx upgrade aethis-cli"))
+    result, sub_run, _ = _run(["update"], _detect_install_method="pipx")
     assert result.exit_code == 0
     sub_run.assert_called_once_with(["pipx", "upgrade", "aethis-cli"])
 

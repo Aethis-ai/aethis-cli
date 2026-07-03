@@ -21,6 +21,7 @@ from aethis_cli.commands._id_utils import require_ruleset_id
 from aethis_cli.config import load_client_or_fallback, resolve_base_url_with_source
 from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel, success, warn
+from aethis_cli.prompts import confirm_or_abort
 from aethis_cli.render import emit, is_json_requested
 
 rulesets_app = typer.Typer(
@@ -373,10 +374,7 @@ def archive_ruleset(
     """Archive a ruleset (soft-delete, preserves all data)."""
     require_ruleset_id(ruleset_id)
 
-    if not yes:
-        confirmed = typer.confirm(f"Archive ruleset {ruleset_id}? This cannot be undone")
-        if not confirmed:
-            raise typer.Abort()
+    confirm_or_abort(f"Archive ruleset {ruleset_id}? This cannot be undone", assume_yes=yes)
 
     _cfg, client = load_client_or_fallback()
 

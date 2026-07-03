@@ -105,17 +105,20 @@ def _is_newer(latest: str, current: str) -> bool:
     return _parse_version(latest) > _parse_version(current)
 
 
-def _detect_install_method(package: str) -> tuple[str, str]:
-    """Return (method, upgrade_command). Heuristic on sys.executable."""
+def _detect_install_method(package: str) -> str:
+    """Return the install method ("uv" | "pipx" | "pip"). Heuristic on sys.executable.
+
+    The concrete upgrade argv is built from this by ``_upgrade_argv`` in
+    update_cmd; the detector only classifies the install so the two never
+    disagree on the command to run.
+    """
     exe = (sys.executable or "").lower()
     prefix = (sys.prefix or "").lower()
     if "/uv/tools/" in exe or "/uv/tools/" in prefix:
-        # `uv tool upgrade` honours the install receipt (extra `--with`
-        # requirements survive); `install --upgrade` would drop them.
-        return ("uv", f"uv tool upgrade {package}")
+        return "uv"
     if "/pipx/venvs/" in exe or "/pipx/venvs/" in prefix:
-        return ("pipx", f"pipx upgrade {package}")
-    return ("pip", f"pip install --upgrade {package}")
+        return "pipx"
+    return "pip"
 
 
 def _print_banner(package: str, current: str, latest: str) -> None:
