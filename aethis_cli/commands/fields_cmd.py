@@ -87,7 +87,7 @@ def fields(
         "--ruleset-id",
         "-b",
         help=(
-            "Ruleset ID or slug (e.g. aethis/uk-settlement or "
+            "Ruleset ID or slug (e.g. aethis/consumer-credit-prequalification or "
             "my_ruleset:20260408-abc1234). Defaults to .aethis/state.json if omitted."
         ),
     ),
@@ -96,7 +96,7 @@ def fields(
 
     Examples:
 
-        aethis fields -b aethis/uk-settlement-continuous-residence
+        aethis fields -b aethis/spacecraft-crew-certification
         aethis fields -b crew_certification:20260408-cbf63f1f
         aethis fields                    # uses .aethis/state.json if present
         aethis fields discover           # propose fields from the sources

@@ -1,7 +1,7 @@
 .PHONY: install test test-e2e lint clean
 
 install:
-	pip install -e ".[dev]"
+	uv pip install -e ".[dev]"
 
 test:
 	python -m pytest -v

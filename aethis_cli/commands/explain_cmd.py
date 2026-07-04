@@ -30,7 +30,7 @@ def explain(
 
     Examples:
 
-        aethis explain -b aethis/uk-settlement-continuous-residence
+        aethis explain -b aethis/spacecraft-crew-certification
         aethis explain -b crew_certification:20260408-cbf63f1f
         aethis explain                   # uses .aethis/state.json if present
     """

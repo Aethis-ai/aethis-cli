@@ -493,6 +493,10 @@ def test_archive_rulebook_with_yes(tmp_path, monkeypatch):
 def test_archive_rulebook_aborts_without_confirmation(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
+    # Force an interactive baseline: the runner may inherit CI=true, which
+    # would otherwise trip the non-interactive confirm bypass and proceed.
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("AETHIS_NONINTERACTIVE", raising=False)
     client = MagicMock()
     with patch("aethis_cli.client.AethisClient", return_value=client):
         # Decline the confirmation prompt by feeding "n\n" on stdin.

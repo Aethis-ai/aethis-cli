@@ -39,6 +39,7 @@ from aethis_cli.client import make_anonymous_client
 from aethis_cli.config import load_client_or_fallback, resolve_base_url_with_source
 from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel, success
+from aethis_cli.prompts import confirm_or_abort
 from aethis_cli.render import emit, is_json_requested
 
 rulebooks_app = typer.Typer(
@@ -576,10 +577,7 @@ def archive_rulebook(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
     """Archive a rulebook (soft-delete; data preserved)."""
-    if not yes:
-        confirmed = typer.confirm(f"Archive rulebook {rulebook}? Cannot be undone")
-        if not confirmed:
-            raise typer.Abort()
+    confirm_or_abort(f"Archive rulebook {rulebook}? Cannot be undone", assume_yes=yes)
     _cfg, client = load_client_or_fallback()
     try:
         result = client.archive_rulebook(rulebook)
@@ -792,10 +790,7 @@ def tests_delete(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
     """Delete a rulebook-level test case by tc_id."""
-    if not yes:
-        confirmed = typer.confirm(f"Delete test case {tc_id} from rulebook {rulebook}?")
-        if not confirmed:
-            raise typer.Abort()
+    confirm_or_abort(f"Delete test case {tc_id} from rulebook {rulebook}?", assume_yes=yes)
     _cfg, client = load_client_or_fallback()
     try:
         client.delete_rulebook_test_case(rulebook, tc_id)

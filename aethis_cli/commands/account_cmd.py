@@ -13,6 +13,7 @@ from aethis_cli.commands.login_cmd import save_api_key
 from aethis_cli.config import DEFAULT_BASE_URL
 from aethis_cli.errors import AuthenticationError
 from aethis_cli.output import console, info, success
+from aethis_cli.prompts import confirm_or_abort
 from aethis_cli.render import emit, is_json_requested
 
 CLERK_DOMAIN = os.environ.get("AETHIS_CLERK_DOMAIN", "clerk.aethis.ai")
@@ -251,10 +252,7 @@ def revoke(
 ) -> None:
     """Revoke an API key (requires browser sign-in)."""
     base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
-    if not yes:
-        confirmed = typer.confirm(f"Revoke key {key_id}? This cannot be undone")
-        if not confirmed:
-            raise typer.Abort()
+    confirm_or_abort(f"Revoke key {key_id}? This cannot be undone", assume_yes=yes)
 
     access_token = _clerk_auth(timeout)
     success("Authenticated successfully.")

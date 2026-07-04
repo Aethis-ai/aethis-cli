@@ -40,23 +40,20 @@ def test_parse_version_handles_garbage() -> None:
 
 def test_detect_install_method_uv() -> None:
     with patch.object(uc.sys, "executable", "/Users/x/.local/share/uv/tools/aethis-cli/bin/python"):
-        method, cmd = uc._detect_install_method("aethis-cli")
+        method = uc._detect_install_method("aethis-cli")
     assert method == "uv"
-    assert cmd == "uv tool upgrade aethis-cli"
 
 
 def test_detect_install_method_pipx() -> None:
     with patch.object(uc.sys, "executable", "/Users/x/.local/pipx/venvs/aethis-cli/bin/python"):
-        method, cmd = uc._detect_install_method("aethis-cli")
+        method = uc._detect_install_method("aethis-cli")
     assert method == "pipx"
-    assert cmd == "pipx upgrade aethis-cli"
 
 
 def test_detect_install_method_falls_back_to_pip() -> None:
     with patch.object(uc.sys, "executable", "/usr/local/bin/python3"), patch.object(uc.sys, "prefix", "/usr/local"):
-        method, cmd = uc._detect_install_method("aethis-cli")
+        method = uc._detect_install_method("aethis-cli")
     assert method == "pip"
-    assert cmd == "pip install --upgrade aethis-cli"
 
 
 def test_save_and_load_cache(fake_config_dir: Path) -> None:

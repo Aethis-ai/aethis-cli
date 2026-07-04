@@ -93,7 +93,7 @@ def update(
         )
         raise typer.Exit(code=1)
 
-    method, _ = _detect_install_method(PACKAGE)
+    method = _detect_install_method(PACKAGE)
     argv = _upgrade_argv(method, PACKAGE)
     console.print(f"[dim]Running: {' '.join(argv)}[/dim]")
     try:

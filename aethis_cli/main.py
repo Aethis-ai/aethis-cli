@@ -7,6 +7,7 @@ import sys
 from importlib.metadata import entry_points
 from typing import Optional
 
+import httpx
 import typer
 
 from aethis_cli._version import __version__
@@ -237,6 +238,22 @@ def cli() -> None:
         console.print(f"[red]Error: {detail} (HTTP {e.status_code})[/red]", highlight=False)
         if e.status_code == 401:
             console.print("[dim]Run 'aethis login' to re-authenticate.[/dim]")
+        raise SystemExit(1)
+    except httpx.HTTPError as e:
+        # Unreachable / slow API, DNS failure, TLS error, etc. Render one
+        # actionable line instead of a raw traceback (pretty_exceptions is
+        # disabled). The base URL the client tried lives on the request, when
+        # httpx attached one (RequestError subclasses carry .request).
+        target = os.environ.get("AETHIS_BASE_URL", "https://api.aethis.ai")
+        request = getattr(e, "request", None)
+        if request is not None:
+            target = str(request.url)
+        reason = str(e) or e.__class__.__name__
+        console.print(
+            f"[red]Could not reach the Aethis API at {target}: {reason}.[/red]",
+            highlight=False,
+        )
+        console.print("[dim]Check your connection or try again shortly.[/dim]")
         raise SystemExit(1)
 
 
