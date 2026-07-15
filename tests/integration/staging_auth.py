@@ -2,11 +2,11 @@
 
 The staging integration lane must exercise the *same* path a new developer
 walks: obtain a signed-in session for a fenced end-to-end user, then mint an
-API key with the server's default scopes (no ``scopes`` field — Decision 3).
-This module wraps that three-step dance so the tests read as intent, not
-plumbing.
+API key with the server's default scopes (no ``scopes`` field — the server
+applies its default set). This module wraps that three-step dance so the tests
+read as intent, not plumbing.
 
-Steps (all bounded by timeouts, per the no-interactive-blocking rule):
+Steps (all bounded by timeouts so nothing blocks on a stalled dependency):
 
 1. Exchange the dev-tools secret for a one-time sign-in **ticket**
    (``POST api.clerk.com/v1/sign_in_tokens``).
@@ -130,7 +130,7 @@ def _keys_client(jwt: str) -> httpx.Client:
 
 
 def mint_key(jwt: str, name: str, scopes: Optional[list[str]] = None) -> MintedKey:
-    """Mint a key. Omit ``scopes`` to get the server default (Decision 3).
+    """Mint a key. Omit ``scopes`` to exercise the server's default scope set.
 
     ``scopes`` is only passed for the negative-path key (an explicit reduced
     set): the staging keys API exposes no scope-editing endpoint, so minting a

@@ -14,9 +14,9 @@ Spacecraft Crew Certification Act 2049 as source material:
   8. Call /decide with known inputs and verify outcomes
 
 This test drives the **LLM authoring pipeline** (generation), so it runs in its
-own weekly + manual-dispatch lane (``.github/workflows/authoring-e2e-weekly.yml``),
-never the nightly LLM-free cadence (developer-platform test programme, Decision
-10). It keeps the ``manual`` marker as the local escape hatch.
+own weekly + manual-dispatch lane (``.github/workflows/authoring-e2e-weekly.yml``)
+rather than any nightly LLM-free lane. It keeps the ``manual`` marker as the
+local escape hatch.
 
 Requires:
   AETHIS_API_KEY   — developer API key

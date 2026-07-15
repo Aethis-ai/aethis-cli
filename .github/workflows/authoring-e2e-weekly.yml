@@ -1,10 +1,9 @@
 name: authoring-e2e-weekly
 
 # Report-only weekly lane for the LLM authoring pipeline (spacecraft e2e). It
-# drives generation via an LLM, so it is deliberately kept OUT of the nightly
-# LLM-free staging cadence (developer-platform test programme, Decision 10):
-# separate schedule, no `pull_request` trigger, never gates a merge. The
-# `manual` marker stays the local escape hatch.
+# drives generation via an LLM, so it is deliberately kept OUT of any nightly
+# LLM-free staging lane: separate schedule, no `pull_request` trigger, never
+# gates a merge. The `manual` marker stays the local escape hatch.
 
 on:
   schedule:
@@ -39,9 +38,10 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
-      # Fail loud on a missing secret (Decision 9). ANTHROPIC_API_KEY is the
-      # explicit authoring model this lane pins; CLERK creds mint the key the
-      # same self-serve way the nightly lane does.
+      # Fail loud on a missing secret (a CI lane must report red, never
+      # skip-green). ANTHROPIC_API_KEY is the explicit authoring model this lane
+      # pins; the Clerk creds mint the key the same self-serve way the nightly
+      # lane does.
       #
       # NOTE: ANTHROPIC_API_KEY exists on this repo; if a future rotation drops
       # it, this guard turns the lane RED instead of running against a

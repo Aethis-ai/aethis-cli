@@ -11,7 +11,8 @@ Session lifecycle:
 
 Absent creds: the tests **skip** so a developer without the Clerk dev-tools
 secret isn't blocked. The *CI workflow* fails loud on a missing secret instead
-(Decision 9) — the skip is a local-dev ergonomic, not a CI escape hatch.
+(a CI lane must report red, never silently pass) — the skip is a local-dev
+ergonomic, not a CI escape hatch.
 """
 
 from __future__ import annotations
@@ -86,7 +87,7 @@ def contract() -> dict:
         return load_contract()
     except ContractUnavailable as exc:
         if is_strict():
-            pytest.fail(f"contract unavailable in strict/CI mode (Decision 9): {exc}")
+            pytest.fail(f"contract unavailable in strict/CI mode (a CI lane must report red, not skip): {exc}")
         pytest.skip(f"contract unavailable (non-strict local run): {exc}")
 
 

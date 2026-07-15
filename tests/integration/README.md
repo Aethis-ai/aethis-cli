@@ -31,7 +31,7 @@ uv run pytest tests/integration -m staging -o addopts="" -v
 
 Without the two Clerk creds the tests **skip** (local ergonomic). In CI a
 missing secret or an unreachable staging/contract is a **hard red**, never a
-skip-green (developer-platform test programme, Decision 9).
+skip-green — a lane that cannot actually run must report red.
 
 ## What it never logs
 

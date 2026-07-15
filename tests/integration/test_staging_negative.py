@@ -1,7 +1,7 @@
 """Staging negative paths — what the user actually sees when denied.
 
 Two failure modes, asserted both at the wire (the error *envelope* conforms to
-the P1 contract) and at the CLI (the rendered text is *readable* — it names the
+the published contract) and at the CLI (the rendered text is *readable* — it names the
 missing scope and shows the server's hint, rather than dumping a raw dict):
 
 - **403** — a key minted without any ``projects`` scope calls ``projects

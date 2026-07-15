@@ -4,7 +4,7 @@ name: staging-integration
 # core loop against deployed staging, plus the negative paths. Deliberately has
 # no `pull_request` trigger — it never gates a merge (it hits a live external
 # surface with real latency). Results are surfaced via the uploaded qa-run
-# record (ingest wiring lands in the programme's P6).
+# record (a later phase wires that record into the quality store).
 
 on:
   schedule:
@@ -27,9 +27,10 @@ jobs:
     env:
       LANE_NAME: cli-staging
       AETHIS_BASE_URL: https://staging.api.aethis.ai
-      # The contract endpoint (P1). Once aethis-core serves it on staging this
-      # default just works; until then the contract fixture goes RED in CI
-      # (Decision 9 — never skip-green), which is the intended report-only signal.
+      # The published contract endpoint. Once the engine serves it on staging
+      # this default just works; until then the contract fixture goes RED in CI
+      # (a lane that cannot verify its contract must report red, never
+      # skip-green), which is the intended report-only signal.
       AETHIS_CONTRACT_URL: https://staging.api.aethis.ai/api/v1/public/diagnostics/contract
     steps:
       - uses: actions/checkout@v6
@@ -43,8 +44,8 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
-      # Decision 9: a missing secret or an unreachable staging must fail LOUD,
-      # never skip-green. No `continue-on-error` anywhere in this job.
+      # A missing secret or an unreachable staging must fail LOUD, never
+      # skip-green. No `continue-on-error` anywhere in this job.
       - name: Guard — required secrets + staging reachable
         env:
           CLERK_SECRET_KEY_DEV_TOOLS: ${{ secrets.CLERK_SECRET_KEY_DEV_TOOLS }}
@@ -87,10 +88,11 @@ jobs:
           PYTEST_EXIT: ${{ steps.pytest.outputs.exit_code }}
         run: |
           set -euo pipefail
-          # Matches tda.models.qa_run.QARun field-for-field so P6 ingest upserts
-          # it directly. Nightly staging lane → source "smoke"; the free-text
-          # lane label distinguishes it. natural_key is the workflow-run id so a
-          # re-run of a night updates its record in place (idempotent).
+          # Matches the platform's qa_runs record schema field-for-field so a
+          # later ingest phase upserts it directly. Nightly staging lane →
+          # source "smoke"; the free-text lane label distinguishes it.
+          # natural_key is the workflow-run id so a re-run of a night updates
+          # its record in place (idempotent).
           python3 - <<'PY'
           import json, os
           from datetime import date

@@ -2,18 +2,19 @@
 
 The contract (default scopes, per-endpoint scope map, and the exact shape of
 the 401/403/429 error envelopes) is served anonymously at
-``GET /api/v1/public/diagnostics/contract`` on staging once aethis-core P1
-deploys. Until then, a local checkout of the same file is a valid source, so
-this loader accepts:
+``GET /api/v1/public/diagnostics/contract`` on staging once the engine exposes
+that endpoint. Until then, a local checkout of the same file is a valid source,
+so this loader accepts:
 
 - an ``http(s)://`` URL — fetched over the network (the CI default);
 - a ``file://`` URL or a bare filesystem path — read from disk (local dev,
   pointed at the aethis-core checkout).
 
 Strictness: in CI (``CI`` truthy, or ``AETHIS_CONTRACT_STRICT=1``) an
-unreachable contract is a hard failure — Decision 9 forbids skip-green. Local
-runs without strictness get a ``ContractUnavailable`` the caller turns into a
-skip, so a developer whose staging endpoint isn't live yet isn't blocked.
+unreachable contract is a hard failure — a CI lane that cannot verify its
+contract must report red, never silently pass. Local runs without strictness
+get a ``ContractUnavailable`` the caller turns into a skip, so a developer whose
+staging endpoint isn't live yet isn't blocked.
 """
 
 from __future__ import annotations
