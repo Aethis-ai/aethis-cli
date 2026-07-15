@@ -1,0 +1,141 @@
+name: staging-integration
+
+# Report-only nightly lane: acquire a key the self-serve way and drive the CLI
+# core loop against deployed staging, plus the negative paths. Deliberately has
+# no `pull_request` trigger — it never gates a merge (it hits a live external
+# surface with real latency). Results are surfaced via the uploaded qa-run
+# record (ingest wiring lands in the programme's P6).
+
+on:
+  schedule:
+    # 02:30 UTC nightly.
+    - cron: "30 2 * * *"
+  workflow_dispatch: {}
+
+# Serialise: the fenced e2e user's keys are shared state; two concurrent runs
+# could sweep each other's in-flight keys.
+concurrency:
+  group: staging-integration
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  staging:
+    runs-on: ubuntu-latest
+    env:
+      LANE_NAME: cli-staging
+      AETHIS_BASE_URL: https://staging.api.aethis.ai
+      # The contract endpoint (P1). Once aethis-core serves it on staging this
+      # default just works; until then the contract fixture goes RED in CI
+      # (Decision 9 — never skip-green), which is the intended report-only signal.
+      AETHIS_CONTRACT_URL: https://staging.api.aethis.ai/api/v1/public/diagnostics/contract
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      # Decision 9: a missing secret or an unreachable staging must fail LOUD,
+      # never skip-green. No `continue-on-error` anywhere in this job.
+      - name: Guard — required secrets + staging reachable
+        env:
+          CLERK_SECRET_KEY_DEV_TOOLS: ${{ secrets.CLERK_SECRET_KEY_DEV_TOOLS }}
+          CLERK_E2E_DX_USER_ID: ${{ vars.CLERK_E2E_DX_USER_ID }}
+        run: |
+          set -euo pipefail
+          missing=0
+          if [ -z "${CLERK_SECRET_KEY_DEV_TOOLS:-}" ]; then echo "::error::CLERK_SECRET_KEY_DEV_TOOLS secret is not set"; missing=1; fi
+          if [ -z "${CLERK_E2E_DX_USER_ID:-}" ]; then echo "::error::CLERK_E2E_DX_USER_ID var is not set"; missing=1; fi
+          if [ "$missing" -ne 0 ]; then exit 1; fi
+          code=$(curl -s -o /dev/null -w "%{http_code}" -m 20 "$AETHIS_BASE_URL/openapi.json" || echo 000)
+          if [ "$code" != "200" ]; then echo "::error::staging unreachable ($AETHIS_BASE_URL/openapi.json → HTTP $code)"; exit 1; fi
+          echo "guard ok: secrets present, staging reachable"
+
+      - name: Capture engine + CLI versions
+        id: versions
+        run: |
+          set -euo pipefail
+          engine=$(curl -s -m 20 "$AETHIS_BASE_URL/openapi.json" | python3 -c 'import sys,json; print(json.load(sys.stdin)["info"]["version"])')
+          cli=$(uv run python -c 'from aethis_cli._version import __version__; print(__version__)')
+          echo "engine=$engine" >> "$GITHUB_OUTPUT"
+          echo "cli=$cli" >> "$GITHUB_OUTPUT"
+          echo "engine=$engine cli=$cli"
+
+      - name: Run staging integration lane
+        id: pytest
+        env:
+          CLERK_SECRET_KEY_DEV_TOOLS: ${{ secrets.CLERK_SECRET_KEY_DEV_TOOLS }}
+          CLERK_E2E_DX_USER_ID: ${{ vars.CLERK_E2E_DX_USER_ID }}
+        run: |
+          set +e
+          uv run pytest tests/integration -m staging -o addopts="" -p no:cacheprovider -v
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Emit qa-run record
+        if: always()
+        env:
+          ENGINE_VERSION: ${{ steps.versions.outputs.engine }}
+          CLI_VERSION: ${{ steps.versions.outputs.cli }}
+          PYTEST_EXIT: ${{ steps.pytest.outputs.exit_code }}
+        run: |
+          set -euo pipefail
+          # Matches tda.models.qa_run.QARun field-for-field so P6 ingest upserts
+          # it directly. Nightly staging lane → source "smoke"; the free-text
+          # lane label distinguishes it. natural_key is the workflow-run id so a
+          # re-run of a night updates its record in place (idempotent).
+          python3 - <<'PY'
+          import json, os
+          from datetime import date
+          exit_code = int(os.environ.get("PYTEST_EXIT", "1") or "1")
+          run_id = os.environ.get("GITHUB_RUN_ID", "local")
+          server = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
+          repo = os.environ.get("GITHUB_REPOSITORY", "Aethis-ai/aethis-cli")
+          record = {
+              "schema_version": 1,
+              "natural_key": f"cli-staging:{run_id}",
+              "source": "smoke",
+              "lane": os.environ.get("LANE_NAME", "cli-staging"),
+              "verdict": "pass" if exit_code == 0 else "fail",
+              "profile": None,
+              "engine_version": os.environ.get("ENGINE_VERSION") or None,
+              "run_date": date.today().isoformat(),
+              "run_ref": f"{server}/{repo}/actions/runs/{run_id}",
+              "artifact_ref": None,
+              "notes": f"aethis-cli {os.environ.get('CLI_VERSION','?')} staging integration lane",
+              "raw": {
+                  "cli_version": os.environ.get("CLI_VERSION"),
+                  "engine_version": os.environ.get("ENGINE_VERSION"),
+                  "pytest_exit_code": exit_code,
+                  "github_run_id": run_id,
+                  "github_run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
+              },
+          }
+          with open("qa-run-record.json", "w") as fh:
+              json.dump(record, fh, indent=2)
+          print(json.dumps(record, indent=2))
+          PY
+
+      - name: Upload qa-run record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-run-record
+          path: qa-run-record.json
+          if-no-files-found: error
+
+      - name: Fail the job if the lane failed
+        if: always()
+        run: |
+          code="${{ steps.pytest.outputs.exit_code }}"
+          if [ "$code" != "0" ]; then
+            echo "::error::staging integration lane failed (pytest exit $code)"
+            exit 1
+          fi

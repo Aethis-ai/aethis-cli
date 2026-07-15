@@ -1,0 +1,120 @@
+name: authoring-e2e-weekly
+
+# Report-only weekly lane for the LLM authoring pipeline (spacecraft e2e). It
+# drives generation via an LLM, so it is deliberately kept OUT of the nightly
+# LLM-free staging cadence (developer-platform test programme, Decision 10):
+# separate schedule, no `pull_request` trigger, never gates a merge. The
+# `manual` marker stays the local escape hatch.
+
+on:
+  schedule:
+    # 03:30 UTC every Monday.
+    - cron: "30 3 * * 1"
+  workflow_dispatch: {}
+
+concurrency:
+  group: authoring-e2e-weekly
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  authoring:
+    runs-on: ubuntu-latest
+    env:
+      AETHIS_BASE_URL: https://staging.api.aethis.ai
+      # Tight generation cap so a wedged LLM run fails loud rather than
+      # burning the whole job timeout.
+      SPACECRAFT_GENERATION_TIMEOUT: "420"
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      # Fail loud on a missing secret (Decision 9). ANTHROPIC_API_KEY is the
+      # explicit authoring model this lane pins; CLERK creds mint the key the
+      # same self-serve way the nightly lane does.
+      #
+      # NOTE: ANTHROPIC_API_KEY exists on this repo; if a future rotation drops
+      # it, this guard turns the lane RED instead of running against a
+      # server-default model.
+      - name: Guard — required secrets + staging reachable
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLERK_SECRET_KEY_DEV_TOOLS: ${{ secrets.CLERK_SECRET_KEY_DEV_TOOLS }}
+          CLERK_E2E_DX_USER_ID: ${{ vars.CLERK_E2E_DX_USER_ID }}
+        run: |
+          set -euo pipefail
+          missing=0
+          if [ -z "${ANTHROPIC_API_KEY:-}" ]; then echo "::error::ANTHROPIC_API_KEY secret is not set"; missing=1; fi
+          if [ -z "${CLERK_SECRET_KEY_DEV_TOOLS:-}" ]; then echo "::error::CLERK_SECRET_KEY_DEV_TOOLS secret is not set"; missing=1; fi
+          if [ -z "${CLERK_E2E_DX_USER_ID:-}" ]; then echo "::error::CLERK_E2E_DX_USER_ID var is not set"; missing=1; fi
+          if [ "$missing" -ne 0 ]; then exit 1; fi
+          code=$(curl -s -o /dev/null -w "%{http_code}" -m 20 "$AETHIS_BASE_URL/openapi.json" || echo 000)
+          if [ "$code" != "200" ]; then echo "::error::staging unreachable ($AETHIS_BASE_URL/openapi.json → HTTP $code)"; exit 1; fi
+          echo "guard ok"
+
+      - name: Mint a staging key for authoring
+        id: mint
+        env:
+          CLERK_SECRET_KEY_DEV_TOOLS: ${{ secrets.CLERK_SECRET_KEY_DEV_TOOLS }}
+          CLERK_E2E_DX_USER_ID: ${{ vars.CLERK_E2E_DX_USER_ID }}
+        run: |
+          set -euo pipefail
+          # Reuse the lane's own auth helper to acquire a JWT and mint a key.
+          # The key id is exported (safe) for the revoke step; the secret key is
+          # written to a file the pytest step reads and never echoed.
+          uv run python - <<'PY'
+          import os
+          from tests.integration import staging_auth
+          jwt = staging_auth.acquire_session_jwt()
+          key = staging_auth.mint_key(jwt, name=f"{staging_auth.E2E_KEY_PREFIX}authoring")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+              fh.write(f"key_id={key.key_id}\n")
+          with open(".authoring_key", "w") as fh:
+              fh.write(key.full_key)
+          # Stash the JWT for the revoke step (short-lived, workspace-local).
+          with open(".authoring_jwt", "w") as fh:
+              fh.write(jwt)
+          PY
+
+      - name: Run spacecraft authoring e2e
+        id: pytest
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set +e
+          export AETHIS_API_KEY="$(cat .authoring_key)"
+          uv run pytest tests/e2e/test_spacecraft_e2e.py -m manual -v -o addopts="" -p no:cacheprovider
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Revoke the minted key
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ -f .authoring_jwt ] && [ -n "${{ steps.mint.outputs.key_id }}" ]; then
+            uv run python - <<'PY'
+          from tests.integration import staging_auth
+          jwt = open(".authoring_jwt").read().strip()
+          # Revoke this run's key and sweep any stray e2e-dx-cli-* keys.
+          staging_auth.sweep_e2e_keys(jwt)
+          PY
+          fi
+          rm -f .authoring_key .authoring_jwt
+
+      - name: Fail the job if the lane failed
+        if: always()
+        run: |
+          code="${{ steps.pytest.outputs.exit_code }}"
+          if [ "$code" != "0" ]; then
+            echo "::error::authoring e2e lane failed (pytest exit $code)"
+            exit 1
+          fi

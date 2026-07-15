@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.25.0 (2026-07-15)
+
+- **feat: authorization errors now render the server's `hint` and the missing scope readably.** A `403 denied_missing_permission` (and `401`) previously printed the raw error object on commands that render their own errors (`projects`, `whoami`, …); the CLI now renders one clean line naming the missing permission plus, on its own dim line, the server's follow-up hint (e.g. how to request access). The top-level handler and the per-command renderer now share one formatter (`aethis_cli.output.format_error_detail` / `render_api_error`), so every command surfaces the same readable message.
+- **test: new staging integration lane (`tests/integration/`, marker `staging`).** Acquires an API key the self-serve way (a fenced e2e user's session → mint with the server's default scopes, no `scopes` field), drives the CLI core loop against deployed staging (`whoami`/`status`, `projects list`/`archive`, `rulesets`/`explain`/`fields`/`decide` against a public showcase ruleset), and asserts the negative paths a caller actually sees — a scope-reduced key's 403 and a revoked key's 401 — with the error envelopes checked against the machine-readable public-API contract. Report-only nightly workflow (`staging-integration.yml`); never gates a merge. Run locally with the one-liner in `tests/integration/README.md`.
+- **test: the spacecraft authoring e2e moved to its own weekly lane** (`authoring-e2e-weekly.yml`). It drives the LLM authoring pipeline, so it is kept out of the nightly LLM-free cadence; the model is passed explicitly via `X-Anthropic-Key`, generation is bounded by an explicit iteration cap (`SPACECRAFT_GENERATION_TIMEOUT`), and the `manual` marker stays as the local escape hatch.
+
 ## 0.24.0 (2026-07-04)
 
 - **fix: network errors now render one actionable line, not a raw traceback.** When the API is unreachable, times out, or a DNS/TLS error occurs, every command now prints `Could not reach the Aethis API at <url>: <reason>.` plus a "check your connection" hint and exits non-zero, instead of dumping an `httpx` stack trace. The top-level handler catches `httpx.HTTPError` (the umbrella over connect/timeout `RequestError`s), matching the graceful handling `login`/`account` already had.
