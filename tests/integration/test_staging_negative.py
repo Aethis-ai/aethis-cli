@@ -47,7 +47,18 @@ def test_missing_scope_envelope_matches_contract(reduced_scope_key, staging_base
 
 
 def test_missing_scope_rendered_readably(reduced_scope_key, staging_base_url):
-    """The CLI renders the missing permission and the server hint, not a dict."""
+    """The CLI renders the missing permission and the server hint, not a dict.
+
+    Asserts structurally, not against exact hint wording: capture whatever hint
+    the server actually returns, then require the CLI to have rendered it.
+    """
+    # Capture the server's real hint from the wire (whatever copy it uses).
+    client = AethisClient(reduced_scope_key.full_key, staging_base_url)
+    with pytest.raises(AethisAPIError) as excinfo:
+        client.list_projects()
+    server_hint = excinfo.value.detail.get("hint")
+    assert isinstance(server_hint, str) and server_hint.strip(), "server should supply a non-empty 403 hint"
+
     r = _run_cli(["projects", "list"], staging_base_url, api_key=reduced_scope_key.full_key)
     assert r.returncode == 1
     combined = r.stdout + r.stderr
@@ -55,8 +66,11 @@ def test_missing_scope_rendered_readably(reduced_scope_key, staging_base_url):
     assert "missing=projects:read" in combined
     assert "denied_missing_permission" in combined
     assert "{'error'" not in combined, "error rendered as a raw dict"
-    # The server's hint (how to request access) is surfaced on its own line.
-    assert "invite-only" in combined or "sign-up" in combined
+    # The server's actual hint is surfaced (structural: rendered, not exact copy).
+    # Rich may soft-wrap the hint across lines, so compare with whitespace collapsed.
+    normalized = " ".join(combined.split())
+    normalized_hint = " ".join(server_hint.split())
+    assert normalized_hint in normalized, "server hint not rendered by the CLI"
 
 
 # --------------------------------------------------------------------------- #

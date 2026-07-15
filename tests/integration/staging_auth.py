@@ -35,9 +35,17 @@ STAGING_BASE_URL = os.environ.get("AETHIS_BASE_URL", "https://staging.api.aethis
 # The Origin the Frontend API expects for a browser-mode ticket redemption.
 CLERK_ORIGIN = os.environ.get("CLERK_ORIGIN", "https://aethis.ai")
 
-# Every key this lane mints carries this prefix so a crash-leaked key is
-# identifiable and swept in teardown.
+# Every key a lane mints carries a lane-specific prefix so a crash-leaked key is
+# identifiable and swept in teardown — and, crucially, so one lane's sweep never
+# revokes another lane's in-flight key. The integration lane and the weekly
+# authoring lane run on independent schedules, so each sweeps ONLY its own
+# prefix (both share the ``e2e-dx-`` stem, but the prefixes are disjoint).
 E2E_KEY_PREFIX = "e2e-dx-cli-"
+AUTHORING_KEY_PREFIX = "e2e-dx-authoring-"
+
+# Projects the happy path creates carry this name prefix, so a crash between
+# create and the in-test archive is swept on the next run's teardown.
+E2E_PROJECT_PREFIX = "e2e-dx-cli-proj"
 
 _HTTP_TIMEOUT = 30.0
 
@@ -162,24 +170,23 @@ def revoke_key(jwt: str, key_id: str) -> None:
         raise StagingAuthError(f"key revoke returned HTTP {resp.status_code}")
 
 
-def list_live_e2e_key_ids(jwt: str) -> list[str]:
-    """Return the ids of every non-revoked ``e2e-dx-cli-*`` key on the tenant.
+def list_live_e2e_key_ids(jwt: str, prefix: str = E2E_KEY_PREFIX) -> list[str]:
+    """Return the ids of every non-revoked key named ``<prefix>*`` on the tenant.
 
-    Used by teardown to sweep keys a crashed run may have leaked, so the
-    fenced user never accumulates orphaned credentials.
+    Used by teardown to sweep keys a crashed run may have leaked, so the fenced
+    user never accumulates orphaned credentials. Scoped to a single ``prefix``
+    so one lane's sweep can't revoke another lane's in-flight key.
     """
     with _keys_client(jwt) as client:
         resp = client.get("/api/v1/keys/")
     if resp.status_code != 200:
         raise StagingAuthError(f"key list returned HTTP {resp.status_code}")
-    return [
-        k["key_id"] for k in resp.json() if str(k.get("name", "")).startswith(E2E_KEY_PREFIX) and not k.get("revoked")
-    ]
+    return [k["key_id"] for k in resp.json() if str(k.get("name", "")).startswith(prefix) and not k.get("revoked")]
 
 
-def sweep_e2e_keys(jwt: str) -> int:
-    """Revoke every stray ``e2e-dx-cli-*`` key; return how many were swept."""
-    stray = list_live_e2e_key_ids(jwt)
+def sweep_e2e_keys(jwt: str, prefix: str = E2E_KEY_PREFIX) -> int:
+    """Revoke every stray ``<prefix>*`` key; return how many were swept."""
+    stray = list_live_e2e_key_ids(jwt, prefix=prefix)
     for key_id in stray:
         try:
             revoke_key(jwt, key_id)

@@ -57,11 +57,34 @@ def _run_id() -> str:
 
 
 @pytest.fixture(scope="session")
-def default_key(session_jwt: str) -> Iterator[staging_auth.MintedKey]:
-    """A key minted with the server's default scopes (no ``scopes`` field)."""
+def default_key(session_jwt: str, staging_base_url: str) -> Iterator[staging_auth.MintedKey]:
+    """A key minted with the server's default scopes (no ``scopes`` field).
+
+    Teardown also archives any stray ``e2e-dx-cli-proj*`` project a crashed run
+    left un-archived (the happy path archives in a ``finally``, but a hard crash
+    can still leak one), so fixtures don't accumulate on the tenant.
+    """
     key = staging_auth.mint_key(session_jwt, name=f"{staging_auth.E2E_KEY_PREFIX}{_run_id()}")
     yield key
+    _sweep_e2e_projects(key, staging_base_url)
     staging_auth.revoke_key(session_jwt, key.key_id)
+
+
+def _sweep_e2e_projects(key: staging_auth.MintedKey, base_url: str) -> None:
+    """Best-effort archive of stray ``e2e-dx-cli-proj*`` projects on teardown."""
+    try:
+        client = AethisClient(key.full_key, base_url)
+        for project in client.list_projects():
+            name = str(project.get("name", ""))
+            if name.startswith(staging_auth.E2E_PROJECT_PREFIX) and project.get("status") != "archived":
+                try:
+                    client.archive_project(project["project_id"])
+                except Exception:
+                    # One failure must not abort the sweep of the rest.
+                    pass
+    except Exception:
+        # Cleanup is best-effort — never let it mask a test result.
+        pass
 
 
 @pytest.fixture

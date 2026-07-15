@@ -20,7 +20,9 @@ def format_error_detail(detail: object) -> str:
         reason = detail.get("reason_code", "unknown")
         action = detail.get("action", "unknown")
         missing = detail.get("missing_permissions", [])
-        missing_str = ", ".join(missing) if isinstance(missing, list) else str(missing)
+        # Coerce each item to str — a non-string element (a server quirk) must
+        # not turn a readable error into a raw TypeError traceback.
+        missing_str = ", ".join(str(m) for m in missing) if isinstance(missing, list) else str(missing)
         message = detail.get("message") or detail.get("error") or "Request denied"
         return f"{message} (reason={reason}, action={action}, missing={missing_str})"
     return str(detail)
@@ -36,7 +38,9 @@ def render_api_error(status_code: int, detail: object) -> None:
     )
     hint = detail.get("hint") if isinstance(detail, dict) else None
     if hint:
-        console.print(f"[dim]{hint}[/dim]")
+        # markup=False so server hint text containing [brackets] isn't parsed
+        # as Rich markup and silently dropped.
+        console.print(hint, style="dim", markup=False)
     if status_code == 401:
         console.print("[dim]Run 'aethis login' to re-authenticate.[/dim]")
 

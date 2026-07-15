@@ -21,6 +21,7 @@ permissions:
 jobs:
   authoring:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     env:
       AETHIS_BASE_URL: https://staging.api.aethis.ai
       # Tight generation cap so a wedged LLM run fails loud rather than
@@ -76,7 +77,8 @@ jobs:
           import os
           from tests.integration import staging_auth
           jwt = staging_auth.acquire_session_jwt()
-          key = staging_auth.mint_key(jwt, name=f"{staging_auth.E2E_KEY_PREFIX}authoring")
+          # Own prefix so this lane's sweep never touches the nightly lane's keys.
+          key = staging_auth.mint_key(jwt, name=f"{staging_auth.AUTHORING_KEY_PREFIX}{os.environ.get('GITHUB_RUN_ID','local')}")
           with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
               fh.write(f"key_id={key.key_id}\n")
           with open(".authoring_key", "w") as fh:
@@ -104,8 +106,8 @@ jobs:
             uv run python - <<'PY'
           from tests.integration import staging_auth
           jwt = open(".authoring_jwt").read().strip()
-          # Revoke this run's key and sweep any stray e2e-dx-cli-* keys.
-          staging_auth.sweep_e2e_keys(jwt)
+          # Sweep only THIS lane's prefix so a nightly run's key is never revoked.
+          staging_auth.sweep_e2e_keys(jwt, prefix=staging_auth.AUTHORING_KEY_PREFIX)
           PY
           fi
           rm -f .authoring_key .authoring_jwt

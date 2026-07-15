@@ -24,6 +24,7 @@ permissions:
 jobs:
   staging:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       LANE_NAME: cli-staging
       AETHIS_BASE_URL: https://staging.api.aethis.ai

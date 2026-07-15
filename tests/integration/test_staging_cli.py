@@ -70,7 +70,7 @@ def test_status_json_carries_identity(default_key, staging_base_url):
 def test_projects_list_and_archive(default_key, staging_base_url):
     client = AethisClient(default_key.full_key, staging_base_url)
     project = client.create_project(
-        name=f"{staging_auth.E2E_KEY_PREFIX}proj",
+        name=staging_auth.E2E_PROJECT_PREFIX,
         section_id="e2e_dx_section",
         domain="e2e_dx",
     )
