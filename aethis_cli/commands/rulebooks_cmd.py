@@ -23,6 +23,7 @@ This command group covers the rulebook lifecycle and configuration:
     aethis rulebooks decide <id> -i '{"field":"value"}'
     aethis rulebooks schema <id>
     aethis rulebooks explain <id>
+    aethis rulebooks graph <id>
 """
 
 from __future__ import annotations
@@ -609,6 +610,14 @@ def decide_rulebook(
         help="YAML or JSON file with field values (alternative to --inputs).",
     ),
     explain: bool = typer.Option(False, "--explain", help="Include a human-readable explanation."),
+    include_graph_overlay: bool = typer.Option(
+        False,
+        "--include-graph-overlay",
+        help=(
+            "Stamp this decision's per-criterion status onto the rule-map graph "
+            "(adds a `graph_overlay` field to the response — see `aethis rulebooks graph`)."
+        ),
+    ),
 ) -> None:
     """Evaluate a rulebook against a set of field values.
 
@@ -616,6 +625,7 @@ def decide_rulebook(
 
         aethis rulebooks decide aethis/uk-fsm -i '{"applicant.age": 6}'
         aethis rulebooks decide aethis/uk-fsm --input-file persona.yaml --explain
+        aethis rulebooks decide aethis/uk-fsm -i '{...}' --include-graph-overlay --output json
     """
     if inputs is None and input_file is None:
         raise typer.BadParameter("Provide field values via --inputs / -i or --input-file.")
@@ -642,10 +652,15 @@ def decide_rulebook(
         opts: dict[str, Any] = {}
         if explain:
             opts["include_explanation"] = True
+        if include_graph_overlay:
+            opts["include_graph_overlay"] = True
         result = client.decide_rulebook(rulebook, field_values, **opts)
     except AethisAPIError as e:
         error_panel(e)
         raise typer.Exit(code=1)
+
+    if include_graph_overlay and not is_json_requested() and result.get("graph_overlay"):
+        console.print("[dim]Graph overlay included in the response — rerun with --output json to inspect it.[/dim]")
 
     emit(result)
 
@@ -659,13 +674,24 @@ def decide_rulebook(
 def schema_rulebook(
     rulebook: str = typer.Argument(..., help="Rulebook ID or slug."),
 ) -> None:
-    """Print the combined field schema across all live rulesets."""
+    """Print the combined field schema across all live rulesets.
+
+    The response carries `engine_version` (the aethis-core build that served
+    it, e.g. "aethis-core@0.45.2") — printed as a header line here, and always
+    present in the underlying JSON (`--output json` / piped output).
+    """
     _cfg, client = load_client_or_fallback()
     try:
         result = client.get_rulebook_schema(rulebook)
     except AethisAPIError as e:
         error_panel(e)
         raise typer.Exit(code=1)
+
+    if not is_json_requested():
+        engine_version = result.get("engine_version")
+        if engine_version:
+            console.print(f"[dim]Engine: {engine_version}[/dim]")
+
     emit(result)
 
 
@@ -681,6 +707,95 @@ def explain_rulebook(
         error_panel(e)
         raise typer.Exit(code=1)
     emit(result)
+
+
+# ============================================================================
+# rulebooks graph
+# ============================================================================
+
+
+def _build_graph_nodes_table(nodes: list[dict], title: str) -> Table:
+    table = Table(title=title)
+    table.add_column("ID", style="cyan")
+    table.add_column("Type")
+    table.add_column("Label / rule text")
+    table.add_column("Fields", justify="right")
+    for n in nodes:
+        display = n.get("display") or {}
+        text = display.get("sentence") or n.get("label") or n.get("title") or "[dim]—[/dim]"
+        table.add_row(
+            n.get("id", ""),
+            n.get("type", ""),
+            text,
+            str(len(n.get("fields", []) or [])),
+        )
+    return table
+
+
+@rulebooks_app.command(name="graph")
+def graph_rulebook(
+    rulebook: str = typer.Argument(..., help="Rulebook ID or slug."),
+    mermaid: bool = typer.Option(
+        False,
+        "--mermaid",
+        help="Print only the raw Mermaid diagram source (pipe into a Mermaid renderer).",
+    ),
+) -> None:
+    """Show the ruleset-map dependency graph: field -> criterion -> group -> outcome.
+
+    Each criterion node carries a human-readable `display.sentence` (shown in
+    the summary table below) plus `display.routes`/`display.expr` for
+    programmatic consumers — full detail via `--output json`.
+
+    Note: this endpoint requires a valid API key even for a public rulebook
+    (unlike `aethis rulesets graph`, which is open for public rulesets) — run
+    `aethis login` first if you see a 401.
+
+    Examples::
+
+        aethis rulebooks graph aethis/uk-fsm
+        aethis rulebooks graph aethis/uk-fsm --mermaid
+        aethis rulebooks graph aethis/uk-fsm --output json
+    """
+    _cfg, client = load_client_or_fallback()
+    try:
+        result = client.get_rulebook_graph(rulebook)
+    except AethisAPIError as e:
+        error_panel(e)
+        raise typer.Exit(code=1)
+
+    if mermaid:
+        diagram = result.get("mermaid")
+        if not diagram:
+            console.print("[dim]No Mermaid diagram in the response.[/dim]")
+            raise typer.Exit(code=1)
+        print(diagram)
+        return
+
+    if is_json_requested():
+        emit(result)
+        return
+
+    graph = result.get("graph") or {}
+    nodes = graph.get("nodes", []) or []
+    stats = graph.get("stats") or {}
+
+    console.print(f"[bold]Graph[/bold] — {rulebook}")
+    if stats:
+        console.print(
+            f"  fields: {stats.get('total_fields', 0)}  ·  "
+            f"criteria: {stats.get('total_criteria', 0)}  ·  "
+            f"groups: {stats.get('total_groups', 0)}  ·  "
+            f"sections: {stats.get('sections', len(graph.get('sections', []) or []))}"
+        )
+
+    if not nodes:
+        console.print("[dim]No graph nodes yet — add rulesets or `set-logic` first.[/dim]")
+        return
+
+    console.print(_build_graph_nodes_table(nodes, title=f"Nodes — {rulebook}"))
+    if result.get("mermaid"):
+        console.print("\n[dim]Mermaid diagram available — rerun with --mermaid to print it.[/dim]")
 
 
 # ============================================================================

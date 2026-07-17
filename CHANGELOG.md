@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.26.0 (2026-07-17)
+
+- **feat(rulebooks): `aethis rulebooks graph <id>`** — fetch and render the rulebook-level ruleset-map dependency graph (field -> criterion -> group -> outcome). Prints a node-count summary + a table of nodes (id, type, the criterion's human-readable `display.sentence`, field count); `--mermaid` prints the raw Mermaid diagram source for piping into a renderer; `--output json` returns the full payload (`{rulebook_id, graph: {nodes, edges, sections, stats}, mermaid}`), including each node's `display.routes`/`display.expr` for programmatic consumers. This endpoint requires a valid API key even for a public rulebook (confirmed against the live engine) — unlike the ruleset-level graph below, there's no anonymous path. New `AethisClient.get_rulebook_graph()`.
+- **feat(rulesets): `aethis rulesets graph <ruleset_id>`** — the single-ruleset analogue, open for public rulesets with no API key required (`load_client_or_anon`). Same table/`--mermaid`/`--output json` shape. New `AethisClient.get_ruleset_graph()`.
+- **feat: `--include-graph-overlay` on `aethis decide` and `aethis rulebooks decide`** — stamps the decision's per-criterion status onto the rule-map graph, returned as a `graph_overlay` field on the response (`--output json` to inspect it). Additive request flag; a plain-text hint is printed when the overlay is present and JSON wasn't explicitly requested.
+- **feat(rulebooks): `aethis rulebooks schema` surfaces `engine_version`.** The schema response already carries the aethis-core build that served it (e.g. `aethis-core@0.45.2`); the CLI now prints it as a header line ahead of the schema payload instead of leaving it buried in the JSON.
+- Requires aethis-core 0.40.0+ (live on `api.aethis.ai` / `staging.api.aethis.ai` as of this release) for `/graph`, `include_graph_overlay`, and `engine_version` on `/schema`. `robot_hints` (shipped v0.23.0) is unaffected by this release.
+
 ## 0.25.0 (2026-07-15)
 
 - **feat: authorization errors now render the server's `hint` and the missing scope readably.** A `403 denied_missing_permission` (and `401`) previously printed the raw error object on commands that render their own errors (`projects`, `whoami`, …); the CLI now renders one clean line naming the missing permission plus, on its own dim line, the server's follow-up hint (e.g. how to request access). The top-level handler and the per-command renderer now share one formatter (`aethis_cli.output.format_error_detail` / `render_api_error`), so every command surfaces the same readable message. The hint is rendered with markup disabled (so a hint containing `[brackets]` isn't dropped) and non-string `missing_permissions` items are coerced (so a server quirk can't turn the error into a traceback).

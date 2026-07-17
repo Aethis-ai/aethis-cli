@@ -389,6 +389,35 @@ class AethisClient:
     def explain_rulebook(self, rulebook_id_or_slug: str) -> dict:
         return self._request("GET", f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/explain")
 
+    def get_rulebook_graph(self, rulebook_id_or_slug: str, *, format: str = "all") -> dict:
+        """Fetch the rulebook-level ruleset-map graph (field -> criterion -> group -> outcome).
+
+        Returns ``{rulebook_id, graph: {nodes, edges, sections, stats}, mermaid}``.
+        Unlike :meth:`get_ruleset_graph`, this endpoint requires a valid API
+        key even for a public rulebook (confirmed against the live engine,
+        2026-07-17) — there is no anonymous fallback here.
+        """
+        params = {} if format == "all" else {"format": format}
+        return self._request(
+            "GET",
+            f"/api/v1/public/rulebooks/{rulebook_id_or_slug}/graph",
+            params=params,
+        )
+
+    def get_ruleset_graph(self, ruleset_id: str, *, format: str = "all") -> dict:
+        """Fetch the single-ruleset dependency graph (field -> criterion -> group -> outcome).
+
+        Returns ``{ruleset_id, slug, name, graph: {nodes}, mermaid}``. Public
+        rulesets can be inspected without an API key — pair with
+        :func:`make_anonymous_client`.
+        """
+        params = {} if format == "all" else {"format": format}
+        return self._request(
+            "GET",
+            f"/api/v1/public/rulesets/{ruleset_id}/graph",
+            params=params,
+        )
+
     # -- Rulebook fields (Phase A.6) --
 
     def set_rulebook_fields(self, rulebook_id_or_slug: str, fields: list[dict]) -> dict:

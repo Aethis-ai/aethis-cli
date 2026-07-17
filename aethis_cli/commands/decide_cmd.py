@@ -27,6 +27,14 @@ def decide(
         ),
     ),
     explain: bool = typer.Option(False, "--explain", "-e", help="Show reasoning for the decision"),
+    include_graph_overlay: bool = typer.Option(
+        False,
+        "--include-graph-overlay",
+        help=(
+            "Stamp this decision's per-criterion status onto the rule-map graph "
+            "(adds a `graph_overlay` field to the response — see `aethis rulesets graph`)."
+        ),
+    ),
 ) -> None:
     """Evaluate eligibility against a published ruleset. No API key required for public rulesets.
 
@@ -35,6 +43,7 @@ def decide(
         aethis decide -b aethis/spacecraft-crew-certification -i '{"space.crew.age": 34, "space.crew.flight_hours": 900}'
         aethis decide -b my_ruleset:20260401-a1b2c3d -i '{"age": 21, "country": "UK"}'
         aethis decide -b my_ruleset:20260401-a1b2c3d --input @inputs.json --explain
+        aethis decide -b aethis/spacecraft-crew-certification -i '{...}' --include-graph-overlay --output json
         aethis decide -i '{...}'         # uses ruleset from .aethis/state.json
 
     Input is a JSON object mapping field IDs to values. Use `aethis fields -b <ruleset>`
@@ -68,6 +77,8 @@ def decide(
     if explain:
         opts["include_trace"] = True
         opts["include_explanation"] = True
+    if include_graph_overlay:
+        opts["include_graph_overlay"] = True
 
     try:
         result = client.decide(ruleset_id, field_values, **opts)
@@ -78,6 +89,9 @@ def decide(
     if is_json_requested():
         emit(result)
         return
+
+    if include_graph_overlay and result.get("graph_overlay"):
+        console.print("[dim]Graph overlay included in the response — rerun with --output json to inspect it.[/dim]")
 
     decision = result.get("decision", "unknown")
     color = {"eligible": "green", "not_eligible": "red"}.get(decision, "yellow")
