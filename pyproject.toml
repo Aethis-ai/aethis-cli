@@ -1,6 +1,6 @@
 [project]
 name = "aethis-cli"
-version = "0.24.0"
+version = "0.25.0"
 description = "CLI for the Aethis developer API — author, test, and publish rulesets"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -50,8 +50,9 @@ build-backend = "setuptools.build_meta"
 testpaths = ["tests"]
 markers = [
     "manual: requires real Aethis API (AETHIS_API_KEY + AETHIS_BASE_URL)",
+    "staging: hits the deployed staging API with a freshly-minted key (Clerk e2e creds required)",
 ]
-addopts = "-m 'not manual' --cov=aethis_cli --cov-fail-under=45"
+addopts = "-m 'not manual and not staging' --cov=aethis_cli --cov-fail-under=45"
 
 [tool.ruff]
 target-version = "py311"

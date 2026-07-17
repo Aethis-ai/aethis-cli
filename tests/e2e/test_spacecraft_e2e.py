@@ -13,9 +13,22 @@ Spacecraft Crew Certification Act 2049 as source material:
   7. Verify field schema (≥5 fields)
   8. Call /decide with known inputs and verify outcomes
 
+This test drives the **LLM authoring pipeline** (generation), so it runs in its
+own weekly + manual-dispatch lane (``.github/workflows/authoring-e2e-weekly.yml``)
+rather than any nightly LLM-free lane. It keeps the ``manual`` marker as the
+local escape hatch.
+
 Requires:
-  AETHIS_API_KEY  — developer API key
-  AETHIS_BASE_URL — API base URL (default: https://api.aethis.ai)
+  AETHIS_API_KEY   — developer API key
+  AETHIS_BASE_URL  — API base URL (default: https://api.aethis.ai)
+  ANTHROPIC_API_KEY — optional; when set it is passed as the explicit authoring
+                      model via the ``X-Anthropic-Key`` header, so the lane
+                      never silently falls back to a server-default model.
+
+Tunables (env):
+  SPACECRAFT_GENERATION_TIMEOUT — poll deadline in seconds (default 300); the
+                                  hard iteration cap so a wedged generation
+                                  fails loud instead of hanging the lane.
 
 Run with:
   pytest tests/e2e/test_spacecraft_e2e.py -m manual -v -s
@@ -42,8 +55,11 @@ SPACECRAFT_POLICY_PATH = (
     Path(__file__).resolve().parents[2] / "examples" / "spacecraft-crew-rules" / "spacecraft-crew-certification-act.md"
 )
 
-GENERATION_TIMEOUT = 300  # 5 minutes
+# Poll deadline / iteration cap. Overridable so the weekly lane can bound a
+# wedged generation tightly; a run that exceeds it fails loud (never hangs).
+GENERATION_TIMEOUT = int(os.environ.get("SPACECRAFT_GENERATION_TIMEOUT", "300"))
 POLL_INTERVAL = 5
+MAX_POLL_ITERATIONS = max(1, GENERATION_TIMEOUT // POLL_INTERVAL)
 
 # ---------------------------------------------------------------------------
 # Guidance hints — prescriptive DSL structure
@@ -184,7 +200,10 @@ def _make_client() -> tuple[AethisClient, str]:
     if not api_key:
         pytest.skip("AETHIS_API_KEY not set")
     base_url = os.environ.get("AETHIS_BASE_URL", "https://api.aethis.ai")
-    return AethisClient(api_key, base_url), base_url
+    # Pass the authoring model explicitly (X-Anthropic-Key) when provided, so
+    # the lane pins its own generation model rather than the server default.
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY") or None
+    return AethisClient(api_key, base_url, anthropic_key=anthropic_key), base_url
 
 
 @pytest.fixture(scope="module")
@@ -217,9 +236,12 @@ def spacecraft_ruleset():
     # 5. Trigger generation
     client.generate(pid)
 
-    # 6. Poll until done
+    # 6. Poll until done — bounded by BOTH a wall-clock deadline and an explicit
+    # iteration cap, so a wedged generation fails loud instead of hanging.
     deadline = time.time() + GENERATION_TIMEOUT
-    while time.time() < deadline:
+    iterations = 0
+    while time.time() < deadline and iterations < MAX_POLL_ITERATIONS:
+        iterations += 1
         status = client.get_status(pid)
         job_info = status.get("job") or {}
         job_status = job_info.get("status", "unknown")
@@ -239,7 +261,7 @@ def spacecraft_ruleset():
 
         time.sleep(POLL_INTERVAL)
 
-    pytest.fail("Generation timed out after 5 minutes")
+    pytest.fail(f"Generation did not finish within the cap ({GENERATION_TIMEOUT}s / {MAX_POLL_ITERATIONS} polls)")
 
 
 # ---------------------------------------------------------------------------

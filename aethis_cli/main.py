@@ -13,7 +13,7 @@ import typer
 from aethis_cli._version import __version__
 from aethis_cli.auth_helpers import RUNTIME
 from aethis_cli.errors import AethisAPIError, AuthenticationError, AuthRequired, ConfigError
-from aethis_cli.output import console
+from aethis_cli.output import console, format_error_detail, render_api_error
 from aethis_cli.render import RUNTIME as RENDER_RUNTIME, OutputFormat
 from aethis_cli.commands.account_cmd import account_app
 from aethis_cli.commands.rulebooks_cmd import rulebooks_app
@@ -39,15 +39,10 @@ from aethis_cli.commands.update_cmd import update
 PLUGIN_GROUP = "aethis_cli.plugins"
 
 
-def _format_error_detail(detail: object) -> str:
-    if isinstance(detail, dict):
-        reason = detail.get("reason_code", "unknown")
-        action = detail.get("action", "unknown")
-        missing = detail.get("missing_permissions", [])
-        missing_str = ", ".join(missing) if isinstance(missing, list) else str(missing)
-        message = detail.get("message") or detail.get("error") or "Request denied"
-        return f"{message} (reason={reason}, action={action}, missing={missing_str})"
-    return str(detail)
+# Canonical error-envelope formatter lives in ``output`` so the top-level
+# handler and the per-command ``error_panel`` render identically. Re-exported
+# under the historical name for callers/tests that import it from ``main``.
+_format_error_detail = format_error_detail
 
 
 def _version_callback(value: bool) -> None:
@@ -234,10 +229,7 @@ def cli() -> None:
         console.print(f"[red]Auth error:[/red] {e}")
         raise SystemExit(1)
     except AethisAPIError as e:
-        detail = _format_error_detail(e.detail)
-        console.print(f"[red]Error: {detail} (HTTP {e.status_code})[/red]", highlight=False)
-        if e.status_code == 401:
-            console.print("[dim]Run 'aethis login' to re-authenticate.[/dim]")
+        render_api_error(e.status_code, e.detail)
         raise SystemExit(1)
     except httpx.HTTPError as e:
         # Unreachable / slow API, DNS failure, TLS error, etc. Render one
