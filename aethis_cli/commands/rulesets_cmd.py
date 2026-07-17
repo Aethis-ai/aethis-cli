@@ -18,7 +18,7 @@ from rich.table import Table
 
 from aethis_cli.client import make_anonymous_client
 from aethis_cli.commands._id_utils import require_ruleset_id
-from aethis_cli.config import load_client_or_fallback, resolve_base_url_with_source
+from aethis_cli.config import load_client_or_anon, load_client_or_fallback, resolve_base_url_with_source
 from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel, success, warn
 from aethis_cli.prompts import confirm_or_abort
@@ -361,6 +361,78 @@ def promote_ruleset(
     if prior:
         console.print(f"  prior live archived: [dim]{prior}[/dim]")
     console.print(f"  cut reason: [dim]{resp.get('cut_reason')}[/dim]")
+
+
+def _build_ruleset_graph_nodes_table(nodes: list[dict], title: str) -> Table:
+    table = Table(title=title)
+    table.add_column("ID", style="cyan")
+    table.add_column("Type")
+    table.add_column("Label / rule text")
+    table.add_column("Fields", justify="right")
+    for n in nodes:
+        display = n.get("display") or {}
+        text = display.get("sentence") or n.get("label") or n.get("title") or "[dim]—[/dim]"
+        table.add_row(
+            n.get("id", ""),
+            n.get("type", ""),
+            text,
+            str(len(n.get("fields", []) or [])),
+        )
+    return table
+
+
+@rulesets_app.command(name="graph")
+def graph_ruleset(
+    ruleset_id: str = typer.Argument(..., help="Ruleset ID (e.g. example_ruleset:20260408-abc1234)."),
+    mermaid: bool = typer.Option(
+        False,
+        "--mermaid",
+        help="Print only the raw Mermaid diagram source (pipe into a Mermaid renderer).",
+    ),
+) -> None:
+    """Show a single ruleset's dependency graph: field -> criterion -> group -> outcome.
+
+    The single-ruleset (one-section) analogue of `aethis rulebooks graph`. No
+    API key required for a public ruleset.
+
+    Examples::
+
+        aethis rulesets graph construction-all-risks:20260412-gold
+        aethis rulesets graph construction-all-risks:20260412-gold --mermaid
+        aethis rulesets graph construction-all-risks:20260412-gold --output json
+    """
+    require_ruleset_id(ruleset_id)
+    _cfg, client = load_client_or_anon()
+    try:
+        result = client.get_ruleset_graph(ruleset_id)
+    except AethisAPIError as e:
+        error_panel(e)
+        raise typer.Exit(code=1)
+
+    if mermaid:
+        diagram = result.get("mermaid")
+        if not diagram:
+            console.print("[dim]No Mermaid diagram in the response.[/dim]")
+            raise typer.Exit(code=1)
+        print(diagram)
+        return
+
+    if is_json_requested():
+        emit(result)
+        return
+
+    nodes = (result.get("graph") or {}).get("nodes", []) or []
+    console.print(f"[bold]Graph[/bold] — {result.get('name') or ruleset_id}")
+    if result.get("slug"):
+        console.print(f"  slug: [cyan]{result['slug']}[/cyan]")
+
+    if not nodes:
+        console.print("[dim]No graph nodes in this ruleset.[/dim]")
+        return
+
+    console.print(_build_ruleset_graph_nodes_table(nodes, title=f"Nodes — {ruleset_id}"))
+    if result.get("mermaid"):
+        console.print("\n[dim]Mermaid diagram available — rerun with --mermaid to print it.[/dim]")
 
 
 @rulesets_app.command(name="archive")
