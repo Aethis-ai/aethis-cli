@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **ci: cut a GitHub Release on publish.** The `publish` workflow now creates a GitHub Release for each just-published tag, using that version's `CHANGELOG.md` section as the release notes, so the "watch → releases" subscribe channel stays current automatically. Idempotent (create-or-skip on an existing Release) and `--verify-tag` (never mints a synthetic tag). No package/runtime change. (epic aethis-workspace#526)
+
 ## 0.27.0 (2026-07-19)
 
 - **feat: `aethis review [<project>]`** — the Authoring Coach report for a project. Runs the server-side rubric and prints an authoring score, 2–3 evidence-cited strengths, and the single highest-leverage next improvement (with its docs link and the lever that fixes it). Defaults to the current project in `.aethis/state.json`; pass a `proj_…` id to review any of your projects from anywhere. `--verbose` shows the full per-check table; `--json` (and any piped/`--output json` invocation) emits the raw `ReviewReport`. The deterministic report needs only your API key; `--coach` opts into LLM mentoring prose billed to your own Anthropic key (`ANTHROPIC_API_KEY`). Advisory only — the exit code is always 0 regardless of score. New `AethisClient.review()`.

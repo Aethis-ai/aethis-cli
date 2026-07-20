@@ -65,6 +65,7 @@ jobs:
       url: https://pypi.org/p/aethis-cli
     permissions:
       id-token: write  # trusted publishing via OIDC — no token needed
+      contents: write  # cut a GitHub Release (gh release create) after publish
 
     steps:
       - uses: actions/download-artifact@v8
@@ -91,6 +92,44 @@ jobs:
             sleep 10
           done
           exit 1
+
+      - name: Check out repo at the published tag (for CHANGELOG.md)
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Cut GitHub Release from CHANGELOG
+        # Revive the subscribe-able GitHub Releases channel: on every publish,
+        # create a Release for the just-published tag with the matching
+        # CHANGELOG section as its notes. Idempotent create-or-skip so a re-run
+        # or workflow_dispatch never fails the publish. `--verify-tag` refuses to
+        # mint a synthetic tag at HEAD — the Release only ever attaches to the
+        # real published tag (epic aethis-workspace#526, sub-issue #80).
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          TAG="$RELEASE_TAG"
+          VERSION="${TAG#v}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; skipping (idempotent)."
+            exit 0
+          fi
+          NOTES_FILE="$(mktemp)"
+          awk -v ver="$VERSION" '
+            $0 ~ "^## " ver "([ (]|$)" { inblock=1; next }
+            inblock && /^## / { exit }
+            inblock { print }
+          ' CHANGELOG.md | sed '/./,$!d' > "$NOTES_FILE"  # drop leading blank line(s)
+          if [[ ! -s "$NOTES_FILE" ]]; then
+            echo "No CHANGELOG.md section found for version $VERSION; cannot cut a Release." >&2
+            exit 1
+          fi
+          gh release create "$TAG" --title "$TAG" --notes-file "$NOTES_FILE" --verify-tag
+          echo "Created GitHub Release $TAG."
 
       - name: Trigger workspace release sync
         env:
