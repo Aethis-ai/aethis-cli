@@ -7,6 +7,7 @@ from typing import Any, Callable, Optional
 
 import httpx
 
+from aethis_cli._version import __version__
 from aethis_cli.auth_providers import AuthProvider, ProviderContext, get_provider
 from aethis_cli.errors import AethisAPIError
 
@@ -43,6 +44,10 @@ class AethisClient:
             profile=profile or {},
         )
         headers: dict[str, str] = dict(auth_provider(ctx))
+        # Per-surface telemetry: identify the calling client + its version so the
+        # server can attribute `/review` (and future) records to `cli` vs `mcp`.
+        # Always sent — the header carries no credentials and no PII.
+        headers["X-Aethis-Client"] = f"cli/{__version__}"
         if anthropic_key:
             headers["X-Anthropic-Key"] = anthropic_key
         self._auth_provider = auth_provider
@@ -239,6 +244,21 @@ class AethisClient:
 
     def run_tests(self, project_id: str) -> dict:
         return self._request("POST", f"/api/v1/public/projects/{project_id}/test-run")
+
+    def review(self, project_id: str, *, coach: bool = False) -> dict:
+        """Run the Authoring Coach rubric over a project.
+
+        Returns the deterministic ``ReviewReport`` (objective checks, a
+        reproducible score, and the single author-actionable ``next_skill``).
+        ``coach=True`` opts into LLM mentoring prose — the server requires the
+        author's own ``X-Anthropic-Key`` (set at client construction) for
+        external keys; the deterministic report needs no key.
+        """
+        return self._request(
+            "POST",
+            f"/api/v1/public/projects/{project_id}/review",
+            json={"coach": coach},
+        )
 
     def publish(
         self,

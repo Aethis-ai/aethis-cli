@@ -318,3 +318,59 @@ def test_non_json_error_body(respx_mock):
     with pytest.raises(AethisAPIError) as exc_info:
         AethisClient("ak", BASE).decide("b:1", {})
     assert exc_info.value.status_code == 500
+
+
+# ============================================================================
+# Authoring Coach — /review + the X-Aethis-Client telemetry header
+# ============================================================================
+
+
+@respx.mock(base_url=BASE)
+def test_review_posts_deterministic_body(respx_mock):
+    """Default review: POST to the project's /review with coach=false."""
+    route = respx_mock.post("/api/v1/public/projects/proj_abc/review").mock(
+        return_value=httpx.Response(200, json={"project_id": "proj_abc", "rubric_version": "1", "score": 72})
+    )
+    result = AethisClient("ak_live_x", BASE).review("proj_abc")
+    assert result["score"] == 72
+    body = json.loads(route.calls[0].request.content)
+    assert body == {"coach": False}
+
+
+@respx.mock(base_url=BASE)
+def test_review_coach_sends_anthropic_key(respx_mock):
+    """coach=True + a constructed anthropic key => X-Anthropic-Key on the wire
+    and coach=true in the body."""
+    route = respx_mock.post("/api/v1/public/projects/proj_abc/review").mock(
+        return_value=httpx.Response(200, json={"project_id": "proj_abc", "rubric_version": "1"})
+    )
+    client = AethisClient("ak_live_x", BASE, anthropic_key="sk-ant-secret")
+    client.review("proj_abc", coach=True)
+    req = route.calls[0].request
+    assert req.headers["x-anthropic-key"] == "sk-ant-secret"
+    assert json.loads(req.content) == {"coach": True}
+
+
+@respx.mock(base_url=BASE)
+def test_review_sends_client_id_header(respx_mock):
+    """Every /review carries X-Aethis-Client: cli/<version> for telemetry."""
+    from aethis_cli._version import __version__
+
+    route = respx_mock.post("/api/v1/public/projects/proj_abc/review").mock(
+        return_value=httpx.Response(200, json={"project_id": "proj_abc", "rubric_version": "1"})
+    )
+    AethisClient("ak_live_x", BASE).review("proj_abc")
+    assert route.calls[0].request.headers["x-aethis-client"] == f"cli/{__version__}"
+
+
+@respx.mock(base_url=BASE)
+def test_client_id_header_sent_on_every_request(respx_mock):
+    """The client-id header isn't review-specific — it rides every call so the
+    server can attribute per-surface telemetry (regression guard)."""
+    from aethis_cli._version import __version__
+
+    route = respx_mock.post("/api/v1/public/decide").mock(
+        return_value=httpx.Response(200, json={"decision": "eligible"})
+    )
+    AethisClient("ak_live_x", BASE).decide("b:1", {})
+    assert route.calls[0].request.headers["x-aethis-client"] == f"cli/{__version__}"

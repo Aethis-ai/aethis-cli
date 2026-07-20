@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.27.0 (2026-07-19)
+
+- **feat: `aethis review [<project>]`** — the Authoring Coach report for a project. Runs the server-side rubric and prints an authoring score, 2–3 evidence-cited strengths, and the single highest-leverage next improvement (with its docs link and the lever that fixes it). Defaults to the current project in `.aethis/state.json`; pass a `proj_…` id to review any of your projects from anywhere. `--verbose` shows the full per-check table; `--json` (and any piped/`--output json` invocation) emits the raw `ReviewReport`. The deterministic report needs only your API key; `--coach` opts into LLM mentoring prose billed to your own Anthropic key (`ANTHROPIC_API_KEY`). Advisory only — the exit code is always 0 regardless of score. New `AethisClient.review()`.
+- **feat: every request now sends `X-Aethis-Client: cli/<version>`** so the server can attribute per-surface telemetry (CLI vs MCP). The header carries no credentials and no PII, and is set once at client construction for all commands.
+- Requires aethis-core with the `/api/v1/public/projects/{id}/review` endpoint live (epic aethis-workspace#514, P1). The public release of this version is held until that endpoint is live on `api.aethis.ai`.
+
 ## 0.26.0 (2026-07-17)
 
 - **feat(rulebooks): `aethis rulebooks graph <id>`** — fetch and render the rulebook-level ruleset-map dependency graph (field -> criterion -> group -> outcome). Prints a node-count summary + a table of nodes (id, type, the criterion's human-readable `display.sentence`, field count); `--mermaid` prints the raw Mermaid diagram source for piping into a renderer; `--output json` returns the full payload (`{rulebook_id, graph: {nodes, edges, sections, stats}, mermaid}`), including each node's `display.routes`/`display.expr` for programmatic consumers. This endpoint requires a valid API key even for a public rulebook (confirmed against the live engine) — unlike the ruleset-level graph below, there's no anonymous path. New `AethisClient.get_rulebook_graph()`.

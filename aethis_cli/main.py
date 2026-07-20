@@ -29,6 +29,7 @@ from aethis_cli.commands.refine_cmd import refine
 from aethis_cli.commands.status_cmd import status
 from aethis_cli.commands.test_cmd import test
 from aethis_cli.commands.publish_cmd import publish
+from aethis_cli.commands.review_cmd import review
 from aethis_cli.commands.fields_cmd import fields_app
 from aethis_cli.commands.explain_cmd import explain
 from aethis_cli.commands.decide_cmd import decide
@@ -181,6 +182,7 @@ app.command()(refine)
 app.command()(status)
 app.command(name="test")(test)
 app.command()(publish)
+app.command()(review)
 app.command()(explain)
 app.command()(decide)
 app.command()(whoami)
