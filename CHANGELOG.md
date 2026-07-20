@@ -1,7 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.28.0 (2026-07-20)
 
+- **feat: "what's new" on `aethis update`.** `aethis update` / `aethis update --check` now shows the changelog entries between your installed version and the latest release (titles + notes, newest ≤5, long notes truncated), sourced from the project's GitHub Releases. If the Releases API is unreachable, rate-limited, or has nothing in range, it falls back to a link to the Releases page — the command never errors or hangs on this. The exit-time update banner also gained a "what's new →" link to the same page. Coverage is forward-fill: only releases cut from here on populate the range, so an old install may see a gap. New `update_check._fetch_github_releases()`; the display logic lives in `update_cmd._releases_in_range()` / `_print_whats_new()`. (epic aethis-workspace#537)
 - **ci: cut a GitHub Release on publish.** The `publish` workflow now creates a GitHub Release for each just-published tag, using that version's `CHANGELOG.md` section as the release notes, so the "watch → releases" subscribe channel stays current automatically. Idempotent (create-or-skip on an existing Release) and `--verify-tag` (never mints a synthetic tag). No package/runtime change. (epic aethis-workspace#526)
 
 ## 0.27.0 (2026-07-19)

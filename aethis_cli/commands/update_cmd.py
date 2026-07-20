@@ -11,13 +11,18 @@ import typer
 from aethis_cli._version import __version__
 from aethis_cli.output import console
 from aethis_cli.update_check import (
+    _RELEASES_PAGE_URL,
     _detect_install_method,
+    _fetch_github_releases,
     _fetch_latest_pypi,
     _is_newer,
+    _parse_version,
     _save_cache,
 )
 
 PACKAGE = "aethis-cli"
+_CHANGELOG_MAX_ENTRIES = 5
+_CHANGELOG_NOTE_MAX_CHARS = 600
 
 
 def _is_editable_install(package: str) -> bool:
@@ -36,6 +41,60 @@ def _is_editable_install(package: str) -> bool:
         return False
     dir_info = data.get("dir_info")
     return isinstance(dir_info, dict) and bool(dir_info.get("editable"))
+
+
+def _releases_in_range(releases: list[tuple[str, str, str]], current: str, latest: str) -> list[tuple[str, str, str]]:
+    """Filter releases to tags in the semver range (current, latest], newest first.
+
+    #526 backfilled only the latest tag per repo (no historical backfill), so
+    the range is expected to be sparse — this just returns what exists.
+    """
+    current_v = _parse_version(current)
+    latest_v = _parse_version(latest)
+    tagged = []
+    for tag, title, notes in releases:
+        v = _parse_version(tag.lstrip("v"))
+        if current_v < v <= latest_v:
+            tagged.append((v, tag, title, notes))
+    tagged.sort(key=lambda item: item[0], reverse=True)
+    return [(tag, title, notes) for _, tag, title, notes in tagged[:_CHANGELOG_MAX_ENTRIES]]
+
+
+def _print_fallback() -> None:
+    console.print(f"[dim]See what's new: {_RELEASES_PAGE_URL}[/dim]")
+
+
+def _print_whats_new(current: str, latest: str) -> None:
+    """Print changelog entries between `current` and `latest`; never raises.
+
+    Falls back to a link to the Releases page on any failure (fetch, filter,
+    or render) or empty result — the changelog is a nice-to-have, never a
+    reason to break `aethis update`. The whole body is wrapped, not just the
+    fetch: `_fetch_github_releases` already sanitizes its output, so the
+    render loop shouldn't be reachable with bad data today, but the
+    "never raises" contract must be self-contained rather than depend on
+    that invariant holding for every future caller/sanitizer change
+    (defense-in-depth).
+    """
+    try:
+        entries = _releases_in_range(_fetch_github_releases(), current, latest)
+        if not entries:
+            _print_fallback()
+            return
+
+        console.print("\n[bold]What's new:[/bold]")
+        for tag, title, notes in entries:
+            # style= (not inline markup) + markup=False/highlight=False: title/notes
+            # are untrusted external text (a Release title could itself contain
+            # `[brackets]`) — never let it be parsed as Rich markup.
+            console.print(f"\n{title or tag}", style="bold", markup=False, highlight=False)
+            text = (notes or "").strip()
+            if len(text) > _CHANGELOG_NOTE_MAX_CHARS:
+                text = text[:_CHANGELOG_NOTE_MAX_CHARS].rstrip() + "…"
+            if text:
+                console.print(text, markup=False, highlight=False)
+    except Exception:
+        _print_fallback()
 
 
 def _upgrade_argv(method: str, package: str) -> list[str]:
@@ -81,6 +140,7 @@ def update(
         return
 
     console.print(f"[bold]New release available:[/bold] {__version__} → {latest}")
+    _print_whats_new(__version__, latest)
 
     if check:
         console.print("[dim]Run `aethis update` to install it.[/dim]")

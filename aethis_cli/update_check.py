@@ -25,8 +25,11 @@ import httpx
 
 _CACHE_TTL_SECONDS = 24 * 60 * 60
 _PYPI_TIMEOUT_SECONDS = 3.0
+_GITHUB_API_TIMEOUT_SECONDS = 3.0
 _JOIN_TIMEOUT_SECONDS = 0.05
 _DISABLE_ENV = "AETHIS_DISABLE_UPDATE_CHECK"
+_RELEASES_API_URL = "https://api.github.com/repos/Aethis-ai/aethis-cli/releases"
+_RELEASES_PAGE_URL = "https://github.com/Aethis-ai/aethis-cli/releases"
 
 
 def _config_dir() -> Path:
@@ -86,6 +89,42 @@ def _fetch_latest_pypi(package: str) -> Optional[str]:
     return None
 
 
+def _fetch_github_releases(url: str = _RELEASES_API_URL) -> list[tuple[str, str, str]]:
+    """Fetch GitHub Releases (unauthenticated). Returns [(tag, title, notes), ...].
+
+    Newest-first, as returned by the API. Fails silent (empty list) on any
+    network, HTTP, or parse error — the "what's new" display is a nice-to-have,
+    never a reason to break `aethis update`.
+    """
+    try:
+        resp = httpx.get(
+            url,
+            timeout=_GITHUB_API_TIMEOUT_SECONDS,
+            headers={"Accept": "application/vnd.github+json"},
+        )
+    except httpx.HTTPError:
+        return []
+    if resp.status_code != 200:
+        return []
+    try:
+        data = resp.json()
+    except ValueError:
+        return []
+    if not isinstance(data, list):
+        return []
+    releases: list[tuple[str, str, str]] = []
+    for entry in data:
+        if not isinstance(entry, dict):
+            continue
+        tag = entry.get("tag_name")
+        if not isinstance(tag, str) or not tag:
+            continue
+        title = entry.get("name") if isinstance(entry.get("name"), str) and entry.get("name") else tag
+        notes = entry.get("body") if isinstance(entry.get("body"), str) else ""
+        releases.append((tag, title, notes))
+    return releases
+
+
 _VERSION_RE = re.compile(r"^(\d+)(?:\.(\d+))?(?:\.(\d+))?")
 
 
@@ -122,7 +161,11 @@ def _detect_install_method(package: str) -> str:
 
 
 def _print_banner(package: str, current: str, latest: str) -> None:
-    msg = f"\nA new release of {package} is available: {current} → {latest}\nTo upgrade, run: aethis update\n"
+    msg = (
+        f"\nA new release of {package} is available: {current} → {latest}\n"
+        f"To upgrade, run: aethis update\n"
+        f"what's new → {_RELEASES_PAGE_URL}\n"
+    )
     try:
         sys.stderr.write(msg)
         sys.stderr.flush()

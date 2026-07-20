@@ -154,6 +154,73 @@ def test_print_banner_writes_to_stderr(capsys: pytest.CaptureFixture[str]) -> No
     assert captured.out == ""
 
 
+def test_print_banner_contains_releases_link(capsys: pytest.CaptureFixture[str]) -> None:
+    """(d) the exit banner points at the GitHub Releases page, not the (still-404) docs URL."""
+    uc._print_banner("aethis-cli", "0.10.0", "0.11.0")
+    captured = capsys.readouterr()
+    assert uc._RELEASES_PAGE_URL in captured.err
+    assert "docs.aethis.ai" not in captured.err
+
+
+@respx.mock
+def test_fetch_github_releases_happy_path() -> None:
+    respx.get(uc._RELEASES_API_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"tag_name": "v0.11.0", "name": "0.11.0", "body": "Added widgets."},
+                {"tag_name": "v0.10.0", "name": "0.10.0", "body": "Fixed bugs."},
+            ],
+        )
+    )
+    releases = uc._fetch_github_releases()
+    assert releases == [
+        ("v0.11.0", "0.11.0", "Added widgets."),
+        ("v0.10.0", "0.10.0", "Fixed bugs."),
+    ]
+
+
+@respx.mock
+def test_fetch_github_releases_non_200_returns_empty() -> None:
+    respx.get(uc._RELEASES_API_URL).mock(return_value=httpx.Response(403))
+    assert uc._fetch_github_releases() == []
+
+
+@respx.mock
+def test_fetch_github_releases_network_error_returns_empty() -> None:
+    respx.get(uc._RELEASES_API_URL).mock(side_effect=httpx.ConnectError("boom"))
+    assert uc._fetch_github_releases() == []
+
+
+@respx.mock
+def test_fetch_github_releases_malformed_body_returns_empty() -> None:
+    respx.get(uc._RELEASES_API_URL).mock(return_value=httpx.Response(200, text="not json"))
+    assert uc._fetch_github_releases() == []
+
+
+@respx.mock
+def test_fetch_github_releases_skips_malformed_entries() -> None:
+    """Missing tag_name / non-string body: skip the entry, never raise."""
+    respx.get(uc._RELEASES_API_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"name": "no tag", "body": "should be skipped"},
+                {"tag_name": "v0.11.0", "name": None, "body": None},
+                "not-a-dict",
+            ],
+        )
+    )
+    releases = uc._fetch_github_releases()
+    assert releases == [("v0.11.0", "v0.11.0", "")]
+
+
+@respx.mock
+def test_fetch_github_releases_non_list_body_returns_empty() -> None:
+    respx.get(uc._RELEASES_API_URL).mock(return_value=httpx.Response(200, json={"message": "not found"}))
+    assert uc._fetch_github_releases() == []
+
+
 class _SyncThread:
     """Runs target synchronously on .start(); makes background_check deterministic."""
 
