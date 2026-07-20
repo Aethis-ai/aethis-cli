@@ -60,33 +60,41 @@ def _releases_in_range(releases: list[tuple[str, str, str]], current: str, lates
     return [(tag, title, notes) for _, tag, title, notes in tagged[:_CHANGELOG_MAX_ENTRIES]]
 
 
+def _print_fallback() -> None:
+    console.print(f"[dim]See what's new: {_RELEASES_PAGE_URL}[/dim]")
+
+
 def _print_whats_new(current: str, latest: str) -> None:
     """Print changelog entries between `current` and `latest`; never raises.
 
-    Falls back to a link to the Releases page on any failure or empty
-    result — the changelog is a nice-to-have, never a reason to break
-    `aethis update`.
+    Falls back to a link to the Releases page on any failure (fetch, filter,
+    or render) or empty result — the changelog is a nice-to-have, never a
+    reason to break `aethis update`. The whole body is wrapped, not just the
+    fetch: `_fetch_github_releases` already sanitizes its output, so the
+    render loop shouldn't be reachable with bad data today, but the
+    "never raises" contract must be self-contained rather than depend on
+    that invariant holding for every future caller/sanitizer change
+    (defense-in-depth).
     """
     try:
         entries = _releases_in_range(_fetch_github_releases(), current, latest)
+        if not entries:
+            _print_fallback()
+            return
+
+        console.print("\n[bold]What's new:[/bold]")
+        for tag, title, notes in entries:
+            # style= (not inline markup) + markup=False/highlight=False: title/notes
+            # are untrusted external text (a Release title could itself contain
+            # `[brackets]`) — never let it be parsed as Rich markup.
+            console.print(f"\n{title or tag}", style="bold", markup=False, highlight=False)
+            text = (notes or "").strip()
+            if len(text) > _CHANGELOG_NOTE_MAX_CHARS:
+                text = text[:_CHANGELOG_NOTE_MAX_CHARS].rstrip() + "…"
+            if text:
+                console.print(text, markup=False, highlight=False)
     except Exception:
-        entries = []
-
-    if not entries:
-        console.print(f"[dim]See what's new: {_RELEASES_PAGE_URL}[/dim]")
-        return
-
-    console.print("\n[bold]What's new:[/bold]")
-    for tag, title, notes in entries:
-        # style= (not inline markup) + markup=False/highlight=False: title/notes
-        # are untrusted external text (a Release title could itself contain
-        # `[brackets]`) — never let it be parsed as Rich markup.
-        console.print(f"\n{title or tag}", style="bold", markup=False, highlight=False)
-        text = notes.strip()
-        if len(text) > _CHANGELOG_NOTE_MAX_CHARS:
-            text = text[:_CHANGELOG_NOTE_MAX_CHARS].rstrip() + "…"
-        if text:
-            console.print(text, markup=False, highlight=False)
+        _print_fallback()
 
 
 def _upgrade_argv(method: str, package: str) -> list[str]:
