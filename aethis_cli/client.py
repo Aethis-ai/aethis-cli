@@ -63,6 +63,9 @@ class AethisClient:
         # a second 401 surfaces the original error so we never loop. Disabled
         # for unsigned clients — there's no key to refresh.
         self._on_auth_required = None if unsigned else on_auth_required
+        # Latest X-RateLimit-* budget seen on a response (epic #552 P2). None
+        # until the first metered, authenticated call.
+        self.last_rate_limit: Optional[dict] = None
 
     def close(self) -> None:
         self._client.close()
@@ -72,6 +75,24 @@ class AethisClient:
 
     def __exit__(self, *args: Any) -> None:
         self.close()
+
+    def _capture_rate_limit(self, resp: httpx.Response) -> None:
+        """Stash the X-RateLimit-* headers (epic #552 P2) from the latest
+        response so command code can surface remaining budget. None when the
+        server didn't send them (unauthenticated / non-metered response)."""
+        h = resp.headers
+        cls = h.get("X-RateLimit-Class")
+        if cls is None:
+            return
+        try:
+            self.last_rate_limit = {
+                "class": cls,
+                "limit": int(h["X-RateLimit-Limit"]),
+                "remaining": int(h["X-RateLimit-Remaining"]),
+                "reset": int(h["X-RateLimit-Reset"]),
+            }
+        except (KeyError, ValueError):
+            self.last_rate_limit = None
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         resp = self._client.request(method, path, **kwargs)
@@ -87,6 +108,7 @@ class AethisClient:
             new_key = refresh(force_browser=True)
             self._client.headers["X-API-Key"] = new_key
             resp = self._client.request(method, path, **kwargs)
+        self._capture_rate_limit(resp)
         if resp.status_code >= 400:
             self._raise_for_status(resp)
         if resp.status_code == 204:
@@ -113,6 +135,10 @@ class AethisClient:
                 **opts,
             },
         )
+
+    def usage(self) -> dict:
+        """Per-operation-class rate-limit budget for the calling key (epic #552)."""
+        return self._request("GET", "/api/v1/public/usage")
 
     def whoami(self) -> dict:
         """Return metadata for the current API key."""

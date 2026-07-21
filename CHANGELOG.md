@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.29.0 (2026-07-21)
+
+- **feat: `aethis usage`** — show your rate-limit budget per operation class (decide / generate / author / read / keys / admin) as a table: used / limit / remaining / reset, over the rolling 24h window. `generate` (LLM rule generation) is the scarce class; browsing and status polling (`read`) are effectively unlimited. `--json`/piped emits the raw `/usage` payload. New `AethisClient.usage()`.
+- **feat: remaining generate budget after `aethis generate`.** The CLI now reads the `X-RateLimit-*` response headers (captured on every request as `AethisClient.last_rate_limit`) and, after a generation is queued, prints "N generations left in the current 24h window" — so a 429 is never the first signal. The line turns yellow at ≤5 remaining.
+- Requires aethis-core with the `GET /api/v1/public/usage` endpoint + `X-RateLimit-*` headers live (epic aethis-workspace#552, P2). The public release of this version is held until that surface is live on `api.aethis.ai`.
+
 ## 0.28.0 (2026-07-20)
 
 - **feat: "what's new" on `aethis update`.** `aethis update` / `aethis update --check` now shows the changelog entries between your installed version and the latest release (titles + notes, newest ≤5, long notes truncated), sourced from the project's GitHub Releases. If the Releases API is unreachable, rate-limited, or has nothing in range, it falls back to a link to the Releases page — the command never errors or hangs on this. The exit-time update banner also gained a "what's new →" link to the same page. Coverage is forward-fill: only releases cut from here on populate the range, so an old install may see a gap. New `update_check._fetch_github_releases()`; the display logic lives in `update_cmd._releases_in_range()` / `_print_whats_new()`. (epic aethis-workspace#537)

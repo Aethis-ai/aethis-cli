@@ -33,6 +33,7 @@ from aethis_cli.commands.review_cmd import review
 from aethis_cli.commands.fields_cmd import fields_app
 from aethis_cli.commands.explain_cmd import explain
 from aethis_cli.commands.decide_cmd import decide
+from aethis_cli.commands.usage_cmd import usage
 from aethis_cli.commands.whoami_cmd import whoami
 from aethis_cli.commands.update_cmd import update
 
@@ -186,6 +187,7 @@ app.command()(review)
 app.command()(explain)
 app.command()(decide)
 app.command()(whoami)
+app.command()(usage)
 app.command()(update)
 
 

@@ -470,6 +470,15 @@ def _run_generate(
         job = client.generate(pid, mode=mode, seed_ruleset_id=seed_ruleset_id)
         write_state(project_dir, {"project_id": pid, "job_id": job["job_id"]})
         info(f"Generation queued (job={job['job_id']})")
+        # Surface the remaining generate budget from the POST's X-RateLimit-*
+        # headers (epic #552) — captured now, before polling /status overwrites
+        # it with the `read` class. `aethis usage` shows the full picture.
+        _rl = client.last_rate_limit
+        if _rl and _rl.get("class") == "generate":
+            _rem = _rl.get("remaining", 0)
+            _noun = "generation" if _rem == 1 else "generations"
+            _style = "yellow" if _rem <= 5 else "dim"
+            console.print(f"[{_style}]{_rem} {_noun} left in the current 24h window.[/{_style}]")
 
         if not poll:
             console.print("Use 'aethis status' to check progress.")
