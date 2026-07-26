@@ -399,7 +399,7 @@ def graph_ruleset(
 
         aethis rulesets graph construction-all-risks:20260412-gold
         aethis rulesets graph construction-all-risks:20260412-gold --mermaid
-        aethis rulesets graph construction-all-risks:20260412-gold --output json
+        aethis --output json rulesets graph construction-all-risks:20260412-gold
     """
     require_ruleset_id(ruleset_id)
     _cfg, client = load_client_or_anon()

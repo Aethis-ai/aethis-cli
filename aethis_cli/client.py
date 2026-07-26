@@ -9,6 +9,7 @@ import httpx
 
 from aethis_cli._version import __version__
 from aethis_cli.auth_providers import AuthProvider, ProviderContext, get_provider
+from aethis_cli.contract import check_decide_options
 from aethis_cli.errors import AethisAPIError
 
 # Callback signature for the lazy-auth refresh hook. Receives ``force_browser``
@@ -113,7 +114,21 @@ class AethisClient:
             self._raise_for_status(resp)
         if resp.status_code == 204:
             return {}
-        return resp.json()
+        try:
+            return resp.json()
+        except ValueError as exc:
+            # A 2xx whose body is not JSON is a broken server, an HTML error
+            # page from an intermediary, or a truncated response. Any of those
+            # is an API error the CLI reports in one line -- never a raw
+            # JSONDecodeError traceback out of the middle of a command.
+            preview = (resp.text or "").strip()[:200]
+            raise AethisAPIError(
+                resp.status_code,
+                "The server returned a non-JSON response"
+                + (f": {preview}" if preview else " with an empty body")
+                + ". If this persists, the API or an intermediary between you "
+                "and it is misbehaving.",
+            ) from exc
 
     @staticmethod
     def _raise_for_status(resp: httpx.Response) -> None:
@@ -126,6 +141,13 @@ class AethisClient:
     # -- Decision API --
 
     def decide(self, ruleset_id: str, field_values: dict, **opts: Any) -> dict:
+        """Evaluate ``field_values`` against a published ruleset.
+
+        The API rejects an unknown top-level body member with a 422 rather
+        than ignoring it, so an undeclared option is caught here and named
+        locally instead of costing a round-trip.
+        """
+        check_decide_options(opts)
         return self._request(
             "POST",
             "/api/v1/public/decide",
@@ -524,6 +546,7 @@ class AethisClient:
         of ``ruleset_id``. The engine resolves the rulebook's live ruleset
         pins and runs the composed evaluation.
         """
+        check_decide_options(opts)
         return self._request(
             "POST",
             "/api/v1/public/decide",

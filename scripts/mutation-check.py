@@ -1,0 +1,263 @@
+#!/usr/bin/env python3
+"""Measure whether the contract tests can actually fail.
+
+A safety property is only as good as the test that would notice it breaking.
+This harness breaks the contract on purpose, one mutation at a time, and runs
+the suite against each: a mutation the suite still passes is a hole in the
+oracle, not a passing build.
+
+It exists because the P8 review ran exactly this and found 5 of 13 mutations
+survived — including deleting a scrub site and redefining the blocking exit
+code to 0 — while the suite reported 427 passed. Three causes, all now fixed:
+scrub sites the fixtures never poisoned, exit assertions written against the
+constant (a tautology that survives redefining it), and a test whose
+assertions sat behind `if contract.is_blocked(...)`, so breaking that
+predicate made it vacuous rather than red.
+
+Each mutation is a literal source substitution applied to a temporary copy of
+the tree, so nothing here can modify the working checkout.
+
+    uv run python scripts/mutation-check.py
+    uv run python scripts/mutation-check.py --list
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from typing import List, NamedTuple
+
+REPO = Path(__file__).resolve().parent.parent
+SUITE_TIMEOUT = 900
+
+
+class Mutation(NamedTuple):
+    mutation_id: str
+    path: str
+    before: str
+    after: str
+    kills: str  # what SHOULD notice
+
+
+MUTATIONS: List[Mutation] = [
+    # -- the blocking predicate ------------------------------------------
+    Mutation(
+        "blocked-always-false",
+        "aethis_cli/contract.py",
+        "def is_blocked(response: Mapping[str, Any]) -> bool:\n"
+        '    """True when the response carries at least one blocking input error."""\n'
+        "    return bool(blocking_field_errors(response))",
+        "def is_blocked(response: Mapping[str, Any]) -> bool:\n"
+        '    """True when the response carries at least one blocking input error."""\n'
+        "    return False",
+        "nothing blocks; every blocking test must fail",
+    ),
+    Mutation(
+        "field-errors-mapping-only",
+        "aethis_cli/contract.py",
+        '    if isinstance(raw, list):\n        return {f"[{i}]": str(item) for i, item in enumerate(raw)}\n'
+        '    return {"__field_errors__": str(raw)}',
+        "    return {}",
+        "list/scalar field_errors shapes stop blocking",
+    ),
+    Mutation(
+        "field-errors-list-shape",
+        "aethis_cli/contract.py",
+        '    if isinstance(raw, list):\n        return {f"[{i}]": str(item) for i, item in enumerate(raw)}',
+        "    if isinstance(raw, list):\n        return {}",
+        "a list-shaped field_errors stops blocking",
+    ),
+    Mutation(
+        "presented-decision-echoes-server",
+        "aethis_cli/contract.py",
+        '    decision = response.get("decision")\n    if is_blocked(response):\n        return "undetermined"',
+        '    decision = response.get("decision")\n    if False:\n        return "undetermined"',
+        "presented_decision stops consulting the error channel",
+    ),
+    # -- the exit contract -------------------------------------------------
+    Mutation(
+        "exit-code-zero",
+        "aethis_cli/contract.py",
+        "EXIT_BLOCKING_INPUT = 3",
+        "EXIT_BLOCKING_INPUT = 0",
+        "a blocked evaluation starts passing shell gates",
+    ),
+    # -- the five scrub sites ---------------------------------------------
+    Mutation(
+        "scrub-top-level-decision",
+        "aethis_cli/contract.py",
+        '        if guarded.get("decision") in TERMINAL_DECISIONS:\n            guarded["decision"] = "undetermined"',
+        "        pass",
+        "a terminal verdict survives into JSON",
+    ),
+    Mutation(
+        "scrub-explanation-decision",
+        "aethis_cli/contract.py",
+        '            if explanation.get("decision") in TERMINAL_DECISIONS:\n'
+        '                explanation["decision"] = "undetermined"',
+        "            pass",
+        "embedded explanation.decision survives",
+    ),
+    Mutation(
+        "scrub-explanation-decision-path",
+        "aethis_cli/contract.py",
+        '            explanation.pop("decision_path", None)',
+        "            pass",
+        "a satisfying path survives under a blocked result",
+    ),
+    Mutation(
+        "scrub-trace-status",
+        "aethis_cli/contract.py",
+        '            if trace.get("status") in TERMINAL_DECISIONS:\n                trace["status"] = "undetermined"',
+        "            pass",
+        "embedded trace.status survives",
+    ),
+    Mutation(
+        "scrub-trace-path",
+        "aethis_cli/contract.py",
+        '            trace.pop("path", None)',
+        "            pass",
+        "trace.path survives under a blocked result",
+    ),
+    # -- the guard's reporting --------------------------------------------
+    Mutation(
+        "no-contract-note",
+        "aethis_cli/contract.py",
+        "    guarded[CONTRACT_NOTE_KEY] = note",
+        "    pass",
+        "the enforcement record disappears from JSON",
+    ),
+    Mutation(
+        "violations-never-reported",
+        "aethis_cli/contract.py",
+        '    if violations:\n        note["violations"] = violations',
+        "    pass",
+        "overrides stop being reported",
+    ),
+    # -- identity honesty --------------------------------------------------
+    Mutation(
+        "unknown-version-accepted",
+        "aethis_cli/contract.py",
+        '        if version is None or version == UNRESOLVED_VERSION:\n            unresolved.append("ruleset_version")\n'
+        '        if digest is None:\n            unresolved.append("content_digest")\n'
+        "    elif not rulebook_id and _looks_like_a_decision(response):",
+        '        if False:\n            unresolved.append("ruleset_version")\n'
+        '        if digest is None:\n            unresolved.append("content_digest")\n'
+        "    elif not rulebook_id and _looks_like_a_decision(response):",
+        "an unreproducible 'unknown' version prints as identity",
+    ),
+    # -- the exit is actually taken ---------------------------------------
+    Mutation(
+        "decide-never-exits-three",
+        "aethis_cli/commands/decide_cmd.py",
+        "    if blocked:\n        raise typer.Exit(code=contract.EXIT_BLOCKING_INPUT)\n",
+        "    if False:\n        raise typer.Exit(code=contract.EXIT_BLOCKING_INPUT)\n",
+        "`aethis decide` stops exiting non-zero when blocked",
+    ),
+    Mutation(
+        "rulebook-decide-unguarded",
+        "aethis_cli/commands/rulebooks_cmd.py",
+        "    blocked = contract.is_blocked(result)\n    result = contract.guard_response(result)",
+        "    blocked = False\n    result = result",
+        "`aethis rulebooks decide` reverts to the unguarded surface",
+    ),
+    # -- the field projection ---------------------------------------------
+    Mutation(
+        "projection-drops-contract-note",
+        "aethis_cli/render.py",
+        "    keep = list(fields) + [f for f in PINNED_JSON_FIELDS if f in record and f not in fields]",
+        "    keep = list(fields)",
+        "--json <fields> loses the enforcement record",
+    ),
+]
+
+
+def _apply(tree: Path, mutation: Mutation) -> bool:
+    target = tree / mutation.path
+    text = target.read_text()
+    if mutation.before not in text:
+        return False
+    target.write_text(text.replace(mutation.before, mutation.after, 1))
+    return True
+
+
+def _run_suite(tree: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["uv", "run", "--project", str(tree), "pytest", "tests/", "-x", "-q", "--no-cov", "-p", "no:cacheprovider"],
+        cwd=tree,
+        capture_output=True,
+        text=True,
+        timeout=SUITE_TIMEOUT,
+        check=False,
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--list", action="store_true", help="list the mutation set and exit")
+    parser.add_argument("--only", help="run a single mutation by id")
+    parser.add_argument("--output", help="write the result record here")
+    args = parser.parse_args()
+
+    if args.list:
+        for mutation in MUTATIONS:
+            print(f"{mutation.mutation_id:34} {mutation.path:38} {mutation.kills}")
+        return 0
+
+    selected = [m for m in MUTATIONS if not args.only or m.mutation_id == args.only]
+    if not selected:
+        sys.exit(f"no mutation named {args.only!r}")
+
+    results = []
+    for mutation in selected:
+        with tempfile.TemporaryDirectory(prefix="aethis-mutation-") as tmp:
+            tree = Path(tmp) / "tree"
+            shutil.copytree(
+                REPO,
+                tree,
+                ignore=shutil.ignore_patterns(".git", ".venv", "dist", "build", "__pycache__", ".pytest_cache"),
+            )
+            if not _apply(tree, mutation):
+                results.append({"id": mutation.mutation_id, "status": "STALE", "detail": "source text not found"})
+                print(f"STALE   {mutation.mutation_id} — mutation text no longer matches the source")
+                continue
+            completed = _run_suite(tree)
+            killed = completed.returncode != 0
+            results.append(
+                {
+                    "id": mutation.mutation_id,
+                    "status": "killed" if killed else "SURVIVED",
+                    "kills": mutation.kills,
+                }
+            )
+            print(f"{'killed ' if killed else 'SURVIVED'} {mutation.mutation_id} — {mutation.kills}")
+
+    killed = sum(1 for r in results if r["status"] == "killed")
+    survived = [r for r in results if r["status"] == "SURVIVED"]
+    stale = [r for r in results if r["status"] == "STALE"]
+    record = {
+        "total": len(results),
+        "killed": killed,
+        "survived": [r["id"] for r in survived],
+        "stale": [r["id"] for r in stale],
+        "results": results,
+    }
+    print(f"\nkilled {killed}/{len(results)}")
+    if args.output:
+        Path(args.output).write_text(json.dumps(record, indent=2) + "\n")
+    if survived or stale:
+        for r in survived:
+            print(f"oracle hole: {r['id']} survived — {r['kills']}", file=sys.stderr)
+        for r in stale:
+            print(f"mutation {r['id']} no longer applies; update it", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

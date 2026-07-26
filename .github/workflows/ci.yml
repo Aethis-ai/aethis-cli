@@ -31,6 +31,85 @@ jobs:
       - name: Test
         run: uv run pytest tests/ --ignore=tests/e2e -v --cov=aethis_cli --cov-report=term-missing
 
+  hermetic:
+    # Does it work for someone who has never run it? A temporary
+    # HOME/XDG/cache, no Aethis or provider credentials, an empty-cache
+    # install from the built distribution only, across every supported
+    # runtime/OS/architecture -- plus a poisoned negative control, so a check
+    # that could not fail never passes for the wrong reason.
+    name: hermetic first-user install (${{ matrix.os }} / py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Build distribution
+        # Pin the build clock: with SOURCE_DATE_EPOCH set the wheel is
+        # byte-identical across builds of an identical tree, so the matrix
+        # jobs agree on its digest. The sdist still varies (gzip header
+        # timestamp) -- see scripts/release-integrity.py.
+        run: |
+          SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)"
+          echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH" >> "$GITHUB_ENV"
+          SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" uv build
+
+      - name: Release integrity tuple
+        run: uv run python scripts/release-integrity.py --output integrity-${{ matrix.os }}-${{ matrix.python-version }}.json
+
+      - name: Hermetic install
+        run: uv run python scripts/hermetic-install-check.py --source dist --python ${{ matrix.python-version }} --output hermetic-${{ matrix.os }}-${{ matrix.python-version }}.json
+
+      - name: Poisoned-cache negative control
+        run: uv run python scripts/hermetic-install-check.py --source dist --python ${{ matrix.python-version }} --poison
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-evidence-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: |
+            integrity-*.json
+            hermetic-*.json
+
+  mutation:
+    # The contract tests are the only thing standing between a rejected input
+    # and a green exit status, so their ability to fail is itself gated: each
+    # mutation breaks the contract on purpose and must turn the suite red.
+    # A survivor is a hole in the oracle, and fails this job.
+    name: contract oracle (mutation)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Mutation check
+        run: uv run python scripts/mutation-check.py --output mutation.json
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mutation-report
+          path: mutation.json
+
   lint:
     runs-on: ubuntu-latest
     steps:

@@ -3,6 +3,14 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+# Release evidence written by scripts/release-integrity.py and
+# scripts/hermetic-install-check.py; regenerated per run, never committed.
+evidence/
+*-integrity.json
+hermetic-*.json
+# Dropped in the cwd when scripts/gen-contract-fixtures.py runs inside the
+# engine's environment (its logging config opens a file handler).
+app.log
 .pytest_cache/
 .coverage
 .coverage.*

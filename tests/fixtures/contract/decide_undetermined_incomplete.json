@@ -1,0 +1,137 @@
+{
+ "decision_id": "dec_eoPVAq3mYyiXei41",
+ "inputs_hash": "sha256:25ba08769055d639dae25a6c04cebfc58b69b8fbf9422b5d7948bbf86cb3f7dd",
+ "decision_time": "2026-07-26T04:39:39.374851Z",
+ "engine_version": "aethis-core@0.48.0",
+ "decision": "undetermined",
+ "ruleset_id": "spacecraft-crew-certification:20260407-933531f7",
+ "slug": "aethis/spacecraft-crew-certification",
+ "rulebook_id": null,
+ "ruleset_version": "v1",
+ "content_digest": "sha256:2abb79e26d630c4bb84f3dcfe79c52e45eaed71087270b27cf87f027a6c1e736",
+ "fields_evaluated": 11,
+ "fields_provided": 1,
+ "missing_fields": [
+  "space.crew.flight_hours",
+  "space.crew.has_pilot_license",
+  "space.crew.has_gaa_exam",
+  "space.crew.has_approved_provider_cert",
+  "space.crew.age",
+  "space.medical.cert_valid",
+  "space.mission.type",
+  "space.crew.has_radiation_cert",
+  "space.vessel.propulsion_type",
+  "space.crew.has_towel"
+ ],
+ "next_question": {
+  "field_id": "space.mission.type",
+  "question": "What is the mission type?",
+  "weight": 1,
+  "sort": "Enum",
+  "enum_values": [
+   "orbital",
+   "suborbital",
+   "lunar"
+  ],
+  "x_ui_widget": null,
+  "notes": []
+ },
+ "optimal_path": [
+  {
+   "field_id": "space.mission.type",
+   "question": "What is the mission type?",
+   "weight": 1,
+   "sort": "Enum",
+   "enum_values": [
+    "orbital",
+    "suborbital",
+    "lunar"
+   ],
+   "x_ui_widget": null,
+   "notes": []
+  },
+  {
+   "field_id": "space.crew.flight_hours",
+   "question": "How many flight hours has the applicant accumulated?",
+   "weight": 1,
+   "sort": "Int",
+   "enum_values": null,
+   "x_ui_widget": null,
+   "notes": []
+  },
+  {
+   "field_id": "space.crew.has_pilot_license",
+   "question": "Does the applicant hold a valid pilot licence?",
+   "weight": 1,
+   "sort": "Bool",
+   "enum_values": null,
+   "x_ui_widget": null,
+   "notes": []
+  },
+  {
+   "field_id": "space.crew.has_gaa_exam",
+   "question": "Has the applicant passed a GAA medical examination?",
+   "weight": 1,
+   "sort": "Bool",
+   "enum_values": null,
+   "x_ui_widget": null,
+   "notes": []
+  },
+  {
+   "field_id": "space.crew.age",
+   "question": "What is the applicant's age?",
+   "weight": 1,
+   "sort": "Int",
+   "enum_values": null,
+   "x_ui_widget": null,
+   "notes": []
+  },
+  {
+   "field_id": "space.medical.cert_valid",
+   "question": "Is the medical certificate within 730 days of application?",
+   "weight": 1,
+   "sort": "Bool",
+   "enum_values": null,
+   "x_ui_widget": null,
+   "notes": []
+  },
+  {
+   "field_id": "space.crew.has_radiation_cert",
+   "question": "Does the applicant hold a radiation protection certificate?",
+   "weight": 1,
+   "sort": "Bool",
+   "enum_values": null,
+   "x_ui_widget": null,
+   "notes": []
+  },
+  {
+   "field_id": "space.vessel.propulsion_type",
+   "question": "What type of propulsion system does the vessel use?",
+   "weight": 1,
+   "sort": "Enum",
+   "enum_values": [
+    "Infinite Improbability Drive",
+    "Bistromathics",
+    "Conventional",
+    "Heart of Gold Special"
+   ],
+   "x_ui_widget": null,
+   "notes": []
+  },
+  {
+   "field_id": "space.crew.has_towel",
+   "question": "Does the applicant carry a towel?",
+   "weight": 1,
+   "sort": "Bool",
+   "enum_values": null,
+   "x_ui_widget": null,
+   "notes": []
+  }
+ ],
+ "field_errors": null,
+ "trace": null,
+ "explanation": null,
+ "section_results": null,
+ "timing": null,
+ "graph_overlay": null
+}

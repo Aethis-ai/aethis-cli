@@ -1,0 +1,17 @@
+{
+ "detail": [
+  {
+   "type": "extra_forbidden",
+   "loc": [
+    "body",
+    "batch"
+   ],
+   "msg": "Extra inputs are not permitted",
+   "input": [
+    {
+     "field_values": {}
+    }
+   ]
+  }
+ ]
+}

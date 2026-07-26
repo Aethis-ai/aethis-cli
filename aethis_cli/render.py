@@ -138,17 +138,30 @@ def _available_fields(data: Any) -> list[str]:
     return []
 
 
+#: Keys a ``--json <fields>`` projection may never drop. ``aethis_cli_contract``
+#: records that the CLI overrode something the server said (see
+#: ``aethis_cli.contract``); losing it to a field selection would hand a
+#: caller a payload that looks clean while the enforcement went unreported.
+PINNED_JSON_FIELDS = ("aethis_cli_contract",)
+
+
+def _project(record: dict, fields: list[str]) -> dict:
+    keep = list(fields) + [f for f in PINNED_JSON_FIELDS if f in record and f not in fields]
+    return {f: record[f] for f in keep if f in record}
+
+
 def _filter_fields(data: Any, fields: list[str]) -> Any:
     """Pluck only the named fields from a dict or list-of-dicts.
 
     Unknown field names are silently dropped — matches gh. (We surface
     the available field list via the introspection sentinel, so a typo
-    is easy to debug.)
+    is easy to debug.) Fields in :data:`PINNED_JSON_FIELDS` survive any
+    projection.
     """
     if isinstance(data, dict):
-        return {f: data[f] for f in fields if f in data}
+        return _project(data, fields)
     if isinstance(data, list):
-        return [{f: r[f] for f in fields if isinstance(r, dict) and f in r} for r in data]
+        return [_project(r, fields) if isinstance(r, dict) else r for r in data]
     return data
 
 
@@ -281,6 +294,7 @@ def emit(
 
 
 __all__ = [
+    "PINNED_JSON_FIELDS",
     "OutputFormat",
     "RenderOpts",
     "RUNTIME",
