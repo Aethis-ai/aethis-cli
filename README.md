@@ -153,8 +153,9 @@ value that does not match the field's type — the response carries blocking
 `field_errors` and **no decision exists**. `aethis decide` prints the rejected
 inputs instead of a verdict and exits `3`; JSON output reports
 `"decision": "undetermined"` and records the block under
-`aethis_cli_contract`. There is no combination of flags that renders a blocked
-evaluation as eligible or ineligible.
+`aethis_cli_contract`. On every decide surface — `aethis decide` and
+`aethis rulebooks decide` — there is no combination of flags that renders a
+blocked evaluation as eligible or ineligible.
 
 | Exit code | Meaning |
 |---|---|
@@ -162,14 +163,19 @@ evaluation as eligible or ineligible.
 | `1` | The call failed — unreachable API, auth, or an error envelope. |
 | `3` | One or more inputs were rejected, so there is no decision. |
 
+`--output` is a root option, so it goes *before* the subcommand:
+
 ```bash
 # Safe in a shell gate: a rejected input can never pass as success
-if aethis decide -b <ruleset> -i "$INPUTS" --output json > result.json; then
+if aethis --output json decide -b <ruleset> -i "$INPUTS" > result.json; then
   jq -r '.decision' result.json
 else
   echo "no decision: $(jq -r '.field_errors // empty' result.json)"
 fi
 ```
+
+The same contract and the same exit codes apply to
+`aethis rulebooks decide`.
 
 ### Authoring
 
@@ -372,8 +378,17 @@ uv run python scripts/hermetic-install-check.py --source dist --poison  # must d
 ```
 
 Both scripts are non-interactive with bounded timeouts and print one JSON
-record; the poisoned run is a negative control — it passes only when the
-checks correctly notice a contaminated environment.
+record. The poisoned run is a negative control: it passes only when the
+contamination trips the *specific* assertions it was meant to trip, and fails
+loudly if it never reached them (a control that "passes" because nothing was
+installed is not evidence).
+
+Note what the digests do and do not prove. `uv build` is not byte-reproducible
+here — the wheel is, with `SOURCE_DATE_EPOCH` set; the sdist is not, because
+its gzip header carries a build timestamp. So the tuple attests *these are the
+bytes that job built and published*, verified against what the registry
+serves; it is not something you can re-derive by rebuilding the commit. Check
+it yourself with `--verify-reproducible`.
 
 ## Extending with plugins
 

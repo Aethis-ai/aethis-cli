@@ -13,8 +13,10 @@ Two sources, both authoritative:
    evaluation, the 422 for an undeclared request member, and the explain
    envelope. Captured verbatim.
 
-2. **The engine's own ``SourceReference`` model**, for the citation-bearing
-   payloads. No published showcase ruleset carries source references yet, so
+2. **The engine's own response models**, for payloads a public caller
+   cannot provoke against staging today -- the citation-bearing responses and
+   the rulebook decision envelope (no public rulebook is published on
+   staging, so ``/rulebooks/`` returns an empty catalogue). No published showcase ruleset carries source references yet, so
    the DTO cannot be captured from the wire; instead the real model
    serialises the fixture (it rejects a malformed digest, a non-HTTPS URL or
    a missing member exactly as the server would), and the references are
@@ -25,7 +27,7 @@ Two sources, both authoritative:
 Usage (non-interactive, bounded timeouts, no prompts):
 
     uv run python scripts/gen-contract-fixtures.py --capture
-    uv run --project ../aethis-core python scripts/gen-contract-fixtures.py --cite
+    uv run --project ../aethis-core python scripts/gen-contract-fixtures.py --cite --rulebook
 """
 
 from __future__ import annotations
@@ -254,18 +256,54 @@ def cite() -> None:
     _write("explain_with_degraded_source_reference.json", degraded)
 
 
+def rulebook() -> None:
+    """Serialise a blocked rulebook decision through the engine's own model.
+
+    No public rulebook is published on staging, so this envelope cannot be
+    captured from the wire. `DecideResponse` is the model the route returns,
+    and it enforces the envelope the CLI has to survive: the `decision`
+    literal, the required replay fields, and -- for a rulebook -- an
+    unresolved `ruleset_version` with no `content_digest`, which is legal for
+    a composite and must NOT be reported as a contract violation.
+
+    Values are anchored to a real captured ruleset decision so nothing is
+    invented beyond the rulebook-vs-ruleset envelope difference itself.
+    """
+    from aethis_core.public.routes.decide import DecideResponse
+
+    anchor = json.loads((FIXTURES / "decide_blocking_unknown_field.json").read_text())
+    response = DecideResponse(
+        decision_id=anchor["decision_id"],
+        inputs_hash=anchor["inputs_hash"],
+        decision_time=anchor["decision_time"],
+        engine_version=anchor["engine_version"],
+        decision="undetermined",
+        rulebook_id="aethis/spacecraft-certification-book",
+        ruleset_version="unknown",
+        fields_evaluated=anchor["fields_evaluated"],
+        fields_provided=anchor["fields_provided"],
+        missing_fields=anchor["missing_fields"],
+        field_errors=anchor["field_errors"],
+        section_results=[{"section_id": "crew", "status": "pending"}],
+    )
+    _write("decide_rulebook_blocking.json", response.model_dump(mode="json"))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default=DEFAULT_BASE)
     parser.add_argument("--capture", action="store_true", help="capture live payloads")
     parser.add_argument("--cite", action="store_true", help="graft engine-serialised source references")
+    parser.add_argument("--rulebook", action="store_true", help="serialise the rulebook decision envelope")
     args = parser.parse_args()
-    if not (args.capture or args.cite):
-        parser.error("pass --capture and/or --cite")
+    if not (args.capture or args.cite or args.rulebook):
+        parser.error("pass --capture, --cite and/or --rulebook")
     if args.capture:
         capture(args.base_url)
     if args.cite:
         cite()
+    if args.rulebook:
+        rulebook()
 
 
 if __name__ == "__main__":

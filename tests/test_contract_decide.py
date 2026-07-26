@@ -29,6 +29,15 @@ BLOCKING_FIXTURES = [
 ]
 
 
+def test_blocking_exit_code_is_three():
+    """Pinned as a literal, deliberately. Every other exit assertion in this
+    file also compares against the literal 3 -- asserting against the
+    constant would be a tautology that survives redefining it."""
+    assert contract.EXIT_BLOCKING_INPUT == 3
+    assert contract.EXIT_OK == 0
+    assert contract.EXIT_ERROR == 1
+
+
 def load(name: str) -> dict:
     return json.loads((FIXTURES / name).read_text())
 
@@ -88,7 +97,7 @@ def test_captured_blocking_payloads_are_undetermined(name):
 @pytest.mark.parametrize("name", BLOCKING_FIXTURES)
 def test_blocking_response_exits_non_zero(monkeypatch, tmp_path, name):
     result = run_decide(monkeypatch, tmp_path, load(name))
-    assert result.exit_code == contract.EXIT_BLOCKING_INPUT, result.output
+    assert result.exit_code == 3, result.output
 
 
 @pytest.mark.parametrize("name", BLOCKING_FIXTURES)
@@ -120,7 +129,7 @@ def test_blocking_with_explanation_still_shows_the_logic_trace(monkeypatch, tmp_
         extra_args=("--explain",),
     )
     out = strip(result.output)
-    assert result.exit_code == contract.EXIT_BLOCKING_INPUT
+    assert result.exit_code == 3
     assert "Logic trace" in out
     assert "blocked" in out
 
@@ -133,12 +142,12 @@ def test_blocking_with_explanation_still_shows_the_logic_trace(monkeypatch, tmp_
 @pytest.mark.parametrize("name", BLOCKING_FIXTURES)
 def test_blocking_json_exits_non_zero_and_records_the_block(monkeypatch, tmp_path, name):
     result = run_decide(monkeypatch, tmp_path, load(name), root_args=("--output", "json"))
-    assert result.exit_code == contract.EXIT_BLOCKING_INPUT
+    assert result.exit_code == 3
     payload = json.loads(strip(result.output))
     assert payload["decision"] == "undetermined"
     note = payload[contract.CONTRACT_NOTE_KEY]
     assert note["presented_decision"] == "undetermined"
-    assert note["exit_code"] == contract.EXIT_BLOCKING_INPUT
+    assert note["exit_code"] == 3
     assert sorted(load(name)["field_errors"]) == note["blocking_field_errors"]
 
 
@@ -156,23 +165,87 @@ def test_json_passes_a_conforming_response_through_unchanged(monkeypatch, tmp_pa
 
 
 def _contradicting_payload() -> dict:
-    """A real blocking payload with a terminal verdict spliced in.
+    """A real blocking payload with a terminal verdict spliced into every
+    place the engine's own forcing sweep scrubs.
 
     Not a shape the current engine produces -- that is the point. A stale
     deployment, a caching proxy or a third-party API-compatible server can
     produce it, and the CLI must not become the component that turns it into
-    a green exit status.
+    a green exit status. Poisoning all five sites (not just the two the first
+    version of this helper touched) is what keeps the scrub code from being
+    dead weight the suite never exercises.
     """
     payload = load("decide_blocking_unknown_field.json")
     payload["decision"] = "eligible"
     payload["explanation"]["decision"] = "eligible"
+    payload["explanation"]["decision_path"] = "CERTIFIED_VIA_FLIGHT_HOURS"
+    payload["trace"] = {
+        "status": "eligible",
+        "path": "CERTIFIED_VIA_FLIGHT_HOURS",
+        "satisfied_requirement": "CERTIFIED_VIA_FLIGHT_HOURS",
+        "group_statuses": {"flight_readiness": "satisfied"},
+    }
     return payload
+
+
+@pytest.mark.parametrize(
+    "site,poison,read_back",
+    [
+        ("decision", lambda p: p.__setitem__("decision", "eligible"), lambda p: p["decision"]),
+        (
+            "explanation.decision",
+            lambda p: p["explanation"].__setitem__("decision", "eligible"),
+            lambda p: p["explanation"]["decision"],
+        ),
+        (
+            "explanation.decision_path",
+            lambda p: p["explanation"].__setitem__("decision_path", "SOME_PATH"),
+            lambda p: p["explanation"].get("decision_path"),
+        ),
+        (
+            "trace.status",
+            lambda p: p.__setitem__("trace", {"status": "eligible"}),
+            lambda p: p["trace"]["status"],
+        ),
+        (
+            "trace.path",
+            lambda p: p.__setitem__("trace", {"status": "undetermined", "path": "SOME_PATH"}),
+            lambda p: p["trace"].get("path"),
+        ),
+    ],
+)
+def test_every_embedded_verdict_copy_is_scrubbed(site, poison, read_back):
+    """One test per scrub site, so removing any single override turns this
+    file red. The engine scrubs all five when a response is blocked; a CLI
+    scrubbing a subset renders `Satisfied by: X` under a blocked result."""
+    payload = load("decide_blocking_unknown_field.json")
+    if not isinstance(payload.get("explanation"), dict):
+        payload["explanation"] = {"groups": []}
+    poison(payload)
+    guarded = contract.guard_response(payload)
+    assert read_back(guarded) in (None, "undetermined"), f"{site} survived the guard"
+    assert any(site.split(".")[-1] in v for v in guarded[contract.CONTRACT_NOTE_KEY]["violations"])
+
+
+def test_blocked_output_never_claims_a_satisfying_path(monkeypatch, tmp_path):
+    """The reviewer's finding: a blocked run with --explain printed
+    `Satisfied by: CERTIFIED_VIA_FLIGHT_HOURS` three times under a
+    `Result: blocked` heading."""
+    result = run_decide(monkeypatch, tmp_path, _contradicting_payload(), extra_args=("--explain",))
+    out = strip(result.output)
+    assert result.exit_code == 3
+    assert "Satisfied by" not in out
+    # The path may still be *named* in the violation report -- that is the
+    # CLI saying what it dropped. What it must never do is present it.
+    claims = [line for line in out.splitlines() if "Contract violation" not in line]
+    assert not any("CERTIFIED_VIA_FLIGHT_HOURS" in line for line in claims), claims
+    assert any("decision_path" in line and "Contract violation" in line for line in out.splitlines())
 
 
 def test_contradicting_server_never_yields_a_positive_human_result(monkeypatch, tmp_path):
     result = run_decide(monkeypatch, tmp_path, _contradicting_payload(), extra_args=("--explain",))
     out = strip(result.output)
-    assert result.exit_code == contract.EXIT_BLOCKING_INPUT
+    assert result.exit_code == 3
     assert "Decision: eligible" not in out
     assert "blocked" in out
     assert "Contract violation" in out
@@ -180,7 +253,7 @@ def test_contradicting_server_never_yields_a_positive_human_result(monkeypatch, 
 
 def test_contradicting_server_never_yields_a_positive_json_result(monkeypatch, tmp_path):
     result = run_decide(monkeypatch, tmp_path, _contradicting_payload(), root_args=("--output", "json"))
-    assert result.exit_code == contract.EXIT_BLOCKING_INPUT
+    assert result.exit_code == 3
     payload = json.loads(strip(result.output))
     assert payload["decision"] == "undetermined"
     assert payload["explanation"]["decision"] == "undetermined"
@@ -232,18 +305,57 @@ def test_terminal_results_render_and_exit_zero(monkeypatch, tmp_path, name, expe
 
 
 @pytest.mark.parametrize(
-    "payload",
+    "payload,expected_exit",
     [
-        {},
-        {"decision": None, "field_errors": None},
-        {"decision": "eligible", "field_errors": "everything is broken"},
-        {"decision": "eligible", "field_errors": ["space.crew.age is wrong"]},
+        ({}, 0),
+        ({"decision": None, "field_errors": None}, 0),
+        ({"decision": "eligible", "field_errors": {}}, 0),
+        # Non-mapping `field_errors`: a contract-breaking server, but errors
+        # are errors -- they block, whatever container they arrive in.
+        ({"decision": "eligible", "field_errors": "everything is broken"}, 3),
+        ({"decision": "eligible", "field_errors": ["space.crew.age is wrong"]}, 3),
+        ({"decision": "eligible", "field_errors": {"space.crew.age": "bad"}}, 3),
     ],
 )
-def test_malformed_response_never_crashes_and_never_overclaims(monkeypatch, tmp_path, payload):
+def test_malformed_response_never_crashes_and_never_overclaims(monkeypatch, tmp_path, payload, expected_exit):
+    """Every case asserts an exact exit code.
+
+    The earlier version guarded its assertions behind `if
+    contract.is_blocked(payload)`, so breaking that predicate made the test
+    vacuous instead of red -- it was reading the very function it was meant
+    to be checking.
+    """
     result = run_decide(monkeypatch, tmp_path, payload)
     out = strip(result.output)
     assert "Traceback" not in out
-    if contract.is_blocked(payload):
-        assert result.exit_code == contract.EXIT_BLOCKING_INPUT
+    assert result.exit_code == expected_exit, out
+    if expected_exit == 3:
         assert "Decision: eligible" not in out
+        assert "blocked" in out
+
+
+@pytest.mark.parametrize(
+    "field_errors,expected_keys",
+    [
+        ({"a": "bad"}, ["a"]),
+        (["first", "second"], ["[0]", "[1]"]),
+        ("everything is broken", ["__field_errors__"]),
+    ],
+)
+def test_every_field_errors_container_shape_blocks(field_errors, expected_keys):
+    """A server returning `field_errors` as a list or a bare string is
+    broken, but it is still reporting rejected inputs -- reading only the
+    mapping shape would treat those as a clean response."""
+    payload = {"decision": "eligible", "field_errors": field_errors}
+    assert contract.is_blocked(payload) is True
+    assert sorted(contract.blocking_field_errors(payload)) == sorted(expected_keys)
+    assert contract.presented_decision(payload) == "undetermined"
+    assert contract.guard_response(payload)["decision"] == "undetermined"
+
+
+def test_presented_decision_reads_the_error_channel():
+    """`presented_decision` must consult `field_errors`, not echo `decision`
+    -- it is the single function every renderer trusts."""
+    assert contract.presented_decision({"decision": "eligible", "field_errors": {"a": "b"}}) == "undetermined"
+    assert contract.presented_decision({"decision": "eligible"}) == "eligible"
+    assert contract.presented_decision({"decision": "not_eligible", "field_errors": {}}) == "not_eligible"

@@ -45,7 +45,14 @@ jobs:
           fi
 
       - name: Build sdist and wheel
-        run: uv build
+        # Pin the build clock: with SOURCE_DATE_EPOCH set the wheel is
+        # byte-identical across builds of an identical tree, so the matrix
+        # jobs agree on its digest. The sdist still varies (gzip header
+        # timestamp) -- see scripts/release-integrity.py.
+        run: |
+          SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)"
+          echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH" >> "$GITHUB_ENV"
+          SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" uv build
 
       - name: Check distribution
         run: |

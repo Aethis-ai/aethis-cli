@@ -132,9 +132,20 @@ def _poison(root: Path, env: Dict[str, str]) -> None:
     env["PYTHONPATH"] = str(root / "poison" / "site")
 
 
-def _assert(condition: bool, message: str, failures: List[str]) -> None:
+#: Assertions the poisoned control MUST trip. If a poisoned run fails for
+#: any other reason -- a missing wheel, a network error, uv absent -- the
+#: control proves nothing: it never got as far as the checks it is meant to
+#: be exercising.
+POISON_MUST_DETECT = ("stale-binary", "version-mismatch")
+
+
+def _assert(condition: bool, message: str, failures: List[str], tag: str = "") -> None:
     if not condition:
-        failures.append(message)
+        failures.append(f"[{tag}] {message}" if tag else message)
+
+
+def _tags(failures: List[str]) -> List[str]:
+    return [f.split("]")[0].lstrip("[") for f in failures if f.startswith("[")]
 
 
 def run_check(
@@ -204,6 +215,7 @@ def run_check(
             bool(binary) and binary.startswith(str(venv)),
             f"the `aethis` on PATH is not the one just installed: {binary or '<not found>'}",
             failures,
+            "stale-binary",
         )
 
         version_out = _run(["aethis", "--version"], env)
@@ -212,17 +224,33 @@ def run_check(
             version_out.returncode == 0 and version_out.stdout.strip() == f"aethis {version}",
             f"`aethis --version` reported {version_out.stdout.strip()!r}, expected 'aethis {version}'",
             failures,
+            "version-mismatch",
         )
 
         help_out = _run(["aethis", "--help"], env)
         help_text = " ".join(help_out.stdout.split())
-        _assert(help_out.returncode == 0, "`aethis --help` did not exit cleanly", failures)
-        _assert("no API key" in help_text, "root help does not state that evaluation needs no API key", failures)
-        _assert("invite-only" in help_text, "root help does not state that authoring is invite-only", failures)
+        _assert(help_out.returncode == 0, "`aethis --help` did not exit cleanly", failures, "help-exit")
+        _assert(
+            "no API key" in help_text,
+            "root help does not state that evaluation needs no API key",
+            failures,
+            "help-no-key",
+        )
+        _assert(
+            "invite-only" in help_text,
+            "root help does not state that authoring is invite-only",
+            failures,
+            "help-invite-only",
+        )
 
         decide_help = _run(["aethis", "decide", "--help"], env)
         decide_text = " ".join(decide_help.stdout.split())
-        _assert("Exit codes" in decide_text, "`aethis decide --help` does not document its exit codes", failures)
+        _assert(
+            "Exit codes" in decide_text,
+            "`aethis decide --help` does not document its exit codes",
+            failures,
+            "help-exit-codes",
+        )
 
         # Nothing the CLI does on a first run may need, or invent, a credential.
         leaked = _run(
@@ -234,7 +262,7 @@ def run_check(
             env,
         )
         visible = [line for line in leaked.stdout.splitlines() if not line.startswith("AETHIS_NONINTERACTIVE")]
-        _assert(not visible, f"credential-shaped variables reached the sandbox: {visible}", failures)
+        _assert(not visible, f"credential-shaped variables reached the sandbox: {visible}", failures, "leaked-env")
 
         credentials = Path(env["XDG_CONFIG_HOME"]) / "aethis" / "credentials"
         legacy = Path(env["HOME"]) / ".config" / "aethis" / "credentials"
@@ -242,6 +270,7 @@ def run_check(
             not credentials.exists() and not legacy.exists(),
             "a credentials file was created by a read-only first run",
             failures,
+            "stray-credentials",
         )
 
         record["duration_seconds"] = round(time.monotonic() - started, 2)
@@ -257,6 +286,11 @@ def run_check(
     record["failures"] = failures
     record["passed"] = not failures
     return record
+
+
+def _detection_tags(failures: List[str]) -> List[str]:
+    """Which named assertions actually tripped."""
+    return _tags(failures)
 
 
 def main() -> int:
@@ -283,14 +317,33 @@ def main() -> int:
     )
 
     if args.poison:
-        # Inverted: the control is only meaningful if the contamination was
-        # detected. A poisoned run that passes means the assertions are inert.
-        record["control_detected_contamination"] = not record["passed"]
-        record["passed"] = not record["passed"]
-        if not record["passed"]:
-            record["failures"] = ["poisoned control PASSED the checks -- the assertions do not bite"]
-        else:
-            record["failures"] = []
+        # A control is only evidence if it reached the checks and tripped the
+        # RIGHT ones. The first version treated any failure as success, then
+        # erased the failure list -- so `rm -rf dist && --poison` "passed" in
+        # 0.25s having installed nothing, and the record could not say what
+        # had been detected.
+        detected = _detection_tags(record["failures"])
+        missing = [tag for tag in POISON_MUST_DETECT if tag not in detected]
+        setup_failures = [f for f in record["failures"] if not f.startswith("[")]
+
+        record["control"] = {
+            "expected_detections": list(POISON_MUST_DETECT),
+            "detected": detected,
+            "missing_detections": missing,
+            "setup_failures": setup_failures,
+            # Kept verbatim: the evidence IS what was detected.
+            "observed_failures": record["failures"],
+        }
+        record["passed"] = not missing and not setup_failures
+        record["failures"] = []
+        if setup_failures:
+            record["failures"].append(
+                "poisoned control never reached the checks (setup failed): " + "; ".join(setup_failures)
+            )
+        if missing:
+            record["failures"].append(
+                "poisoned control did not trip: " + ", ".join(missing) + " -- those assertions do not bite"
+            )
 
     text = json.dumps(record, indent=2, sort_keys=True)
     print(text)

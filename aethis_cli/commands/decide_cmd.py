@@ -55,7 +55,7 @@ def decide(
         aethis decide -b aethis/spacecraft-crew-certification -i '{"space.crew.age": 34, "space.crew.flight_hours": 900}'
         aethis decide -b my_ruleset:20260401-a1b2c3d -i '{"age": 21, "country": "UK"}'
         aethis decide -b my_ruleset:20260401-a1b2c3d --input @inputs.json --explain
-        aethis decide -b aethis/spacecraft-crew-certification -i '{...}' --include-graph-overlay --output json
+        aethis --output json decide -b aethis/spacecraft-crew-certification -i '{...}' --include-graph-overlay
         aethis decide -i '{...}'         # uses ruleset from .aethis/state.json
 
     Input is a JSON object mapping field IDs to values. Use `aethis fields -b <ruleset>`
@@ -99,12 +99,13 @@ def decide(
         raise typer.Exit(code=1)
 
     blocked = contract.is_blocked(result)
+    # Every renderer below reads the *guarded* response, not the raw one, so
+    # human and machine output cannot diverge: whatever the guard scrubs (a
+    # terminal verdict, a satisfying path) is gone before anything is printed.
+    result = contract.guard_response(result)
 
     if is_json_requested():
-        # Emit the server payload, with the contract enforced on it: a blocked
-        # response never carries a terminal verdict into a machine consumer,
-        # and any override is recorded rather than applied silently.
-        emit(contract.guard_response(result))
+        emit(result)
         if blocked:
             raise typer.Exit(code=contract.EXIT_BLOCKING_INPUT)
         return
@@ -135,9 +136,9 @@ def decide(
 
     # --- Logic trace ----------------------------------------------------
     if explain and result.get("trace"):
-        _print_trace(result["trace"])
+        _print_trace(result["trace"], blocked=blocked)
     if explain and result.get("explanation"):
-        _print_explanation(result["explanation"])
+        _print_explanation(result["explanation"], blocked=blocked)
 
     # --- Sources --------------------------------------------------------
     if explain:
@@ -163,11 +164,19 @@ _STATUS_ICONS = {
 _API_STATUS_MAP = {"SAT": "satisfied", "UNSAT": "not_satisfied", "UNKNOWN": "pending"}
 
 
-def _print_trace(trace: dict) -> None:
-    """Print per-group and per-requirement evaluation results."""
+def _print_trace(trace: dict, *, blocked: bool = False) -> None:
+    """Print per-group and per-requirement evaluation results.
+
+    ``blocked`` suppresses every "satisfied by" claim. The guard already
+    strips ``trace.path`` (engine parity), but ``satisfied_requirement`` is a
+    per-criterion fact the engine deliberately leaves in place — printing it
+    as "Satisfied by: X" beside a blocked result would read as the verdict the
+    block exists to withhold. Presentation-level suppression, so the payload
+    still matches the engine's contract byte for byte.
+    """
     console.print("\n[bold]Logic trace — engine path[/bold]")
 
-    if trace.get("path"):
+    if trace.get("path") and not blocked:
         console.print(f"  Satisfied by: [green]{trace['path']}[/green]")
 
     groups = trace.get("group_statuses")
@@ -201,7 +210,7 @@ def _print_trace(trace: dict) -> None:
             else:
                 console.print(f"  {req_id}: {info}")
 
-    if trace.get("satisfied_requirement"):
+    if trace.get("satisfied_requirement") and not blocked:
         console.print(f"\n  Satisfied by: [green]{trace['satisfied_requirement']}[/green]")
 
     if trace.get("failing_requirements"):
@@ -220,7 +229,7 @@ _CRITERION_ICONS = {
 }
 
 
-def _print_explanation(explanation: dict) -> None:
+def _print_explanation(explanation: dict, *, blocked: bool = False) -> None:
     """Print the layered decision explanation.
 
     Shape (see aethis-core public decide route): `{decision, decision_path?,
@@ -234,7 +243,7 @@ def _print_explanation(explanation: dict) -> None:
     )
 
     path = explanation.get("decision_path")
-    if path:
+    if path and not blocked:
         console.print(f"  Satisfied by: [green]{path}[/green]")
 
     for group in explanation.get("groups", []) or []:

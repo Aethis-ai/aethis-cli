@@ -1,0 +1,31 @@
+{
+ "decision_id": "dec_E7uvayMj7VTO8eHG",
+ "inputs_hash": "sha256:683187d13c1e8dfceb9c11330a941fe8158c4ce9ddd827330c0bfce9f0981700",
+ "decision_time": "2026-07-26T04:39:38.675225Z",
+ "engine_version": "aethis-core@0.48.0",
+ "decision": "undetermined",
+ "ruleset_id": null,
+ "slug": null,
+ "rulebook_id": "aethis/spacecraft-certification-book",
+ "ruleset_version": "unknown",
+ "content_digest": null,
+ "fields_evaluated": 11,
+ "fields_provided": 12,
+ "missing_fields": null,
+ "next_question": null,
+ "optimal_path": null,
+ "field_errors": {
+  "space.crew.favourite_biscuit": "Invalid value for field 'space.crew.favourite_biscuit' \u2014 check the field type via /schema"
+ },
+ "trace": null,
+ "explanation": null,
+ "section_results": [
+  {
+   "section_id": "crew",
+   "ruleset_id": null,
+   "status": "pending"
+  }
+ ],
+ "timing": null,
+ "graph_overlay": null
+}

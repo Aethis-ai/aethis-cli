@@ -75,3 +75,23 @@ def test_server_validation_envelope_renders_readably():
     assert "batch" in rendered
     assert "does not accept it" in rendered
     assert "[{'field_values'" not in rendered  # not a raw list repr
+
+
+def test_non_json_success_body_is_an_error_not_a_traceback():
+    """A 200 carrying HTML (an intermediary's error page, a truncated body)
+    must surface as one readable API error, never a JSONDecodeError escaping
+    from the middle of a command."""
+    import httpx
+
+    from aethis_cli.errors import AethisAPIError
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="<html><body>502 Bad Gateway</body></html>")
+
+    client = AethisClient(api_key=None, base_url="https://example.invalid", unsigned=True)
+    client._client = httpx.Client(transport=httpx.MockTransport(handler), base_url="https://example.invalid")
+
+    with pytest.raises(AethisAPIError) as excinfo:
+        client.decide("rs:20260101-abcdef12", {"a": 1})
+    assert "non-JSON response" in str(excinfo.value)
+    assert "502 Bad Gateway" in str(excinfo.value)

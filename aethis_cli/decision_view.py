@@ -49,7 +49,16 @@ def print_blocking_errors(response: Mapping[str, Any]) -> None:
 
     console.print("\n[dim]Check each field id and value type against `aethis fields -b <ruleset>`, then re-run.[/dim]")
 
-    for violation in contract.contract_violations(response):
+    # Read the violations off the guard's own record when the response has
+    # already been guarded (the renderers all work on guarded payloads, whose
+    # contradictions have been scrubbed and would therefore no longer be
+    # detectable by re-deriving them here).
+    note = response.get(contract.CONTRACT_NOTE_KEY)
+    if isinstance(note, dict):
+        violations = note.get("violations") or []
+    else:
+        violations = contract.contract_violations(response)
+    for violation in violations:
         console.print(f"[yellow]![/yellow] Contract violation: {violation}", highlight=False)
 
 
@@ -66,9 +75,23 @@ def print_identity(response: Mapping[str, Any], *, heading: bool = True) -> None
     if ident.rulebook_id:
         console.print(f"  Rulebook:  {ident.rulebook_id}", highlight=False)
     if ident.ruleset_version:
-        style = "red" if ident.ruleset_version == contract.UNRESOLVED_VERSION else ""
-        rendered = f"[{style}]{ident.ruleset_version}[/{style}]" if style else ident.ruleset_version
-        console.print(f"  Version:   {rendered}", highlight=False)
+        unresolved_leaf = ident.ruleset_version == contract.UNRESOLVED_VERSION and not ident.rulebook_id
+        if unresolved_leaf:
+            # A published leaf must never report this; say why it matters.
+            console.print(
+                f"  Version:   [red]{ident.ruleset_version}[/red] "
+                "[dim](a published ruleset should always resolve a version)[/dim]",
+                highlight=False,
+            )
+        elif ident.ruleset_version == contract.UNRESOLVED_VERSION:
+            # Legal for a composite: rulebooks do not yet resolve a single
+            # composition version, so this is expected rather than wrong.
+            console.print(
+                "  Version:   unknown [dim](rulebooks do not yet report a resolved composition version)[/dim]",
+                highlight=False,
+            )
+        else:
+            console.print(f"  Version:   {ident.ruleset_version}", highlight=False)
     if ident.content_digest:
         console.print(f"  Digest:    {ident.content_digest}", highlight=False)
     if ident.engine_version:

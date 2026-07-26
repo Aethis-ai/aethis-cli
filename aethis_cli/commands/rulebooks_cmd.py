@@ -35,9 +35,11 @@ from typing import Any, Optional
 import typer
 from rich.table import Table
 
+from aethis_cli import contract
 from aethis_cli.auth_helpers import resolve_cached_key
 from aethis_cli.client import make_anonymous_client
 from aethis_cli.config import load_client_or_fallback, resolve_base_url_with_source
+from aethis_cli.decision_view import print_blocking_errors, print_identity
 from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel, success
 from aethis_cli.prompts import confirm_or_abort
@@ -621,11 +623,17 @@ def decide_rulebook(
 ) -> None:
     """Evaluate a rulebook against a set of field values.
 
+    Exit codes match `aethis decide`:
+
+        0   a decision was reached (eligible, not_eligible or undetermined)
+        1   the call failed (unreachable API, auth, or an error envelope)
+        3   one or more inputs were rejected, so no decision exists
+
     Examples::
 
         aethis rulebooks decide aethis/uk-fsm -i '{"applicant.age": 6}'
         aethis rulebooks decide aethis/uk-fsm --input-file persona.yaml --explain
-        aethis rulebooks decide aethis/uk-fsm -i '{...}' --include-graph-overlay --output json
+        aethis --output json rulebooks decide aethis/uk-fsm -i '{...}' --include-graph-overlay
     """
     if inputs is None and input_file is None:
         raise typer.BadParameter("Provide field values via --inputs / -i or --input-file.")
@@ -659,8 +667,27 @@ def decide_rulebook(
         error_panel(e)
         raise typer.Exit(code=1)
 
-    if include_graph_overlay and not is_json_requested() and result.get("graph_overlay"):
+    # A rulebook decision is the same decision contract as a ruleset one: a
+    # rejected input means no decision exists, so the same guard, the same
+    # exit code, the same refusal to present a verdict. This surface was
+    # unguarded until the P8 review caught it -- the contract has to live on
+    # every decide path, not just the one the epic was named after.
+    blocked = contract.is_blocked(result)
+    result = contract.guard_response(result)
+
+    if is_json_requested():
+        emit(result)
+        if blocked:
+            raise typer.Exit(code=contract.EXIT_BLOCKING_INPUT)
+        return
+
+    if include_graph_overlay and result.get("graph_overlay"):
         console.print("[dim]Graph overlay included in the response — rerun with --output json to inspect it.[/dim]")
+
+    if blocked:
+        print_blocking_errors(result)
+        print_identity(result)
+        raise typer.Exit(code=contract.EXIT_BLOCKING_INPUT)
 
     emit(result)
 
@@ -755,7 +782,7 @@ def graph_rulebook(
 
         aethis rulebooks graph aethis/uk-fsm
         aethis rulebooks graph aethis/uk-fsm --mermaid
-        aethis rulebooks graph aethis/uk-fsm --output json
+        aethis --output json rulebooks graph aethis/uk-fsm
     """
     _cfg, client = load_client_or_fallback()
     try:

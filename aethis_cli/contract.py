@@ -170,17 +170,29 @@ def contract_violations(response: Mapping[str, Any]) -> List[str]:
                 "when an input was rejected)"
             )
         explanation = response.get("explanation")
-        if isinstance(explanation, Mapping) and explanation.get("decision") in TERMINAL_DECISIONS:
-            violations.append(
-                f"embedded explanation.decision={explanation['decision']!r} contradicts the "
-                "blocking field_errors; presented as 'undetermined'"
-            )
+        if isinstance(explanation, Mapping):
+            if explanation.get("decision") in TERMINAL_DECISIONS:
+                violations.append(
+                    f"embedded explanation.decision={explanation['decision']!r} contradicts the "
+                    "blocking field_errors; presented as 'undetermined'"
+                )
+            if explanation.get("decision_path"):
+                violations.append(
+                    f"embedded explanation.decision_path={explanation['decision_path']!r} claims a "
+                    "satisfying path beside blocking field_errors; dropped"
+                )
         trace = response.get("trace")
-        if isinstance(trace, Mapping) and trace.get("status") in TERMINAL_DECISIONS:
-            violations.append(
-                f"embedded trace.status={trace['status']!r} contradicts the blocking "
-                "field_errors; presented as 'undetermined'"
-            )
+        if isinstance(trace, Mapping):
+            if trace.get("status") in TERMINAL_DECISIONS:
+                violations.append(
+                    f"embedded trace.status={trace['status']!r} contradicts the blocking "
+                    "field_errors; presented as 'undetermined'"
+                )
+            if trace.get("path"):
+                violations.append(
+                    f"embedded trace.path={trace['path']!r} claims a satisfying path beside "
+                    "blocking field_errors; dropped"
+                )
 
     if "ruleset_id" in response and response.get("rulebook_id") is None:
         if response.get("ruleset_version") == UNRESOLVED_VERSION:
@@ -212,14 +224,25 @@ def guard_response(response: Any) -> Any:
     guarded: Dict[str, Any] = copy.deepcopy(dict(response))
 
     if blocked:
+        # Parity with the engine's own forcing sweep
+        # (aethis-core public decide route): a blocked response must carry no
+        # surviving copy of a terminal verdict OR of the path that would have
+        # satisfied it -- top-level `decision`, `explanation.decision`,
+        # `explanation.decision_path`, `trace.status`, `trace.path`. Scrubbing
+        # a strict subset of what the engine scrubs would leave the CLI
+        # presenting "Satisfied by: X" under a blocked result.
         if guarded.get("decision") in TERMINAL_DECISIONS:
             guarded["decision"] = "undetermined"
         explanation = guarded.get("explanation")
-        if isinstance(explanation, dict) and explanation.get("decision") in TERMINAL_DECISIONS:
-            explanation["decision"] = "undetermined"
+        if isinstance(explanation, dict):
+            if explanation.get("decision") in TERMINAL_DECISIONS:
+                explanation["decision"] = "undetermined"
+            explanation.pop("decision_path", None)
         trace = guarded.get("trace")
-        if isinstance(trace, dict) and trace.get("status") in TERMINAL_DECISIONS:
-            trace["status"] = "undetermined"
+        if isinstance(trace, dict):
+            if trace.get("status") in TERMINAL_DECISIONS:
+                trace["status"] = "undetermined"
+            trace.pop("path", None)
 
     note: Dict[str, Any] = {
         "blocking_field_errors": sorted(blocking_field_errors(response)),
@@ -262,6 +285,16 @@ def _clean(value: Any) -> Optional[str]:
     return str(value) if value not in (None, "") else None
 
 
+def _looks_like_a_decision(response: Mapping[str, Any]) -> bool:
+    """True for a response that purports to be a decision.
+
+    Used to decide whether a *missing* identity is worth complaining about:
+    an arbitrary payload has no identity to report, but something claiming to
+    be a decision does.
+    """
+    return any(key in response for key in ("decision", "decision_id", "fields_evaluated"))
+
+
 def resolved_identity(response: Mapping[str, Any]) -> Identity:
     """Extract the immutable-identity envelope from any decision-surface response."""
     if not isinstance(response, Mapping):
@@ -272,7 +305,18 @@ def resolved_identity(response: Mapping[str, Any]) -> Identity:
     ruleset_id = _clean(response.get("ruleset_id"))
 
     unresolved: List[str] = []
-    if ruleset_id and not response.get("rulebook_id"):
+    rulebook_id = response.get("rulebook_id")
+    if ruleset_id and not rulebook_id:
+        if version is None or version == UNRESOLVED_VERSION:
+            unresolved.append("ruleset_version")
+        if digest is None:
+            unresolved.append("content_digest")
+    elif not rulebook_id and _looks_like_a_decision(response):
+        # A decision-shaped response with no artefact identity at all is the
+        # least reproducible case there is, and the one most likely to slip
+        # through silently -- the earlier gate only fired when an id was
+        # already present, so "no identity" printed a bare heading.
+        unresolved.append("ruleset_id")
         if version is None or version == UNRESOLVED_VERSION:
             unresolved.append("ruleset_version")
         if digest is None:
@@ -281,7 +325,7 @@ def resolved_identity(response: Mapping[str, Any]) -> Identity:
     return Identity(
         ruleset_id=ruleset_id,
         slug=_clean(response.get("slug")),
-        rulebook_id=_clean(response.get("rulebook_id")),
+        rulebook_id=_clean(rulebook_id),
         ruleset_version=version,
         content_digest=digest,
         engine_version=_clean(response.get("engine_version")),

@@ -37,7 +37,7 @@ Examples:
     aethis status
     aethis status -p proj_i1HyinBtFJniayUC
     aethis --base-url http://localhost:8080 status
-    aethis status --output json | jq .identity.key_id
+    aethis --output json status | jq .identity.key_id
 """
 
 

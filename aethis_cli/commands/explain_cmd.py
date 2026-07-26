@@ -42,7 +42,7 @@ def explain(
 
         aethis explain -b aethis/spacecraft-crew-certification
         aethis explain -b crew_certification:20260408-cbf63f1f
-        aethis explain --output json     # full envelope: identity + criteria
+        aethis --output json explain -b aethis/spacecraft-crew-certification   # full envelope
         aethis explain                   # uses .aethis/state.json if present
     """
     cfg, client = load_client_or_anon()

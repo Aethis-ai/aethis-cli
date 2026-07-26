@@ -8,6 +8,9 @@ build/
 evidence/
 *-integrity.json
 hermetic-*.json
+# Dropped in the cwd when scripts/gen-contract-fixtures.py runs inside the
+# engine's environment (its logging config opens a file handler).
+app.log
 .pytest_cache/
 .coverage
 .coverage.*

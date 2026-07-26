@@ -7,21 +7,40 @@ machine-readable record:
 
     version + sdist sha256 + wheel sha256 + source commit + repository
 
-The same tuple is produced at three points and must agree at all three:
+## What the tuple is, and what it is not
 
-* **at build time**, from `dist/` in a clean checkout (this script's default);
-* **at release time**, in CI, where the source commit is the tag's commit on
-  protected `main` and the workflow run is the evidence of green checks;
-* **after publication**, against the files PyPI actually serves
-  (`--verify-registry`), which is what proves the registry holds the artefact
-  that was built and not something else.
+It is an **attestation by the job that built the artefact**, not something a
+third party can re-derive. `uv build` is not byte-reproducible here:
+
+* the **wheel** IS byte-identical across builds of an identical tree, but only
+  when `SOURCE_DATE_EPOCH` is set (otherwise embedded timestamps differ);
+* the **sdist** is NOT, even with `SOURCE_DATE_EPOCH`: the archived content is
+  identical, but the gzip header carries a build timestamp, so its `sha256`
+  differs per build.
+
+So a digest proves "these are the bytes that job produced and published"; it
+does not let someone rebuild from the commit and expect the same hash. Two
+builds of one commit legitimately disagree on the sdist digest. Measure it
+rather than believing this note: `--verify-reproducible` builds twice and
+reports which artefacts were stable.
+
+The chain that IS load-bearing:
+
+* **at build time**, the digests of the files in `dist/` are recorded against
+  the commit they were built from, in a clean checkout (`--require-clean`);
+* **at publication**, those exact digests are compared against the files the
+  registry serves (`--verify-registry`) — same bytes, not merely the same
+  version string;
+* the source commit's link to reviewed code is carried by the protected
+  branch and the workflow run, not by the digest.
 
 Non-interactive by construction: no prompts, bounded network timeouts, exit
 code 0 only when every requested check passed.
 
     uv build
     uv run python scripts/release-integrity.py
-    uv run python scripts/release-integrity.py --verify-registry   # after publish
+    uv run python scripts/release-integrity.py --verify-registry       # after publish
+    uv run python scripts/release-integrity.py --verify-reproducible   # measure it
 """
 
 from __future__ import annotations
@@ -29,7 +48,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import subprocess
+import tempfile
 import sys
 import urllib.error
 import urllib.request
@@ -134,6 +155,19 @@ def build_record(dist: Path, *, verify_registry: bool) -> Dict[str, Any]:
     if not record["version_sources_agree"]:
         record["version_mismatch"] = {"pyproject.toml": declared, "aethis_cli/_version.py": module}
 
+    record["reproducibility"] = {
+        "source_date_epoch": os.environ.get("SOURCE_DATE_EPOCH"),
+        "wheel_byte_reproducible": "with SOURCE_DATE_EPOCH set",
+        "sdist_byte_reproducible": False,
+        "note": (
+            "The sdist's archived content is reproducible but its gzip header "
+            "carries a build timestamp, so its sha256 differs per build. These "
+            "digests attest what THIS job built and published; they are not "
+            "re-derivable by rebuilding the commit. Measure with "
+            "--verify-reproducible."
+        ),
+    }
+
     if verify_registry:
         registry = _registry_files(declared)
         record["registry"] = {"index": PYPI_JSON, "files": registry}
@@ -166,6 +200,41 @@ def problems(record: Dict[str, Any], *, require_clean: bool, verify_registry: bo
     return found
 
 
+def measure_reproducibility() -> Dict[str, Any]:
+    """Build twice into scratch directories and report what was stable.
+
+    The claim in this module's docstring is only worth what a measurement
+    says, so this makes it checkable instead of asserted.
+    """
+    digests: Dict[str, list] = {}
+    for _ in range(2):
+        with tempfile.TemporaryDirectory(prefix="aethis-repro-") as tmp:
+            built = subprocess.run(
+                ["uv", "build", "--quiet", "-o", tmp],
+                cwd=REPO,
+                capture_output=True,
+                text=True,
+                timeout=600,
+                check=False,
+            )
+            if built.returncode != 0:
+                return {"error": built.stderr.strip()[:500]}
+            for path in sorted(Path(tmp).glob("*")):
+                if path.suffix == ".whl":
+                    kind = "wheel"
+                elif path.name.endswith(".tar.gz"):
+                    kind = "sdist"
+                else:
+                    continue
+                digests.setdefault(kind, []).append(_sha256(path))
+
+    return {
+        "source_date_epoch": os.environ.get("SOURCE_DATE_EPOCH"),
+        "stable": {kind: len(set(values)) == 1 for kind, values in digests.items()},
+        "digests": digests,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dist", default=str(REPO / "dist"), help="directory holding the built distribution")
@@ -175,10 +244,17 @@ def main() -> int:
         action="store_true",
         help="compare the local build against the files the registry serves",
     )
+    parser.add_argument(
+        "--verify-reproducible",
+        action="store_true",
+        help="build twice and report which artefacts were byte-identical",
+    )
     parser.add_argument("--output", help="also write the record to this path")
     args = parser.parse_args()
 
     record = build_record(Path(args.dist), verify_registry=args.verify_registry)
+    if args.verify_reproducible:
+        record["reproducibility"]["measured"] = measure_reproducibility()
     failures = problems(record, require_clean=args.require_clean, verify_registry=args.verify_registry)
     record["ok"] = not failures
     if failures:

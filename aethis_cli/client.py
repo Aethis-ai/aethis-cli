@@ -114,7 +114,21 @@ class AethisClient:
             self._raise_for_status(resp)
         if resp.status_code == 204:
             return {}
-        return resp.json()
+        try:
+            return resp.json()
+        except ValueError as exc:
+            # A 2xx whose body is not JSON is a broken server, an HTML error
+            # page from an intermediary, or a truncated response. Any of those
+            # is an API error the CLI reports in one line -- never a raw
+            # JSONDecodeError traceback out of the middle of a command.
+            preview = (resp.text or "").strip()[:200]
+            raise AethisAPIError(
+                resp.status_code,
+                "The server returned a non-JSON response"
+                + (f": {preview}" if preview else " with an empty body")
+                + ". If this persists, the API or an intermediary between you "
+                "and it is misbehaving.",
+            ) from exc
 
     @staticmethod
     def _raise_for_status(resp: httpx.Response) -> None:
