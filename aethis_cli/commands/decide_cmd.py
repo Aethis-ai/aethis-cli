@@ -7,8 +7,10 @@ from typing import Optional
 
 import typer
 
+from aethis_cli import contract
 from aethis_cli.commands._id_utils import require_ruleset_id
 from aethis_cli.config import load_client_or_anon, read_state
+from aethis_cli.decision_view import print_blocking_errors, print_identity, print_sources
 from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel
 from aethis_cli.render import emit, is_json_requested
@@ -36,7 +38,17 @@ def decide(
         ),
     ),
 ) -> None:
-    """Evaluate eligibility against a published ruleset. No API key required for public rulesets.
+    """Evaluate eligibility against a published ruleset. No API key required.
+
+    Evaluation is open to everyone: `decide`, `fields` and `explain` call
+    public endpoints and work with no account and no key. Authoring rulesets
+    (`generate`, `test`, `publish`) is invite-only -- see `aethis login --help`.
+
+    Exit codes:
+
+        0   a decision was reached (eligible, not_eligible or undetermined)
+        1   the call failed (unreachable API, auth, or an error envelope)
+        3   one or more inputs were rejected, so no decision exists
 
     Examples:
 
@@ -86,35 +98,60 @@ def decide(
         error_panel(e)
         raise typer.Exit(code=1)
 
+    blocked = contract.is_blocked(result)
+
     if is_json_requested():
-        emit(result)
+        # Emit the server payload, with the contract enforced on it: a blocked
+        # response never carries a terminal verdict into a machine consumer,
+        # and any override is recorded rather than applied silently.
+        emit(contract.guard_response(result))
+        if blocked:
+            raise typer.Exit(code=contract.EXIT_BLOCKING_INPUT)
         return
 
     if include_graph_overlay and result.get("graph_overlay"):
         console.print("[dim]Graph overlay included in the response — rerun with --output json to inspect it.[/dim]")
 
-    decision = result.get("decision", "unknown")
-    color = {"eligible": "green", "not_eligible": "red"}.get(decision, "yellow")
-    console.print(f"\nDecision: [bold {color}]{decision}[/bold {color}]")
-    console.print(f"Ruleset:   {result.get('ruleset_id')}")
-    console.print(f"Fields:   {result.get('fields_provided')}/{result.get('fields_evaluated')} provided")
-    if result.get("missing_fields"):
-        console.print(f"Missing:  {', '.join(result['missing_fields'])}")
-    if result.get("field_errors"):
-        for fid, err in result["field_errors"].items():
-            console.print(f"  [red]! {fid}: {err}[/red]")
+    # --- Result ---------------------------------------------------------
+    if blocked:
+        print_blocking_errors(result)
+    else:
+        decision = contract.presented_decision(result)
+        color = {"eligible": "green", "not_eligible": "red"}.get(decision, "yellow")
+        console.print("\n[bold]Result[/bold]")
+        console.print(f"  Decision: [bold {color}]{decision}[/bold {color}]")
+        console.print(f"  Fields:   {result.get('fields_provided')}/{result.get('fields_evaluated')} provided")
+        if result.get("missing_fields"):
+            console.print(f"  Missing:  {', '.join(result['missing_fields'])}")
 
-    nq = result.get("next_question")
-    if nq:
-        console.print(f"\nNext question: [bold]{nq['question']}[/bold]  ({nq['field_id']}, weight={nq['weight']})")
-    path = result.get("optimal_path")
-    if path:
-        console.print(f"Remaining:    {len(path)} questions (total weight={sum(q['weight'] for q in path)})")
+        nq = result.get("next_question")
+        if nq:
+            console.print(f"  Next question: [bold]{nq['question']}[/bold]  ({nq['field_id']}, weight={nq['weight']})")
+        path = result.get("optimal_path")
+        if path:
+            console.print(f"  Remaining:     {len(path)} questions (total weight={sum(q['weight'] for q in path)})")
 
+    print_identity(result)
+
+    # --- Logic trace ----------------------------------------------------
     if explain and result.get("trace"):
         _print_trace(result["trace"])
     if explain and result.get("explanation"):
         _print_explanation(result["explanation"])
+
+    # --- Sources --------------------------------------------------------
+    if explain:
+        print_sources(
+            contract.iter_explanation_sources(result.get("explanation")),
+            empty_note=(
+                "No published source references for the criteria in this "
+                "explanation. Citations are attached when a ruleset is "
+                "published under the source-reference contract."
+            ),
+        )
+
+    if blocked:
+        raise typer.Exit(code=contract.EXIT_BLOCKING_INPUT)
 
 
 _STATUS_ICONS = {
@@ -128,7 +165,7 @@ _API_STATUS_MAP = {"SAT": "satisfied", "UNSAT": "not_satisfied", "UNKNOWN": "pen
 
 def _print_trace(trace: dict) -> None:
     """Print per-group and per-requirement evaluation results."""
-    console.print("\n[bold]Reasoning[/bold]")
+    console.print("\n[bold]Logic trace — engine path[/bold]")
 
     if trace.get("path"):
         console.print(f"  Satisfied by: [green]{trace['path']}[/green]")
@@ -190,7 +227,11 @@ def _print_explanation(explanation: dict) -> None:
     groups: [{group, status, criteria: [{criterion_id, title, status,
     supporting_facts?, source_refs?}]}], unused_facts}`.
     """
-    console.print("\n[bold]Rules[/bold]")
+    console.print("\n[bold]Logic trace — criteria[/bold]")
+    console.print(
+        "  [dim]Per-criterion evaluation. Explanatory only — the Result block "
+        "above is the outcome; criterion statuses never aggregate into one.[/dim]"
+    )
 
     path = explanation.get("decision_path")
     if path:

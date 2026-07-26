@@ -1,0 +1,82 @@
+{
+  "decide": {
+    "additional_properties": false,
+    "envelope_identity_fields": [
+      "content_digest",
+      "field_errors",
+      "ruleset_id",
+      "ruleset_version",
+      "slug"
+    ],
+    "include_explanation_in_body": true,
+    "method": "POST",
+    "path": "/api/v1/public/decide",
+    "query_parameters": [
+      "x-api-key"
+    ],
+    "request_schema": "DecideRequest",
+    "response_schema": "DecideResponse",
+    "success_status": "200"
+  },
+  "explain": {
+    "criterion_source_references_ref": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/components/schemas/SourceReference"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Publish-resolved, validated source references for this criterion. Present only on rulesets published under the fail-closed public citation contract.",
+      "title": "Source References"
+    },
+    "envelope_fields": [
+      "content_digest",
+      "criteria",
+      "ruleset_id",
+      "ruleset_version",
+      "slug"
+    ],
+    "method": "GET",
+    "path": "/api/v1/public/rulesets/{ruleset_id}/explain",
+    "response_schema": "ExplainRulesetResponse",
+    "success_status": "200"
+  },
+  "source_reference": {
+    "properties": [
+      "authority",
+      "content_digest",
+      "deep_link",
+      "licence",
+      "locator",
+      "media_type",
+      "quote",
+      "schema_version",
+      "source_date",
+      "source_id",
+      "source_version",
+      "title",
+      "url",
+      "verified_at"
+    ],
+    "quote_required": [
+      "exact"
+    ],
+    "required": [
+      "authority",
+      "content_digest",
+      "deep_link",
+      "licence",
+      "quote",
+      "source_id",
+      "title",
+      "url",
+      "verified_at"
+    ],
+    "schema_version_const": 1
+  }
+}

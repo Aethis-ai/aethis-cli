@@ -49,13 +49,33 @@ jobs:
 
       - name: Check distribution
         run: |
-          pip install --quiet "twine>=6.0" "packaging>=24.2"
-          twine check dist/*
+          uv tool install --quiet "twine>=6.0"
+          uv tool run twine check dist/*
+
+      - name: Release integrity tuple
+        # Binds the exact bytes about to be published to the reviewed commit
+        # they were built from. --require-clean refuses to release an artefact
+        # that corresponds to no commit at all.
+        run: |
+          mkdir -p evidence
+          uv run python scripts/release-integrity.py --require-clean --output evidence/release-integrity.json
+          cat evidence/release-integrity.json >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Hermetic first-user install (built distribution)
+        run: uv run python scripts/hermetic-install-check.py --source dist --output evidence/hermetic-prepublish.json
+
+      - name: Poisoned-cache negative control
+        run: uv run python scripts/hermetic-install-check.py --source dist --poison
 
       - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-evidence-build
+          path: evidence/
 
   publish:
     needs: build
@@ -72,6 +92,11 @@ jobs:
         with:
           name: dist
           path: dist/
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-evidence-build
+          path: evidence/
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
@@ -93,12 +118,68 @@ jobs:
           done
           exit 1
 
+      - name: Verify the published files match the built distribution
+        # Same version string is not the same artefact. Compare the sha256 the
+        # registry serves against the digests recorded when these bytes were
+        # built, so a substituted file cannot pass as this release.
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}" python3 - <<'PY'
+          import json, os, sys, urllib.request
+
+          version = os.environ["VERSION"]
+          built = json.load(open("evidence/release-integrity.json"))["distribution"]
+          with urllib.request.urlopen("https://pypi.org/pypi/aethis-cli/json", timeout=30) as fh:
+              published = json.load(fh)["releases"].get(version, [])
+
+          by_kind = {
+              "wheel" if f["packagetype"] == "bdist_wheel" else "sdist": f for f in published
+          }
+          failures = []
+          for kind, local in built.items():
+              remote = by_kind.get(kind)
+              if remote is None:
+                  failures.append(f"{kind} missing from the registry")
+              elif remote["digests"]["sha256"] != local["sha256"]:
+                  failures.append(
+                      f"{kind} digest mismatch: built {local['sha256']}, registry "
+                      f"{remote['digests']['sha256']}"
+                  )
+              else:
+                  print(f"{kind}: {remote['filename']} sha256={local['sha256']} matches the build")
+          if failures:
+              sys.exit("; ".join(failures))
+          PY
+
       - name: Check out repo at the published tag (for CHANGELOG.md)
         uses: actions/checkout@v6
         with:
           ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
           fetch-tags: true
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+
+      - name: Hermetic first-user install from the registry
+        # The post-publish half of the first-user proof: temporary
+        # HOME/XDG/cache, no credentials, empty cache, installed from the
+        # registry exactly as a new developer would.
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          uv run python scripts/hermetic-install-check.py \
+            --source registry --version "${RELEASE_TAG#v}" \
+            --output hermetic-postpublish.json
+          cat hermetic-postpublish.json >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-evidence
+          path: hermetic-postpublish.json
 
       - name: Cut GitHub Release from CHANGELOG
         # Revive the subscribe-able GitHub Releases channel: on every publish,

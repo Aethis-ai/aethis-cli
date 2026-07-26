@@ -9,6 +9,7 @@ import httpx
 
 from aethis_cli._version import __version__
 from aethis_cli.auth_providers import AuthProvider, ProviderContext, get_provider
+from aethis_cli.contract import check_decide_options
 from aethis_cli.errors import AethisAPIError
 
 # Callback signature for the lazy-auth refresh hook. Receives ``force_browser``
@@ -126,6 +127,13 @@ class AethisClient:
     # -- Decision API --
 
     def decide(self, ruleset_id: str, field_values: dict, **opts: Any) -> dict:
+        """Evaluate ``field_values`` against a published ruleset.
+
+        The API rejects an unknown top-level body member with a 422 rather
+        than ignoring it, so an undeclared option is caught here and named
+        locally instead of costing a round-trip.
+        """
+        check_decide_options(opts)
         return self._request(
             "POST",
             "/api/v1/public/decide",
@@ -524,6 +532,7 @@ class AethisClient:
         of ``ruleset_id``. The engine resolves the rulebook's live ruleset
         pins and runs the composed evaluation.
         """
+        check_decide_options(opts)
         return self._request(
             "POST",
             "/api/v1/public/decide",

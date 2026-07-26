@@ -3,6 +3,11 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+# Release evidence written by scripts/release-integrity.py and
+# scripts/hermetic-install-check.py; regenerated per run, never committed.
+evidence/
+*-integrity.json
+hermetic-*.json
 .pytest_cache/
 .coverage
 .coverage.*

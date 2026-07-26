@@ -31,6 +31,50 @@ jobs:
       - name: Test
         run: uv run pytest tests/ --ignore=tests/e2e -v --cov=aethis_cli --cov-report=term-missing
 
+  hermetic:
+    # Does it work for someone who has never run it? A temporary
+    # HOME/XDG/cache, no Aethis or provider credentials, an empty-cache
+    # install from the built distribution only, across every supported
+    # runtime/OS/architecture -- plus a poisoned negative control, so a check
+    # that could not fail never passes for the wrong reason.
+    name: hermetic first-user install (${{ matrix.os }} / py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Build distribution
+        run: uv build
+
+      - name: Release integrity tuple
+        run: uv run python scripts/release-integrity.py --output integrity-${{ matrix.os }}-${{ matrix.python-version }}.json
+
+      - name: Hermetic install
+        run: uv run python scripts/hermetic-install-check.py --source dist --python ${{ matrix.python-version }} --output hermetic-${{ matrix.os }}-${{ matrix.python-version }}.json
+
+      - name: Poisoned-cache negative control
+        run: uv run python scripts/hermetic-install-check.py --source dist --python ${{ matrix.python-version }} --poison
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-evidence-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: |
+            integrity-*.json
+            hermetic-*.json
+
   lint:
     runs-on: ubuntu-latest
     steps:

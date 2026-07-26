@@ -1,0 +1,35 @@
+{
+ "decision_id": "dec_Htvo04W1-ozBdj7n",
+ "inputs_hash": "sha256:d648ab0d14ec41b5fb733e3efbd434776f125fc5dcdaa12783be60fad57b0004",
+ "decision_time": "2026-07-26T04:39:39.047856Z",
+ "engine_version": "aethis-core@0.48.0",
+ "decision": "undetermined",
+ "ruleset_id": "spacecraft-crew-certification:20260407-933531f7",
+ "slug": "aethis/spacecraft-crew-certification",
+ "rulebook_id": null,
+ "ruleset_version": "v1",
+ "content_digest": "sha256:2abb79e26d630c4bb84f3dcfe79c52e45eaed71087270b27cf87f027a6c1e736",
+ "fields_evaluated": 11,
+ "fields_provided": 3,
+ "missing_fields": [
+  "space.crew.flight_hours",
+  "space.crew.has_pilot_license",
+  "space.crew.has_gaa_exam",
+  "space.crew.has_approved_provider_cert",
+  "space.medical.cert_valid",
+  "space.mission.type",
+  "space.crew.has_radiation_cert",
+  "space.vessel.propulsion_type",
+  "space.crew.has_towel"
+ ],
+ "next_question": null,
+ "optimal_path": null,
+ "field_errors": {
+  "space.crew.flight_hours": "Invalid value for field 'space.crew.flight_hours' \u2014 check the field type via /schema"
+ },
+ "trace": null,
+ "explanation": null,
+ "section_results": null,
+ "timing": null,
+ "graph_overlay": null
+}

@@ -176,8 +176,10 @@ def require_auth_or_login_inline(
         # ``--profile anonymous`` is an explicit "use no key" — surface that
         # decision instead of silently falling into the browser flow.
         message = (
-            "Active profile is 'anonymous' — this command requires an API key. "
-            "Switch profiles with `aethis profile use <name>` or pass --profile <name>."
+            "Active profile is 'anonymous' — this command is an authoring "
+            "command and needs an API key. Switch profiles with `aethis "
+            "profile use <name>` or pass --profile <name>. Authoring is "
+            "invite-only — request access at https://aethis.ai/developer-access."
         )
         from aethis_cli.output import console
 
@@ -196,7 +198,12 @@ def require_auth_or_login_inline(
         # paths keeps stderr consistent for users who pipe / log the CLI.
         from aethis_cli.output import console
 
-        message = "No API key found. Run 'aethis login' to authenticate, set AETHIS_API_KEY, or pass --api-key."
+        message = (
+            "No API key found. Run 'aethis login' to authenticate, set "
+            "AETHIS_API_KEY, or pass --api-key. Authoring is invite-only — "
+            "request access at https://aethis.ai/developer-access. Evaluating "
+            "published rulesets (decide / fields / explain) needs no key."
+        )
         console.print(f"[red]Auth required:[/red] {message}")
         raise AuthRequired(message)
 
@@ -222,7 +229,11 @@ def require_auth_or_login_inline(
         proceed = _prompt_yes_no("Open browser to sign in?", default=True)
 
     if not proceed:
-        message = "Authentication declined. Run 'aethis login' to authenticate, set AETHIS_API_KEY, or pass --api-key."
+        message = (
+            "Authentication declined. Run 'aethis login' to authenticate, set "
+            "AETHIS_API_KEY, or pass --api-key. Authoring is invite-only — "
+            "request access at https://aethis.ai/developer-access."
+        )
         console.print(f"[red]Auth required:[/red] {message}")
         raise AuthRequired(message)
 

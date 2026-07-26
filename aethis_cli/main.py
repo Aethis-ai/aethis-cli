@@ -56,14 +56,15 @@ def _version_callback(value: bool) -> None:
 _APP_HELP = """
 Author, test, and publish rulesets via the Aethis developer API.
 
-No account needed to explore:
+Evaluation is open to everyone — no account, no API key, no sign-up:
 
-    aethis rulesets list                # browse public rulesets (no key needed)
+    aethis rulesets list                # browse the public catalogue
     aethis fields -b <ruleset>          # show required fields
     aethis explain -b <ruleset>         # human-readable rules for a ruleset
     aethis decide -b <ruleset> -i '{"age": 21}'   # evaluate eligibility
 
-Authoring (API key required):
+Authoring is invite-only (API key required) — request access at
+https://aethis.ai/developer-access:
 
     aethis login                        # sign in and cache your key
     aethis status                       # what server / key / project am I on?
@@ -71,6 +72,9 @@ Authoring (API key required):
     aethis init                         # scaffold a new project dir
     aethis generate --poll              # generate + poll until done
     aethis test && aethis publish       # gate on tests, then publish
+
+Exit codes: 0 success · 1 the call failed · 3 an input was rejected, so no
+decision exists (see `aethis decide --help`).
 
 Run `aethis <command> --help` for per-command examples.
 """

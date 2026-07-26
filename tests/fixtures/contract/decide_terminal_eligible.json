@@ -1,0 +1,192 @@
+{
+ "decision_id": "dec_QSwcTYgkr21KOyRh",
+ "inputs_hash": "sha256:7e384909fe2d4525f92663d18e606e0581af7a2da8bfd354697fbd5dcf8745b0",
+ "decision_time": "2026-07-26T04:39:38.481195Z",
+ "engine_version": "aethis-core@0.48.0",
+ "decision": "eligible",
+ "ruleset_id": "spacecraft-crew-certification:20260407-933531f7",
+ "slug": "aethis/spacecraft-crew-certification",
+ "rulebook_id": null,
+ "ruleset_version": "v1",
+ "content_digest": "sha256:2abb79e26d630c4bb84f3dcfe79c52e45eaed71087270b27cf87f027a6c1e736",
+ "fields_evaluated": 11,
+ "fields_provided": 11,
+ "missing_fields": null,
+ "next_question": null,
+ "optimal_path": null,
+ "field_errors": null,
+ "trace": {
+  "status": "eligible",
+  "path": "species_not_vogon",
+  "answered": [
+   "space.crew.species",
+   "space.crew.flight_hours",
+   "space.crew.age",
+   "space.medical.cert_valid",
+   "space.mission.type",
+   "space.crew.has_radiation_cert",
+   "space.crew.has_towel",
+   "space.vessel.propulsion_type",
+   "space.crew.has_pilot_license",
+   "space.crew.has_gaa_exam",
+   "space.crew.has_approved_provider_cert"
+  ],
+  "group_statuses": {
+   "species_eligibility": "satisfied",
+   "flight_readiness": "satisfied",
+   "medical_certification": "satisfied",
+   "medical_cert_validity": "satisfied",
+   "radiation_certification": "satisfied",
+   "propulsion_compliance": "satisfied",
+   "towel_compliance": "satisfied"
+  }
+ },
+ "explanation": {
+  "decision": "eligible",
+  "groups": [
+   {
+    "group": "species_eligibility",
+    "status": "satisfied",
+    "criteria": [
+     {
+      "criterion_id": "species_not_vogon",
+      "title": "Applicant must not be a Vogon (Section 3)",
+      "status": "satisfied",
+      "supporting_facts": [
+       {
+        "field": "space.crew.species",
+        "value": "human"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "group": "flight_readiness",
+    "status": "satisfied",
+    "criteria": [
+     {
+      "criterion_id": "flight_readiness",
+      "title": "Flight readiness or valid exemption (Sections 4 & 6)",
+      "status": "satisfied",
+      "supporting_facts": [
+       {
+        "field": "space.crew.flight_hours",
+        "value": 1200
+       },
+       {
+        "field": "space.crew.has_pilot_license",
+        "value": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "group": "medical_certification",
+    "status": "satisfied",
+    "criteria": [
+     {
+      "criterion_id": "medical_cert_route_a",
+      "title": "Medical certificate \u2014 Route A: GAA examination (Section 5(1)(a))",
+      "status": "satisfied",
+      "supporting_facts": [
+       {
+        "field": "space.crew.has_gaa_exam",
+        "value": true
+       }
+      ]
+     },
+     {
+      "criterion_id": "medical_cert_route_b",
+      "title": "Medical certificate \u2014 Route B: approved provider (Section 5(1)(b))",
+      "status": "satisfied",
+      "supporting_facts": [
+       {
+        "field": "space.crew.has_approved_provider_cert",
+        "value": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "group": "medical_cert_validity",
+    "status": "satisfied",
+    "criteria": [
+     {
+      "criterion_id": "medical_cert_valid",
+      "title": "Medical certificate must be within validity period (Section 5A)",
+      "status": "satisfied",
+      "supporting_facts": [
+       {
+        "field": "space.medical.cert_valid",
+        "value": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "group": "radiation_certification",
+    "status": "satisfied",
+    "criteria": [
+     {
+      "criterion_id": "radiation_cert",
+      "title": "Radiation protection certificate required for orbital missions (Section 7)",
+      "status": "satisfied",
+      "supporting_facts": [
+       {
+        "field": "space.mission.type",
+        "value": "orbital"
+       },
+       {
+        "field": "space.crew.has_radiation_cert",
+        "value": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "group": "propulsion_compliance",
+    "status": "satisfied",
+    "criteria": [
+     {
+      "criterion_id": "propulsion_type",
+      "title": "Vessel propulsion must be an approved type (Section 8)",
+      "status": "satisfied",
+      "supporting_facts": [
+       {
+        "field": "space.vessel.propulsion_type",
+        "value": "bistromathics"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "group": "towel_compliance",
+    "status": "satisfied",
+    "criteria": [
+     {
+      "criterion_id": "has_towel",
+      "title": "Applicant must carry a towel (Section 9)",
+      "status": "satisfied",
+      "supporting_facts": [
+       {
+        "field": "space.crew.has_towel",
+        "value": true
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "unused_facts": [],
+  "decision_path": "species_not_vogon"
+ },
+ "section_results": null,
+ "timing": null,
+ "graph_overlay": null
+}

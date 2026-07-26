@@ -1,0 +1,72 @@
+{
+ "ruleset_id": "spacecraft-crew-certification:20260407-933531f7",
+ "slug": "aethis/spacecraft-crew-certification",
+ "ruleset_version": "v1",
+ "content_digest": "sha256:2abb79e26d630c4bb84f3dcfe79c52e45eaed71087270b27cf87f027a6c1e736",
+ "criteria": [
+  {
+   "criterion_id": "species_not_vogon",
+   "group": "species_eligibility",
+   "title": "Applicant must not be a Vogon (Section 3)",
+   "rule_text": "NOT (space.crew.species equals \"Vogon\")",
+   "source_refs": null,
+   "source_references": null
+  },
+  {
+   "criterion_id": "flight_readiness",
+   "group": "flight_readiness",
+   "title": "Flight readiness or valid exemption (Sections 4 & 6)",
+   "rule_text": "OR(\n  ( AND space.crew.flight_hours is at least 500 AND space.crew.has_pilot_license equals true),\n  ( AND space.crew.age is at least 60 AND space.mission.type is one of \"suborbital\" or \"lunar\"),\n  space.crew.flight_hours is at least 1000\n)",
+   "source_refs": null,
+   "source_references": null
+  },
+  {
+   "criterion_id": "medical_cert_route_a",
+   "group": "medical_certification",
+   "title": "Medical certificate \u2014 Route A: GAA examination (Section 5(1)(a))",
+   "rule_text": "space.crew.has_gaa_exam equals true",
+   "source_refs": null,
+   "source_references": null
+  },
+  {
+   "criterion_id": "medical_cert_route_b",
+   "group": "medical_certification",
+   "title": "Medical certificate \u2014 Route B: approved provider (Section 5(1)(b))",
+   "rule_text": "space.crew.has_approved_provider_cert equals true",
+   "source_refs": null,
+   "source_references": null
+  },
+  {
+   "criterion_id": "medical_cert_valid",
+   "group": "medical_cert_validity",
+   "title": "Medical certificate must be within validity period (Section 5A)",
+   "rule_text": "space.medical.cert_valid equals true",
+   "source_refs": null,
+   "source_references": null
+  },
+  {
+   "criterion_id": "radiation_cert",
+   "group": "radiation_certification",
+   "title": "Radiation protection certificate required for orbital missions (Section 7)",
+   "rule_text": "IF space.mission.type equals \"orbital\" THEN space.crew.has_radiation_cert equals true",
+   "source_refs": null,
+   "source_references": null
+  },
+  {
+   "criterion_id": "propulsion_type",
+   "group": "propulsion_compliance",
+   "title": "Vessel propulsion must be an approved type (Section 8)",
+   "rule_text": "space.vessel.propulsion_type is one of \"Infinite Improbability Drive\", \"Bistromathics\", or \"Heart of Gold Special\"",
+   "source_refs": null,
+   "source_references": null
+  },
+  {
+   "criterion_id": "has_towel",
+   "group": "towel_compliance",
+   "title": "Applicant must carry a towel (Section 9)",
+   "rule_text": "space.crew.has_towel equals true",
+   "source_refs": null,
+   "source_references": null
+  }
+ ]
+}

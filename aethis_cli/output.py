@@ -16,6 +16,24 @@ def format_error_detail(detail: object) -> str:
     missing_permissions}``) becomes a human line naming the missing scope
     rather than a raw ``dict`` repr; a plain-string detail passes through.
     """
+    if isinstance(detail, list):
+        # FastAPI request-validation envelope: a list of
+        # {type, loc, msg, input} entries. The API forbids unknown top-level
+        # request keys, so "extra_forbidden" is a shape a caller will hit --
+        # naming the offending member beats printing a raw list repr.
+        parts = []
+        for item in detail:
+            if not isinstance(item, dict):
+                parts.append(str(item))
+                continue
+            loc = item.get("loc") or []
+            where = ".".join(str(p) for p in loc if p != "body") if isinstance(loc, list) else str(loc)
+            msg = item.get("msg") or item.get("type") or "invalid"
+            kind = item.get("type")
+            if kind == "extra_forbidden":
+                msg = "not a member of this request; the API does not accept it"
+            parts.append(f"{where or 'request'}: {msg}" if where or msg else str(item))
+        return "Request rejected — " + "; ".join(parts) if parts else "Request rejected"
     if isinstance(detail, dict):
         reason = detail.get("reason_code", "unknown")
         action = detail.get("action", "unknown")
