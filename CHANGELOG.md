@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **fix: no spurious traceback when a login callback is cancelled or times out.** The OAuth callback server closed its socket while its background thread was still waiting on it, so the thread died on `ValueError: Invalid file descriptor: -1` and printed an unhandled-exception traceback after `aethis login` timed out. The serving thread is now signalled before the socket closes, and treats a closed socket as its exit condition rather than an error.
+
 ## 0.29.0 (2026-07-21)
 
 - **feat: `aethis usage`** — show your rate-limit budget per operation class (decide / generate / author / read / keys / admin) as a table: used / limit / remaining / reset, over the rolling 24h window. `generate` (LLM rule generation) is the scarce class; browsing and status polling (`read`) are effectively unlimited. `--json`/piped emits the raw `/usage` payload. New `AethisClient.usage()`.
