@@ -73,13 +73,22 @@ class OAuthCallbackServer:
 
     def __init__(self) -> None:
         self._server: Optional[_AuthHTTPServer] = None
+        self._stop = threading.Event()
         self.port: int = 0
 
     def _serve_until_auth(self) -> None:
-        """Handle requests until we get the auth callback or server is closed."""
+        """Handle requests until we get the auth callback or the server closes."""
         assert self._server is not None
-        while not (self._server.auth_code or self._server.auth_error):
-            self._server.handle_request()
+        while not self._stop.is_set() and not (self._server.auth_code or self._server.auth_error):
+            try:
+                self._server.handle_request()
+            except (OSError, ValueError):
+                # shutdown() closed the socket out from under this thread. That
+                # is how this loop is meant to end, not a failure -- without
+                # this, the closed descriptor surfaces as an unhandled
+                # exception in a background thread ("Invalid file descriptor:
+                # -1"), printing a spurious traceback after a login times out.
+                return
 
     def start(self) -> int:
         """Bind to port 9876 and start serving in a background thread.
@@ -92,6 +101,7 @@ class OAuthCallbackServer:
             self._server = _AuthHTTPServer(("127.0.0.1", port), _CallbackHandler)
             self._server.timeout = 5.0  # Per-request timeout for the loop
             self.port = port
+            self._stop.clear()
             thread = threading.Thread(target=self._serve_until_auth, daemon=True)
             thread.start()
             return port
@@ -114,6 +124,9 @@ class OAuthCallbackServer:
         return None, None, None
 
     def shutdown(self) -> None:
+        # Signal the serving thread before closing the socket, so it can leave
+        # via the loop condition rather than by tripping over a dead descriptor.
+        self._stop.set()
         if self._server:
             self._server.server_close()
 
