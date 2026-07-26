@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **ci(publish): the downstream-unstick sweep now reaches every consumer repo.** The `unstick-downstream` job searched a single owner, so a PR carrying an `aethis-needs: aethis-cli` marker in a repo under a different owner was never found and sat as a draft indefinitely after the release it was waiting for went out. It now queries each consumer repo individually with `gh pr list --repo`, which is genuinely repo-scoped, and matches the marker against the PR body returned by that same call (one request per repo instead of a search plus a fetch per hit). A repo the token cannot read is reported as a warning instead of failing the whole sweep. No package or runtime change.
+
 ## 0.30.0 (2026-07-26)
 
 Safety and provenance for everything the CLI reads back from the API.
