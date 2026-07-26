@@ -236,8 +236,8 @@ jobs:
             -d "{\"event_type\":\"release-package-published\",\"client_payload\":{\"package\":\"aethis-cli\",\"version\":\"${RELEASE_TAG#v}\",\"tag\":\"$RELEASE_TAG\"}}"
 
   unstick-downstream:
-    # After a successful publish, find downstream PRs across the Aethis-ai org
-    # that declared a dependency on this aethis-cli release via the marker
+    # After a successful publish, find downstream PRs that declared a dependency
+    # on this aethis-cli release via the marker
     #   <!-- aethis-needs: aethis-cli >= X.Y.Z -->
     # in their PR body. For each PR whose constraint is satisfied by the just-
     # published version, post a comment and flip the PR from draft to ready.
@@ -252,7 +252,9 @@ jobs:
         env:
           # Cross-repo PR mutation needs a token with `pull-requests:write` on
           # the *target* repo, which the default GITHUB_TOKEN doesn't have.
-          # Reuses the same workspace dispatch token (PAT scoped to the org).
+          # Reuses the same workspace dispatch token. The consumer repos span
+          # two owners, so the token must reach both; any repo it cannot read is
+          # reported as a warning rather than failing the sweep.
           GH_TOKEN: ${{ secrets.WORKSPACE_SYNC_TOKEN }}
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
@@ -271,33 +273,71 @@ jobs:
               re.IGNORECASE,
           )
 
+          # Repos that may carry an `aethis-needs: aethis-cli` marker. They span
+          # two owners, so an owner-scoped query cannot see all of them; each is
+          # queried individually with `gh pr list --repo`, which is genuinely
+          # repo-scoped (unlike `gh search --repo`, whose filter is a query
+          # qualifier against the global search index). The canonical
+          # enumeration lives in the aethis-workspace registry
+          # (`scripts/workspace-repos`), which this repo cannot read, so the
+          # list is declared here; keep the two in step when a consumer is
+          # added.
+          REPOS = [
+              "Aethis-ai/aethis-workspace",
+              "Aethis-ai/aethis-examples",
+              "Aethis-ai/aethis-examples-internal",
+              "Aethis-ai/aethis-mcp",
+              "Aethis-ai/aethis-sdk-python",
+              "Aethis-ai/tda-server",
+              "Aethis-ai/docs",
+              "Paul-Simpson/ok_swift",
+              "Paul-Simpson/aethis.ai",
+              "Paul-Simpson/aethis.law",
+          ]
+
           def vtuple(v): return tuple(int(p) for p in v.split("."))
 
           def gh(*args):
               out = subprocess.check_output(["gh"] + list(args))
               return out.decode()
 
-          search = gh(
-              "search", "prs",
-              "--owner", "Aethis-ai",
-              "--state", "open",
-              "aethis-needs: aethis-cli",
-              "--json", "repository,number,title,isDraft,url",
-              "--limit", "100",
-          )
-          prs = json.loads(search)
+          prs = []
+          unreachable = []
+          for repo in REPOS:
+              try:
+                  out = gh(
+                      "pr", "list",
+                      "--repo", repo,
+                      "--state", "open",
+                      "--search", "aethis-needs",
+                      "--json", "number,title,isDraft,url,body",
+                      "--limit", "100",
+                  )
+              except subprocess.CalledProcessError as exc:
+                  # Never fail the whole sweep on one unreachable repo, but say
+                  # so loudly — a silent skip is how a consumer stops being
+                  # unstuck without anyone noticing.
+                  print(f"::warning::{repo}: could not be queried (rc={exc.returncode}); skipped")
+                  unreachable.append(repo)
+                  continue
+              for pr in json.loads(out):
+                  prs.append({**pr, "repo": repo})
+
           if not prs:
               print("No open PRs reference aethis-needs: aethis-cli — nothing to unstick.")
+              if unreachable:
+                  print(f"NOTE: {len(unreachable)} repo(s) were unreachable: {', '.join(unreachable)}")
               sys.exit(0)
 
           published = vtuple(version)
           for pr in prs:
-              repo = pr["repository"]["nameWithOwner"]
+              repo = pr["repo"]
               num = pr["number"]
-              body = gh("pr", "view", str(num), "-R", repo, "--json", "body", "-q", ".body") or ""
+              # The search term is a loose pre-filter; the marker regex over the
+              # body (fetched in the same call) is the real test.
+              body = pr.get("body") or ""
               m = marker.search(body)
               if not m:
-                  print(f"{repo}#{num}: marker not found in body (search false positive); skip")
                   continue
               op, required = m.group(1), m.group(2)
               required_t = vtuple(required)
