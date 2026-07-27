@@ -110,12 +110,20 @@ def print_identity(response: Mapping[str, Any], *, heading: bool = True) -> None
         )
 
 
-def _print_reference(reference: Mapping[str, Any], indent: str = "      ") -> None:
+def _print_reference(
+    reference: Mapping[str, Any],
+    indent: str = "      ",
+    *,
+    base_url: Optional[str] = None,
+) -> None:
     title = reference.get("title") or reference.get("source_id") or "(untitled source)"
     authority = reference.get("authority")
+    kind = contract.reference_target_kind(reference)
     header = f"{indent}[cyan]{title}[/cyan]"
     if authority:
         header += f" [dim]-- {authority}[/dim]"
+    if kind == "artefact":
+        header += " [magenta](uploaded artefact)[/magenta]"
     console.print(header, highlight=False)
 
     locator = reference.get("locator")
@@ -126,9 +134,30 @@ def _print_reference(reference: Mapping[str, Any], indent: str = "      ") -> No
     if quote:
         console.print(f'{indent}  Quote:    "{quote}"', markup=False, highlight=False)
 
-    link = reference.get("deep_link") or reference.get("url")
+    link = contract.reference_link(reference, base_url)
     if link:
-        console.print(f"{indent}  Link:     {link}", style="dim", markup=False, highlight=False)
+        label = "Download:" if kind == "artefact" else "Link:    "
+        console.print(f"{indent}  {label} {link}", style="dim", markup=False, highlight=False)
+
+    # v1 (URL) and v2 (artefact) references resolve to retained bytes by
+    # different routes, and only one of them is publicly fetchable. Saying so
+    # is the difference between "here is the document" and "here is a link
+    # that will 401 for anyone without this project's key".
+    if kind == "artefact":
+        console.print(
+            f"{indent}  Retained: uploaded snapshot, verified at publish "
+            f"-- authenticated download (needs an API key with projects:read on this project)",
+            style="dim",
+            markup=False,
+            highlight=False,
+        )
+    elif reference.get("snapshot"):
+        console.print(
+            f"{indent}  Retained: snapshot of the fetched page kept at publish",
+            style="dim",
+            markup=False,
+            highlight=False,
+        )
 
     version = reference.get("source_version") or reference.get("source_date")
     if version:
@@ -160,6 +189,7 @@ def print_sources(
     cited: Iterable[contract.CitedCriterion],
     *,
     empty_note: Optional[str] = None,
+    base_url: Optional[str] = None,
 ) -> None:
     """Render the supporting-source block.
 
@@ -181,7 +211,7 @@ def print_sources(
         suffix = f" [dim]({entry.criterion_id})[/dim]" if entry.criterion_id and entry.criterion_id != label else ""
         console.print(f"\n  {label}{suffix}", highlight=False)
         for reference in entry.references:
-            _print_reference(reference)
+            _print_reference(reference, base_url=base_url)
 
 
 __all__ = ["print_blocking_errors", "print_identity", "print_sources"]

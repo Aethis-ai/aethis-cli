@@ -186,6 +186,58 @@ The same contract and the same exit codes apply to
 | `aethis status` | Check generation job progress |
 | `aethis test` | Run test cases against the latest ruleset |
 | `aethis publish [--force]` | Set the latest ruleset as active |
+| `aethis publish --source-targets <file>` | Publish with citations resolved from a YAML/JSON targets file |
+
+### Citations at publish (`--source-targets`)
+
+Where your criteria declare citation keys (`source_refs`), `--source-targets`
+tells the engine what each key cites. Every entry names **exactly one** target:
+
+- `url` — a public HTTPS document. The engine fetches it, checks your verbatim
+  quote against the bytes it received, records their digest, and keeps a
+  snapshot of them.
+- `file` — a local file. The CLI uploads it to the project (or reuses an
+  identical file already uploaded, matched by `sha256`) and the citation
+  points at those retained bytes. Its download URL is **authenticated** — only
+  a key with `projects:read` on that project can fetch it.
+
+```yaml
+# targets.yaml — keys match the source_refs your criteria declare
+"BNA1981#Schedule1/P1.1":
+  url: https://www.legislation.gov.uk/ukpga/1981/61/schedule/1
+  title: British Nationality Act 1981, Schedule 1
+  authority: UK Government
+  licence: OGL-UK-3.0
+  locator: Paragraph 1(1)(a)        # optional
+  quote:
+    exact: "is of full age and capacity"
+
+"GUIDE#4.2":
+  file: ./corpus/guidance.pdf       # relative to this file
+  title: Applicant guidance
+  authority: Example Authority
+  licence: OGL-UK-3.0
+  quote:
+    exact: "You must have been resident"
+```
+
+```bash
+aethis publish --source-targets targets.yaml
+```
+
+The quote must be **verbatim** — never a summary or a paraphrase. A citation
+that cannot be resolved, is unlicensed, or whose quote does not occur in the
+source rejects the whole publish, and every failing key is reported with its
+reason; nothing is published half-cited. Malformed targets files fail locally,
+before any upload, and a duplicate citation key is an error rather than a
+silent overwrite.
+
+Only the citation keys your criteria actually declare are resolved — a key
+nothing declares is ignored by the engine. After publishing, the CLI reads the
+ruleset back and tells you how many targets landed, naming any that did not.
+If a publish fails after files were uploaded, those files stay in the project
+and are reused on the next attempt (matched by `sha256`), so retrying does not
+duplicate them.
 
 ### Guidance (project-level)
 
@@ -405,6 +457,7 @@ Example `my_package/plugin.py`:
 
 ```python
 import typer
+
 
 def register(app: typer.Typer) -> None:
     @app.command()
