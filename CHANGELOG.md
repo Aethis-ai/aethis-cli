@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.31.0 (2026-07-27)
+
+Publish with citations — and be able to cite a document you hold, not just one
+the internet happens to host.
+
+- **feat: `aethis publish --source-targets <file>` resolves a ruleset's citation keys.** A YAML or JSON targets file maps each citation key your criteria declare (`source_refs`) to the document it cites: title, authority, licence, and the **verbatim** quoted text. The engine verifies every quote against the source bytes at publish time and rejects the publish if any citation fails — there is no half-cited ruleset.
+- **feat: a citation can point at a file you uploaded, not only a public URL.** An entry naming `file:` is uploaded to the project and cited by its `source_id`, so the rules can cite the very documents they were generated from. The engine resolves it from retained bytes with no network call at all.
+- **feat: an identical file is never uploaded twice.** File targets are matched by `sha256` against the project's existing sources and reused when the bytes are already there — including two entries in the same run naming byte-identical files. The API does not deduplicate uploads, so re-running a publish previously grew the project a duplicate source per citation.
+- **feat: a malformed targets file costs no round trip.** Exactly-one-of `url`/`file`, a readable file, an `https://` URL, the required `title`/`authority`/`licence`/`quote.exact`, and unknown fields are all checked locally — every problem in the file reported at once, before the first API call, so nothing is uploaded against a targets file that was never going to publish.
+- **feat: an uploaded-artefact citation is never rendered as though it were a public link.** `aethis decide --explain` and `aethis explain` label these references as an uploaded snapshot verified at publish, state that the download is authenticated and needs a key with `projects:read` on the project, and resolve the engine-relative download path against the host you called — while a URL citation keeps reading as the public link it is. `aethis publish` reports the same distinction per target as it resolves them.
+- **feat: `aethis` can list a project's uploaded sources** (`AethisClient.list_sources`), which is what makes the digest comparison above possible.
+
 - **ci(publish): the downstream-unstick sweep now reaches every consumer repo.** The `unstick-downstream` job searched a single owner, so a PR carrying an `aethis-needs: aethis-cli` marker in a repo under a different owner was never found and sat as a draft indefinitely after the release it was waiting for went out. It now queries each consumer repo individually with `gh pr list --repo`, which is genuinely repo-scoped, and matches the marker against the PR body returned by that same call (one request per repo instead of a search plus a fetch per hit). A repo the token cannot read is reported as a warning instead of failing the whole sweep. No package or runtime change.
 
 ## 0.30.0 (2026-07-26)

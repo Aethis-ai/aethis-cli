@@ -422,6 +422,38 @@ def source_reference_gaps(reference: Mapping[str, Any]) -> List[str]:
     return [key for key in SOURCE_REFERENCE_REQUIRED if not reference.get(key)]
 
 
+def reference_target_kind(reference: Any) -> str:
+    """``"artefact"`` for a schema-v2 uploaded-artefact reference, else ``"url"``.
+
+    A v2 reference cites bytes the author uploaded to their own project; its
+    ``url`` is a RELATIVE authenticated download route, not a public link. The
+    two must never be rendered as though they were the same kind of thing.
+    """
+    if not isinstance(reference, Mapping):
+        return "url"
+    if reference.get("schema_version") == 2 or reference.get("target_kind") == "artefact":
+        return "artefact"
+    return "url"
+
+
+def reference_link(reference: Mapping[str, Any], base_url: Optional[str] = None) -> Optional[str]:
+    """The best link for a reference, absolute where that is knowable.
+
+    An artefact reference's ``url``/``deep_link`` is engine-relative, so it is
+    only meaningful joined to the engine it was published on. Without a
+    ``base_url`` the relative path is returned unchanged rather than being
+    dressed up as a URL.
+    """
+    if not isinstance(reference, Mapping):
+        return None
+    link = _clean(reference.get("deep_link")) or _clean(reference.get("url"))
+    if not link:
+        return None
+    if base_url and link.startswith("/"):
+        return base_url.rstrip("/") + link
+    return link
+
+
 def quoted_text(reference: Mapping[str, Any]) -> Optional[str]:
     """The verbatim quoted text of a reference, if it carries one."""
     quote = reference.get("quote") if isinstance(reference, Mapping) else None
@@ -451,6 +483,8 @@ __all__ = [
     "iter_explanation_sources",
     "presented_decision",
     "quoted_text",
+    "reference_link",
+    "reference_target_kind",
     "resolved_identity",
     "source_reference_gaps",
 ]

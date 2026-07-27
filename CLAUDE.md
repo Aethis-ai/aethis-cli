@@ -35,7 +35,7 @@ Project / authoring group (requires `projects:write`):
 - `aethis sections discover --file <path>` — phase 1
 - `aethis fields discover --section <id>` / `aethis fields set` — phase 2
 - `aethis generate --poll` + `aethis test` + `aethis refine --hint ...` — phase 3 TDD loop
-- `aethis publish [--slug my-team/my-ruleset]`
+- `aethis publish [--slug my-team/my-ruleset] [--source-targets targets.yaml]` — `--source-targets` resolves the ruleset's citation keys; each entry names exactly one of `url` (public HTTPS, fetched + snapshotted at publish, schema-v1 reference) or `file` (uploaded to the project and cited by `source_id`, schema-v2 artefact reference with an **authenticated** download route). Validation is local-first; file entries dedupe against existing project sources by `sha256` (the engine never dedupes on upload). See [aethis_cli/source_targets.py](aethis_cli/source_targets.py).
 
 Account:
 

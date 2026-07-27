@@ -149,6 +149,7 @@ def decide(
                 "explanation. Citations are attached when a ruleset is "
                 "published under the source-reference contract."
             ),
+            base_url=getattr(client, "base_url", None),
         )
 
     if blocked:

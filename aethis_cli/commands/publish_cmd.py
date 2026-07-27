@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
 
 import typer
@@ -9,6 +10,44 @@ import typer
 from aethis_cli.config import load_project_config, make_authed_client, resolve_api_key
 from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel, success
+from aethis_cli.source_targets import (
+    SourceTargetsError,
+    load_source_targets,
+    resolve_source_targets,
+)
+
+
+def _print_resolutions(resolutions: list) -> None:
+    """Show what each citation key resolved to, keeping the two reference
+    kinds visibly distinct.
+
+    A URL citation becomes a schema-v1 reference anyone can follow; a file
+    citation becomes a schema-v2 artefact reference whose download route is
+    authenticated. Rendering them identically would invite an author to
+    publish a "link" that nobody outside the project can open.
+    """
+    console.print(f"\n[bold]Source targets[/bold] ({len(resolutions)})")
+    for res in resolutions:
+        if res.kind == "artefact":
+            note = " [dim](reused existing upload — identical bytes)[/dim]" if res.reused else ""
+            console.print(
+                f"  [cyan]{res.key}[/cyan]  [magenta]artefact[/magenta] {res.detail}{note}",
+                highlight=False,
+            )
+            console.print(
+                "    [dim]uploaded snapshot, verified at publish — authenticated download, "
+                "never anonymously readable[/dim]",
+                highlight=False,
+            )
+        else:
+            console.print(
+                f"  [cyan]{res.key}[/cyan]  [green]url[/green] {res.detail}",
+                highlight=False,
+            )
+            console.print(
+                "    [dim]fetched and snapshotted at publish — public link[/dim]",
+                highlight=False,
+            )
 
 
 def publish(
@@ -49,6 +88,19 @@ def publish(
             "'child_eligibility'). Required when --rulebook is set."
         ),
     ),
+    source_targets: Optional[Path] = typer.Option(
+        None,
+        "--source-targets",
+        help=(
+            "Path to a YAML or JSON file resolving the ruleset's citation "
+            "keys to the documents they cite. Each entry names exactly one "
+            "of 'url' (a public HTTPS document) or 'file' (a local file, "
+            "uploaded to the project and cited as a retained artefact), plus "
+            "title, authority, licence and the verbatim 'quote.exact' text. "
+            "The engine verifies every quote against the source bytes at "
+            "publish time and refuses the publish if any citation fails."
+        ),
+    ),
 ) -> None:
     """Publish the latest generated ruleset (make it active for /decide).
 
@@ -61,6 +113,21 @@ def publish(
     those FKs and lands in state='testing'; promote it to live with
     `aethis rulesets promote-to-live <rulebook> <ruleset_name> <rs_id>`.
     """
+    # Local validation FIRST — before config, credentials or any HTTP. A
+    # malformed targets file must cost zero round trips and must never upload
+    # half a citation set before failing.
+    targets = []
+    if source_targets is not None:
+        try:
+            targets = load_source_targets(source_targets)
+        except SourceTargetsError as e:
+            console.print(f"[red]{e}[/red]", highlight=False)
+            console.print(
+                "[dim]Each entry needs exactly one of 'url' or 'file', plus "
+                "title, authority, licence and quote.exact.[/dim]"
+            )
+            raise typer.Exit(code=1)
+
     if (rulebook is None) != (ruleset_name is None):
         console.print(
             "[red]--rulebook and --ruleset-name must be set together "
@@ -105,6 +172,22 @@ def publish(
                 f"[yellow]Warning: publishing with --force despite {failed} failing, {errors} erroring tests.[/yellow]"
             )
 
+    # Resolve citation targets: URL entries pass through untouched; file
+    # entries are uploaded (or matched by sha256 against an identical source
+    # already in the project) and cited by their source_id.
+    wire_targets: dict = {}
+    if targets:
+        try:
+            wire_targets, resolutions = resolve_source_targets(client, pid, targets)
+        except SourceTargetsError as e:
+            console.print(f"[red]{e}[/red]", highlight=False)
+            raise typer.Exit(code=1)
+        except AethisAPIError as e:
+            error_panel(e)
+            console.print("[yellow]Could not resolve source targets; nothing was published.[/yellow]")
+            raise typer.Exit(code=1)
+        _print_resolutions(resolutions)
+
     try:
         # Thread --force to the server-side TDD gate (aethis-core 0.11+).
         # Older engines ignore the field; newer ones refuse a publish over
@@ -116,6 +199,7 @@ def publish(
             force_unsafe=force,
             rulebook_id=rulebook,
             ruleset_name=ruleset_name,
+            source_targets=wire_targets or None,
         )
     except AethisAPIError as e:
         error_panel(e)

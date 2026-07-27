@@ -67,6 +67,11 @@ class AethisClient:
         # Latest X-RateLimit-* budget seen on a response (epic #552 P2). None
         # until the first metered, authenticated call.
         self.last_rate_limit: Optional[dict] = None
+        # The engine this client talks to. Artefact-backed source references
+        # carry a RELATIVE authenticated download path, which is only
+        # meaningful joined to the host it was published on — so renderers
+        # need to be able to ask.
+        self.base_url = base_url
 
     def close(self) -> None:
         self._client.close()
@@ -236,6 +241,16 @@ class AethisClient:
         file_tuples = [("files", (f.name, f.read_bytes(), "application/octet-stream")) for f in files]
         return self._request("POST", f"/api/v1/public/projects/{project_id}/sources", files=file_tuples)
 
+    def list_sources(self, project_id: str) -> dict:
+        """List the project's uploaded sources (metadata only, no bodies).
+
+        Each entry carries ``raw_sha256`` — the digest of the exact bytes the
+        engine retained — which is what lets a caller cite an already-uploaded
+        file instead of uploading a second identical copy. The engine never
+        dedupes on upload, so this is the only guard against duplicates.
+        """
+        return self._request("GET", f"/api/v1/public/projects/{project_id}/sources")
+
     def add_tests(self, project_id: str, test_cases: list[dict]) -> dict:
         return self._request(
             "POST",
@@ -316,6 +331,7 @@ class AethisClient:
         force_unsafe: bool = False,
         rulebook_id: str | None = None,
         ruleset_name: str | None = None,
+        source_targets: dict[str, dict] | None = None,
     ) -> dict:
         body: dict = {}
         if slug is not None:
@@ -335,6 +351,17 @@ class AethisClient:
             body["rulebook_id"] = rulebook_id
         if ruleset_name is not None:
             body["ruleset_name"] = ruleset_name
+        # Citation resolution targets, keyed by the opaque citation key the
+        # ruleset's criteria declare in `source_refs`. Each value names
+        # exactly one target: `url` (HTTPS, fetched + snapshotted at publish,
+        # emitted as a schema-v1 reference) or `artefact_source_id` (an
+        # uploaded project source, resolved from retained bytes with no
+        # network call, emitted as a schema-v2 reference). The engine fails
+        # the publish closed on any unresolved/unlicensed/quote-mismatched
+        # key. Requires an engine carrying artefact targets for the
+        # `artefact_source_id` form; older engines accept the `url` form.
+        if source_targets:
+            body["source_targets"] = source_targets
         kwargs: dict = {}
         if body:
             kwargs["json"] = body
