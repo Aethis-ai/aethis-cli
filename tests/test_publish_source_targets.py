@@ -555,3 +555,256 @@ def test_publish_command_without_targets_sends_none(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     assert client.publish.call_args.kwargs["source_targets"] is None
     client.list_sources.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Review fix 1 — per-key citation failures reach the user
+# ---------------------------------------------------------------------------
+
+#: The real 422 envelope the engine returns when publish-time citation
+#: resolution fails: a per-key `failures` list of {source_id, reason_code,
+#: message}. Shape read from aethis-core `routes/projects.py`
+#: (source_reference_resolution_failed) and `services/source_resolution.py`
+#: (`SourceResolutionError.failures`), not invented.
+RESOLUTION_FAILED_DETAIL = {
+    "error": "validation_error",
+    "reason_code": "source_reference_resolution_failed",
+    "message": (
+        "Refusing to publish a public ruleset with unresolved source references. "
+        "Every declared citation key must resolve to a validated HTTPS authority "
+        "with title, licence and the verbatim quoted text it cites."
+    ),
+    "failures": [
+        {
+            "source_id": "BNA1981#Sch1",
+            "reason_code": "quote_not_found",
+            "message": (
+                "The verbatim quote for 'BNA1981#Sch1' does not occur in the fetched "
+                "source. Quotes must be exact text from the source, never a summary "
+                "or paraphrase."
+            ),
+        },
+        {
+            "source_id": "HO#4",
+            "reason_code": "artefact_unsupported_type",
+            "message": (
+                "Source 'src_abc123' has file_type 'unknown' — its bytes cannot be "
+                "quote-checked, so it cannot back a citation."
+            ),
+        },
+    ],
+}
+
+
+def test_per_key_citation_failures_are_rendered(rendered):
+    """Regression for the swallowed-`failures` defect: the envelope's summary
+    line alone tells an author with several citations neither which key failed
+    nor why."""
+    from aethis_cli.output import render_api_error
+
+    render_api_error(422, RESOLUTION_FAILED_DETAIL)
+    out = rendered()
+    assert "2 citation(s) could not be resolved" in out
+    for key in ("BNA1981#Sch1", "HO#4"):
+        assert key in out
+    for reason in ("quote_not_found", "artefact_unsupported_type"):
+        assert reason in out
+    assert "does not occur in the fetched source" in out
+    assert "cannot be quote-checked" in out
+
+
+def test_publish_command_surfaces_per_key_failures(tmp_path, monkeypatch, rendered):
+    from unittest.mock import patch
+
+    from aethis_cli.errors import AethisAPIError
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
+    _project_dir(tmp_path)
+    corpus = _corpus(tmp_path)
+    targets_file = _write_targets(tmp_path, {"HO#4": _file_entry(corpus)}, name="t.yaml")
+
+    client = _fake_client()
+    client.run_tests.return_value = {"passed": 1, "failed": 0, "errors": 0, "total": 1}
+    client.publish.side_effect = AethisAPIError(422, RESOLUTION_FAILED_DETAIL)
+
+    with patch("aethis_cli.client.AethisClient", return_value=client):
+        result = runner.invoke(app, ["publish", "--source-targets", str(targets_file)], catch_exceptions=False)
+
+    assert result.exit_code == 1
+    out = _ANSI_RE.sub("", result.output)
+    assert "citation(s) could not be resolved" in out
+    assert "quote_not_found" in out
+    # Review fix 3 — the uploads are not rolled back, and retrying is safe.
+    assert "remain in the project" in out
+    assert "does not duplicate" in out
+
+
+def test_failure_list_is_absent_from_ordinary_errors(rendered):
+    from aethis_cli.output import render_api_error
+
+    render_api_error(403, {"message": "Denied", "reason_code": "forbidden"})
+    out = rendered()
+    assert "could not be resolved" not in out
+
+
+def test_no_upload_note_when_only_url_targets_were_sent(tmp_path, monkeypatch):
+    from unittest.mock import patch
+
+    from aethis_cli.errors import AethisAPIError
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
+    _project_dir(tmp_path)
+    targets_file = _write_targets(tmp_path, {"BNA#1": _url_entry()}, name="t.yaml")
+
+    client = _fake_client()
+    client.run_tests.return_value = {"passed": 1, "failed": 0, "errors": 0, "total": 1}
+    client.publish.side_effect = AethisAPIError(422, RESOLUTION_FAILED_DETAIL)
+
+    with patch("aethis_cli.client.AethisClient", return_value=client):
+        result = runner.invoke(app, ["publish", "--source-targets", str(targets_file)], catch_exceptions=False)
+    assert "remain in the project" not in _ANSI_RE.sub("", result.output)
+
+
+# ---------------------------------------------------------------------------
+# Review fix 2 — targets that the ruleset never declared do not pass silently
+# ---------------------------------------------------------------------------
+
+
+def _explain_with(keys):
+    return {
+        "ruleset_id": "rs_x",
+        "criteria": [
+            {
+                "criterion_id": "c1",
+                "source_references": [{"source_id": k, "title": k} for k in keys],
+            }
+        ],
+    }
+
+
+def _publish_with_targets(tmp_path, monkeypatch, client, entries):
+    from unittest.mock import patch
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
+    _project_dir(tmp_path)
+    targets_file = _write_targets(tmp_path, entries, name="t.yaml")
+    client.run_tests.return_value = {"passed": 1, "failed": 0, "errors": 0, "total": 1}
+    client.publish.return_value = {"ruleset_id": "rs_x"}
+    with patch("aethis_cli.client.AethisClient", return_value=client):
+        result = runner.invoke(app, ["publish", "--source-targets", str(targets_file)], catch_exceptions=False)
+    return result
+
+
+def test_publish_warns_loudly_when_no_citations_landed(tmp_path, monkeypatch):
+    """The engine ignores a target whose key no criterion declares, so a
+    typo'd key publishes 'successfully' with zero citations after uploading
+    the files. That must not read as success."""
+    client = _fake_client()
+    client.explain.return_value = _explain_with([])
+    corpus = _corpus(tmp_path)
+    result = _publish_with_targets(tmp_path, monkeypatch, client, {"TYPO#1": _file_entry(corpus)})
+
+    assert result.exit_code == 0
+    out = _ANSI_RE.sub("", result.output)
+    assert "0 of 1 supplied citation target(s) landed" in out
+    assert "Not attached: TYPO#1" in out
+    assert "source_refs" in out
+
+
+def test_publish_reports_quietly_when_every_citation_landed(tmp_path, monkeypatch):
+    client = _fake_client()
+    client.explain.return_value = _explain_with(["BNA#1"])
+    result = _publish_with_targets(tmp_path, monkeypatch, client, {"BNA#1": _url_entry()})
+
+    out = _ANSI_RE.sub("", result.output)
+    assert "1 citation(s) attached" in out
+    assert "Not attached" not in out
+
+
+def test_publish_names_only_the_targets_that_did_not_land(tmp_path, monkeypatch):
+    client = _fake_client()
+    client.explain.return_value = _explain_with(["BNA#1"])
+    corpus = _corpus(tmp_path)
+    result = _publish_with_targets(tmp_path, monkeypatch, client, {"BNA#1": _url_entry(), "HO#4": _file_entry(corpus)})
+
+    out = _ANSI_RE.sub("", result.output)
+    assert "1 of 2 supplied citation target(s) landed" in out
+    assert "Not attached: HO#4" in out
+
+
+def test_verification_failure_never_fails_a_successful_publish(tmp_path, monkeypatch):
+    client = _fake_client()
+    client.explain.side_effect = RuntimeError("engine unreachable")
+    result = _publish_with_targets(tmp_path, monkeypatch, client, {"BNA#1": _url_entry()})
+
+    assert result.exit_code == 0
+    out = _ANSI_RE.sub("", result.output)
+    assert "Published ruleset" in out
+    assert "Could not read the ruleset back" in out
+
+
+def test_no_verification_call_when_no_targets_were_supplied(tmp_path, monkeypatch):
+    from unittest.mock import patch
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
+    _project_dir(tmp_path)
+    client = _fake_client()
+    client.run_tests.return_value = {"passed": 1, "failed": 0, "errors": 0, "total": 1}
+    client.publish.return_value = {"ruleset_id": "rs_x"}
+    with patch("aethis_cli.client.AethisClient", return_value=client):
+        result = runner.invoke(app, ["publish"], catch_exceptions=False)
+    assert result.exit_code == 0
+    client.explain.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Review fix 4 — a duplicate citation key never silently discards a document
+# ---------------------------------------------------------------------------
+
+
+def test_duplicate_key_in_yaml_is_rejected(tmp_path):
+    path = tmp_path / "dupe.yaml"
+    path.write_text(
+        '"K1":\n'
+        "  url: https://example.gov.uk/a\n"
+        "  title: A\n"
+        "  authority: A\n"
+        "  licence: OGL-UK-3.0\n"
+        "  quote: {exact: 'a'}\n"
+        '"K1":\n'
+        "  url: https://example.gov.uk/b\n"
+        "  title: B\n"
+        "  authority: B\n"
+        "  licence: OGL-UK-3.0\n"
+        "  quote: {exact: 'b'}\n"
+    )
+    with pytest.raises(SourceTargetsError) as exc:
+        load_source_targets(path)
+    assert "duplicate citation key 'K1'" in str(exc.value)
+
+
+def test_duplicate_key_in_json_is_rejected(tmp_path):
+    path = tmp_path / "dupe.json"
+    path.write_text(json.dumps({"K1": _url_entry()})[:-1] + ', "K1": ' + json.dumps(_url_entry()) + "}")
+    with pytest.raises(SourceTargetsError) as exc:
+        load_source_targets(path)
+    assert "duplicate citation key 'K1'" in str(exc.value)
+
+
+def test_repeated_field_inside_one_entry_is_also_rejected(tmp_path):
+    path = tmp_path / "dupe-field.yaml"
+    path.write_text(
+        '"K1":\n'
+        "  url: https://example.gov.uk/a\n"
+        "  url: https://example.gov.uk/b\n"
+        "  title: A\n"
+        "  authority: A\n"
+        "  licence: OGL-UK-3.0\n"
+        "  quote: {exact: 'a'}\n"
+    )
+    with pytest.raises(SourceTargetsError):
+        load_source_targets(path)

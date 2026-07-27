@@ -227,8 +227,17 @@ aethis publish --source-targets targets.yaml
 
 The quote must be **verbatim** — never a summary or a paraphrase. A citation
 that cannot be resolved, is unlicensed, or whose quote does not occur in the
-source rejects the whole publish; nothing is published half-cited. Malformed
-targets files fail locally, before any upload.
+source rejects the whole publish, and every failing key is reported with its
+reason; nothing is published half-cited. Malformed targets files fail locally,
+before any upload, and a duplicate citation key is an error rather than a
+silent overwrite.
+
+Only the citation keys your criteria actually declare are resolved — a key
+nothing declares is ignored by the engine. After publishing, the CLI reads the
+ruleset back and tells you how many targets landed, naming any that did not.
+If a publish fails after files were uploaded, those files stay in the project
+and are reused on the next attempt (matched by `sha256`), so retrying does not
+duplicate them.
 
 ### Guidance (project-level)
 

@@ -9,7 +9,7 @@ import typer
 
 from aethis_cli.config import load_project_config, make_authed_client, resolve_api_key
 from aethis_cli.errors import AethisAPIError
-from aethis_cli.output import console, error_panel, success
+from aethis_cli.output import console, error_panel, success, warn
 from aethis_cli.source_targets import (
     SourceTargetsError,
     load_source_targets,
@@ -48,6 +48,62 @@ def _print_resolutions(resolutions: list) -> None:
                 "    [dim]fetched and snapshotted at publish — public link[/dim]",
                 highlight=False,
             )
+
+
+def _verify_citations_landed(client, ruleset_id: Optional[str], sent_keys: set) -> None:
+    """Report how many of the supplied citation targets actually landed.
+
+    The engine resolves only the citation keys the COMPILED ruleset declares
+    in its criteria' ``source_refs``, and silently ignores any target whose
+    key nothing declares. So a targets file with a typo'd key — or a ruleset
+    that declares no citations at all — publishes successfully with zero
+    citations attached, after uploading the files. That is the worst kind of
+    quiet: the author believes the ruleset is cited and it is not.
+
+    The publish response carries no citation count, so this OBSERVES the
+    result by reading the published ruleset back rather than inferring it.
+    A read-back that fails must never turn a successful publish into a
+    failure — it degrades to an honest "could not verify" line.
+    """
+    if not sent_keys:
+        return
+    if not ruleset_id:
+        console.print("[yellow]![/yellow] Could not verify citations: the publish returned no ruleset_id.")
+        return
+    try:
+        explained = client.explain(ruleset_id) or {}
+    except Exception as exc:  # noqa: BLE001 - never fail a successful publish
+        console.print(
+            f"[dim]Could not read the ruleset back to verify citations ({exc}). "
+            f"Check with: aethis explain --ruleset-id {ruleset_id}[/dim]"
+        )
+        return
+
+    landed = {
+        str(ref.get("source_id"))
+        for criterion in (explained.get("criteria") or [])
+        if isinstance(criterion, dict)
+        for ref in (criterion.get("source_references") or [])
+        if isinstance(ref, dict) and ref.get("source_id")
+    }
+    if landed == sent_keys:
+        console.print(f"[dim]{len(landed)} citation(s) attached to the published ruleset.[/dim]")
+        return
+
+    missing = sorted(sent_keys - landed)
+    warn(f"{len(landed)} of {len(sent_keys)} supplied citation target(s) landed on the published ruleset.")
+    if missing:
+        console.print(
+            "  Not attached: " + ", ".join(missing),
+            style="yellow",
+            markup=False,
+            highlight=False,
+        )
+        console.print(
+            "  [dim]The engine only resolves citation keys the compiled ruleset declares in "
+            "its criteria (source_refs). Check the keys match, and that generation produced "
+            "criteria carrying them.[/dim]"
+        )
 
 
 def publish(
@@ -176,6 +232,7 @@ def publish(
     # entries are uploaded (or matched by sha256 against an identical source
     # already in the project) and cited by their source_id.
     wire_targets: dict = {}
+    uploaded_any = False
     if targets:
         try:
             wire_targets, resolutions = resolve_source_targets(client, pid, targets)
@@ -186,6 +243,7 @@ def publish(
             error_panel(e)
             console.print("[yellow]Could not resolve source targets; nothing was published.[/yellow]")
             raise typer.Exit(code=1)
+        uploaded_any = any(r.kind == "artefact" for r in resolutions)
         _print_resolutions(resolutions)
 
     try:
@@ -203,12 +261,24 @@ def publish(
         )
     except AethisAPIError as e:
         error_panel(e)
+        if uploaded_any:
+            # The publish is fail-closed, but the uploads that preceded it are
+            # not rolled back. Say so plainly: without this, a failed publish
+            # reads as "my files went nowhere", and the natural next move —
+            # re-running — looks like it will duplicate them. It won't; the
+            # sha256 match reuses them.
+            console.print(
+                "[dim]Files uploaded for citations remain in the project and will be "
+                "reused (matched by sha256) when you retry — retrying does not "
+                "duplicate them.[/dim]"
+            )
         raise typer.Exit(code=1)
 
     msg = f"Published ruleset {result.get('ruleset_id')}"
     if result.get("slug"):
         msg += f" — slug: {result['slug']}"
     success(msg)
+    _verify_citations_landed(client, result.get("ruleset_id"), set(wire_targets))
     if result.get("state") == "testing" and result.get("rulebook_id"):
         # Rulebook-mode publish: surface the next step explicitly so
         # users don't wonder why /decide doesn't return their ruleset

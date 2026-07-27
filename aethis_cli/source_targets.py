@@ -146,6 +146,43 @@ class ResolvedTarget:
 # ---------------------------------------------------------------------------
 
 
+def _reject_duplicate_pairs(pairs: List[Tuple[Any, Any]]) -> Dict[Any, Any]:
+    """Build a mapping, refusing duplicate keys.
+
+    Both JSON and YAML silently let the last definition of a repeated key win.
+    For a citation manifest that is a trap: an author who defines the same key
+    twice loses one of the two documents with no signal, and the published,
+    immutable ruleset cites whichever happened to come second.
+    """
+    seen: Dict[Any, Any] = {}
+    duplicates: List[str] = []
+    for key, value in pairs:
+        if key in seen:
+            duplicates.append(str(key))
+        seen[key] = value
+    if duplicates:
+        raise SourceTargetsError(
+            [
+                f"duplicate citation key {key!r} — each key may be defined once "
+                "(a repeated key silently discards the earlier definition)"
+                for key in sorted(set(duplicates))
+            ]
+        )
+    return seen
+
+
+class _StrictLoader(yaml.SafeLoader):
+    """SafeLoader that refuses duplicate mapping keys."""
+
+
+def _strict_mapping(loader: yaml.SafeLoader, node: yaml.MappingNode) -> Dict[Any, Any]:
+    loader.flatten_mapping(node)
+    return _reject_duplicate_pairs(loader.construct_pairs(node, deep=True))
+
+
+_StrictLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _strict_mapping)
+
+
 def _parse(path: Path) -> Any:
     try:
         text = path.read_text(encoding="utf-8")
@@ -153,13 +190,17 @@ def _parse(path: Path) -> Any:
         raise SourceTargetsError([f"cannot read the targets file: {exc}"], path=path) from exc
     if path.suffix.lower() == ".json":
         try:
-            return json.loads(text)
+            return json.loads(text, object_pairs_hook=_reject_duplicate_pairs)
         except json.JSONDecodeError as exc:
             raise SourceTargetsError([f"invalid JSON: {exc}"], path=path) from exc
+        except SourceTargetsError as exc:
+            raise SourceTargetsError(exc.problems, path=path) from exc
     try:
-        return yaml.safe_load(text)
+        return yaml.load(text, Loader=_StrictLoader)  # noqa: S506 - _StrictLoader derives from SafeLoader
     except yaml.YAMLError as exc:
         raise SourceTargetsError([f"invalid YAML: {exc}"], path=path) from exc
+    except SourceTargetsError as exc:
+        raise SourceTargetsError(exc.problems, path=path) from exc
 
 
 def _validate_quote(key: str, raw: Any, problems: List[str]) -> Dict[str, str]:

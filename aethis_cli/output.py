@@ -46,14 +46,43 @@ def format_error_detail(detail: object) -> str:
     return str(detail)
 
 
+def render_failure_list(detail: object) -> None:
+    """Print the per-item ``failures`` list a fail-closed endpoint returns.
+
+    Publish-time citation resolution rejects the WHOLE publish and reports
+    one entry per failing citation key (``{source_id, reason_code, message}``
+    — see the engine's ``source_reference_resolution_failed`` envelope).
+    Collapsing that to the envelope's summary line tells an author with three
+    citations that "a citation failed" and nothing about which one or why,
+    which is the difference between a fixable error and a guessing game.
+    """
+    failures = detail.get("failures") if isinstance(detail, dict) else None
+    if not isinstance(failures, list) or not failures:
+        return
+    console.print(f"\n[red]{len(failures)} citation(s) could not be resolved:[/red]", highlight=False)
+    for failure in failures:
+        if not isinstance(failure, dict):
+            console.print(f"  - {failure}", markup=False, highlight=False)
+            continue
+        key = failure.get("source_id") or "(unknown key)"
+        reason = failure.get("reason_code") or "unknown"
+        message = failure.get("message") or ""
+        # markup=False throughout: a server message may contain [brackets]
+        # (a locator, a quote) that Rich would otherwise eat.
+        console.print(f"  {key}  [{reason}]", markup=False, highlight=False)
+        if message:
+            console.print(f"      {message}", style="dim", markup=False, highlight=False)
+
+
 def render_api_error(status_code: int, detail: object) -> None:
-    """Print an API error envelope readably: one red line plus, when the
-    server supplied a ``hint``, a dim follow-up line so the caller sees what
-    to do next (e.g. how to request the missing scope)."""
+    """Print an API error envelope readably: one red line, any per-item
+    ``failures`` the server itemised, plus a dim follow-up when the server
+    supplied a ``hint`` so the caller sees what to do next."""
     console.print(
         f"[red]Error: {format_error_detail(detail)} (HTTP {status_code})[/red]",
         highlight=False,
     )
+    render_failure_list(detail)
     hint = detail.get("hint") if isinstance(detail, dict) else None
     if hint:
         # markup=False so server hint text containing [brackets] isn't parsed
