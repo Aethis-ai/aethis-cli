@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.32.0 (2026-08-05)
+
+Re-uploading a test suite no longer leaves a second copy of it.
+
+- **fix: `aethis generate` replaces the project's test cases instead of adding another copy of them.** `tests/scenarios.yaml` is the authoritative suite and it was uploaded in full on every run, while the API only ever appended — so N authoring cycles left N copies of every case. Nothing errored: duplicates inflate the denominator of every pass rate, so a run reported a total that looked like a result and was partly copies of itself. Two real projects were found holding 185 and 96 cases against files of 42 and 14. The upload now asks the engine to replace, which makes it idempotent.
+- **feat: the count of cases the upload overwrote is reported.** Replacing is destructive — it removes what was on the project — so `aethis generate` prints how many cases went and how many arrived (`Uploaded 42 test case(s) from scenarios.yaml — 42 replaced`) rather than performing it silently.
+- **feat: an engine that cannot replace is named, not worked around quietly.** Replacing needs an engine that offers it, and one that does not offer it does not reject the request — it ignores the member and appends, so sending it blindly would restore the duplication with nothing to notice. The CLI reads the engine's own published schema, sends the flag only where it is advertised, and where it is not — or where the schema could not be read at all, which is a different answer and says so — prints that the upload APPENDED, that running again adds another copy, and what to do about it. Nothing is dropped silently in either direction.
+
 ## 0.31.0 (2026-07-27)
 
 Publish with citations — and be able to cite a document you hold, not just one

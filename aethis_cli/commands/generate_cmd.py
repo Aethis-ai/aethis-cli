@@ -20,7 +20,7 @@ from aethis_cli.config import (
     write_state,
 )
 from aethis_cli.errors import AethisAPIError, ConfigError
-from aethis_cli.output import console, error_panel, info, success
+from aethis_cli.output import console, error_panel, info, success, warn
 
 
 def _chunks(lst: list, n: int):
@@ -441,28 +441,7 @@ def _run_generate(
         _upload_field_vocabulary(client, pid, project_dir)
 
         # Upload test cases
-        tests_path = project_dir / "tests" / "scenarios.yaml"
-        if tests_path.exists():
-            if tests_path.stat().st_size > 1_000_000:
-                console.print(f"[red]{tests_path} exceeds 1 MB limit[/red]")
-                raise typer.Exit(code=1)
-            try:
-                raw = yaml.safe_load(tests_path.read_text()) or {}
-            except yaml.YAMLError as e:
-                console.print(f"[red]Invalid YAML in {tests_path}: {e}[/red]")
-                raise typer.Exit(code=1)
-            test_cases = raw.get("tests", [])
-            if test_cases:
-                normalised = [
-                    {
-                        "name": tc["name"],
-                        "field_values": tc.get("inputs", {}),
-                        "expected_outcome": tc.get("expect", {}).get("outcome", "eligible"),
-                    }
-                    for tc in test_cases
-                ]
-                client.add_tests(pid, normalised)
-                info(f"Added {len(test_cases)} test case(s)")
+        _upload_test_cases(client, pid, project_dir)
 
         # Trigger generation
         if mode == "refine":
@@ -495,6 +474,71 @@ def _run_generate(
     except AethisAPIError as e:
         error_panel(e)
         raise typer.Exit(code=1)
+
+
+def _upload_test_cases(client: AethisClient, pid: str, project_dir: Path) -> None:
+    """Upload `tests/scenarios.yaml` as the project's test cases.
+
+    The file is the authoritative suite, so the upload replaces what is on the
+    project rather than adding to it. That is not free: uploading the same file
+    twice used to leave two copies of every case, and duplicates do not error —
+    they inflate the denominator of every pass rate, so a run reports a total
+    that looks like a result and is partly copies of itself.
+
+    Replacing needs an engine that supports it. Ask the engine rather than
+    assuming, because an engine that does not support it does not say so: it
+    ignores the unknown member and appends, which would restore the duplication
+    with nothing to notice. Where the answer is no — or cannot be read — the
+    upload still happens, and says so.
+    """
+    tests_path = project_dir / "tests" / "scenarios.yaml"
+    if not tests_path.exists():
+        return
+    if tests_path.stat().st_size > 1_000_000:
+        console.print(f"[red]{tests_path} exceeds 1 MB limit[/red]")
+        raise typer.Exit(code=1)
+    try:
+        raw = yaml.safe_load(tests_path.read_text()) or {}
+    except yaml.YAMLError as e:
+        console.print(f"[red]Invalid YAML in {tests_path}: {e}[/red]")
+        raise typer.Exit(code=1)
+    test_cases = raw.get("tests", [])
+    if not test_cases:
+        return
+    normalised = [
+        {
+            "name": tc["name"],
+            "field_values": tc.get("inputs", {}),
+            "expected_outcome": tc.get("expect", {}).get("outcome", "eligible"),
+        }
+        for tc in test_cases
+    ]
+
+    supported = client.supports_test_replace()
+    if supported:
+        result = client.add_tests(pid, normalised, replace=True) or {}
+        added = result.get("added", len(normalised))
+        replaced = result.get("replaced", 0)
+        # The replaced count is the destructive half of an idempotent upload:
+        # it is how many cases this run removed from the project. Printed
+        # always, including the reassuring zero of a first upload.
+        info(f"Uploaded {added} test case(s) from {tests_path.name} — {replaced} replaced")
+        return
+
+    client.add_tests(pid, normalised)
+    info(f"Added {len(normalised)} test case(s)")
+    reason = (
+        "this engine does not offer it"
+        if supported is False
+        else "the engine's API schema could not be read, so its support could not be confirmed"
+    )
+    warn(
+        f"Test cases were APPENDED, not replaced — {reason}. "
+        f"Any cases already on the project are still there, so running this again adds "
+        f"another copy of all {len(normalised)}. Duplicates do not fail: they inflate the "
+        f"total every pass rate is measured against. Remove the extra copies on the "
+        f"project, or point at an engine that supports replacing them."
+    )
 
 
 def _report_field_diff(client: AethisClient, ruleset_id: Optional[str], project_dir: Path) -> None:
