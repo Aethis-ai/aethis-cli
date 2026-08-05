@@ -400,6 +400,13 @@ tests:
       outcome: not_eligible
 ```
 
+This file is the authoritative suite: `aethis generate` uploads it in full and
+**replaces** the project's test cases with it, so running generate twice leaves
+one copy, not two. The upload reports how many existing cases it overwrote. An
+older API host may not offer replacement — where that is so, `aethis generate`
+says the cases were appended and that running again will add another copy,
+rather than leaving you to discover it in an inflated pass-rate total.
+
 ## Environment variables
 
 | Variable | Description | Required | Default |

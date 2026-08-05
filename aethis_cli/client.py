@@ -17,6 +17,11 @@ from aethis_cli.errors import AethisAPIError
 # returns a fresh API key, or raises :class:`AuthRequired` to abort cleanly.
 KeyRefreshCallback = Callable[..., str]
 
+# Marker for "this client has not asked the engine yet". Distinct from both
+# True/False (asked, got an answer) and None (asked, could not tell) — the
+# three states a capability probe genuinely has.
+_UNPROBED = object()
+
 
 class AethisClient:
     """Synchronous client wrapping all Aethis API endpoints."""
@@ -72,6 +77,9 @@ class AethisClient:
         # meaningful joined to the host it was published on — so renderers
         # need to be able to ask.
         self.base_url = base_url
+        # Cached answer to "does this engine accept `replace` on a test-case
+        # upload?" — one probe per client, not one per call.
+        self._test_replace_support: Any = _UNPROBED
 
     def close(self) -> None:
         self._client.close()
@@ -251,14 +259,61 @@ class AethisClient:
         """
         return self._request("GET", f"/api/v1/public/projects/{project_id}/sources")
 
-    def add_tests(self, project_id: str, test_cases: list[dict]) -> dict:
+    def add_tests(self, project_id: str, test_cases: list[dict], replace: bool = False) -> dict:
+        """Upload golden test cases to a project.
+
+        ``replace=True`` makes the upload idempotent: the supplied list becomes
+        the project's test cases instead of being added to whatever is already
+        there, and the response reports ``replaced`` — how many existing cases
+        were overwritten — alongside ``added``.
+
+        Only send it to an engine that advertises it (see
+        :meth:`supports_test_replace`). An engine without the member does not
+        reject the request; it ignores it and appends, which is the silent
+        duplication this flag exists to stop. The member is therefore omitted
+        entirely rather than sent as ``false``, so an engine's own default
+        decides — and so nothing is ever sent that could be quietly dropped.
+        """
+        body: dict = {"test_cases": test_cases}
+        if replace:
+            body["replace"] = True
         return self._request(
             "POST",
             f"/api/v1/public/projects/{project_id}/tests",
-            json={
-                "test_cases": test_cases,
-            },
+            json=body,
         )
+
+    def supports_test_replace(self) -> Optional[bool]:
+        """Does the engine this client talks to accept ``replace`` on a test upload?
+
+        Answered from the engine's own published schema — ``replace`` under
+        ``components.schemas.AddTestCaseRequest.properties`` — rather than from
+        the CLI's version, because the two are deployed independently and the
+        same CLI is pointed at engines of different vintages.
+
+        Returns ``True``/``False`` when the schema answered, and ``None`` when
+        it could not be read at all. **Unknown is not unsupported**: the caller
+        must say which of the two it got, because both mean the upload appends
+        and only one of them means the engine is old.
+        """
+        if self._test_replace_support is not _UNPROBED:
+            return self._test_replace_support  # type: ignore[return-value]
+        answer: Optional[bool]
+        try:
+            resp = self._client.get("/openapi.json", timeout=15.0)
+            if resp.status_code >= 400:
+                answer = None
+            else:
+                schemas = resp.json()["components"]["schemas"]
+                properties = schemas["AddTestCaseRequest"]["properties"]
+                answer = "replace" in properties
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            # Unreachable, non-JSON (an intermediary's error page), or a schema
+            # shaped differently than expected. None of those is evidence about
+            # the engine's behaviour, so none of them may read as an answer.
+            answer = None
+        self._test_replace_support = answer
+        return answer
 
     def set_field_spec(self, project_id: str, expected_fields: list[dict]) -> dict:
         """Pin the project's expected field vocabulary (key + type + enum values).

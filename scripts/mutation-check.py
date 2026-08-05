@@ -174,6 +174,56 @@ MUTATIONS: List[Mutation] = [
         "    keep = list(fields)",
         "--json <fields> loses the enforcement record",
     ),
+    # -- the test-case upload is idempotent, or says it is not -------------
+    Mutation(
+        "tests-upload-appends-again",
+        "aethis_cli/commands/generate_cmd.py",
+        "        result = client.add_tests(pid, normalised, replace=True) or {}",
+        "        result = client.add_tests(pid, normalised) or {}",
+        "every generate run duplicates the whole test suite again",
+    ),
+    Mutation(
+        "capability-gate-bypassed",
+        "aethis_cli/commands/generate_cmd.py",
+        "    supported = client.supports_test_replace()",
+        "    supported = True",
+        "the flag is sent to an engine that would silently ignore it",
+    ),
+    Mutation(
+        "append-warning-silenced",
+        "aethis_cli/commands/generate_cmd.py",
+        '    warn(\n        f"Test cases were APPENDED, not replaced',
+        '    _ = (\n        f"Test cases were APPENDED, not replaced',
+        "an appending upload goes back to being silent",
+    ),
+    Mutation(
+        "replaced-count-hidden",
+        "aethis_cli/commands/generate_cmd.py",
+        'info(f"Uploaded {added} test case(s) from {tests_path.name} — {replaced} replaced")',
+        'info(f"Uploaded {added} test case(s) from {tests_path.name}")',
+        "a destructive overwrite stops being visible",
+    ),
+    Mutation(
+        "unknown-schema-reads-as-supported",
+        "aethis_cli/client.py",
+        "            answer = None\n        self._test_replace_support = answer",
+        "            answer = True\n        self._test_replace_support = answer",
+        "an unreadable schema is treated as a capability the engine may not have",
+    ),
+    Mutation(
+        "capability-probe-matches-substring",
+        "aethis_cli/client.py",
+        'answer = "replace" in properties',
+        'answer = "replace" in str(properties)',
+        "a member merely containing the word reads as the member",
+    ),
+    Mutation(
+        "add-tests-always-replaces",
+        "aethis_cli/client.py",
+        "        if replace:\n            body[\"replace\"] = True",
+        "        if True:\n            body[\"replace\"] = True",
+        "the client sends a destructive flag nobody asked for",
+    ),
 ]
 
 
