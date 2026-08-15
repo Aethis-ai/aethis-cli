@@ -1,6 +1,6 @@
 [project]
 name = "aethis-cli"
-version = "0.34.0"
+version = "0.34.1"
 description = "CLI for the Aethis developer API — author, test, and publish rulesets"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -45,6 +45,12 @@ dev = [
 [build-system]
 requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+# Explicit discovery: auto-discovery aborts the build whenever any other
+# top-level directory exists (the publish workflow itself creates evidence/
+# before building — every release v0.30.0-v0.34.0 failed this way, #94).
+include = ["aethis_cli*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
