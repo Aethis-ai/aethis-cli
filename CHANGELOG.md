@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.34.1 (2026-08-15)
+
+The releases start reaching PyPI again.
+
+- **fix(packaging): explicit package discovery.** Every release from v0.30.0 to v0.34.0 was tagged and never published: the publish workflow's own integrity step creates a top-level `evidence/` directory *before* building, and setuptools flat-layout auto-discovery aborts the build the moment any second top-level directory exists (#94). Discovery is now explicit (`include = ["aethis_cli*"]`), so a stray directory — the workflow's or anyone else's — can no longer poison the build. Proven both ways: with `evidence/` present the build failed before this change and succeeds after it. This release supersedes v0.30.0–v0.34.0, none of which reached PyPI; it is the first PyPI release to carry everything since v0.29.0, including `--no-publish` and the member-set drift report.
+
 ## 0.34.0 (2026-08-15)
 
 Generating a ruleset no longer has to activate it.
