@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.34.0 (2026-08-15)
+
+Generating a ruleset no longer has to activate it.
+
+- **feat: `aethis generate --no-publish` leaves the ruleset an unpublished draft.** A successful `aethis generate --poll` publishes what it produced, and publishing *activates* it. For authoring that must leave a draft behind — a ruleset that only ever activates somewhere else, after promotion — there was no way to opt out, and the only workaround was to archive it immediately afterwards, which leaves a real window where it is live. The flag suppresses the publish and nothing else: the poll, its timeout, and the post-generation field diff are untouched, because those are what make the run worth doing.
+- **feat: the ending says which one it was.** A run that was told not to publish reads differently from one whose publish failed. Both leave a draft and both point at `aethis publish`, so collapsing them would tell an author who never passed the flag that everything went to plan — precisely when they most need to know it did not. The deliberate ending names the flag; the failure ending is unchanged.
+- **Unchanged without the flag.** It defaults off, and `aethis refine`, which shares the same machinery, was not asked to change and does not: the publish still happens on the same call with the same argument.
+
 ## 0.33.0 (2026-08-15)
 
 A pinned enum's members are checked, not just its name — and the check survives
