@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.35.0 (2026-08-15)
+
+Named value spaces reach the wire (aethis-core#424, epic aethis-workspace#980 P3). Requires an engine exposing `/api/v1/public/value-spaces` for referenced fields; projects with no `value_space:` pins are unaffected.
+
+- **feat(fields): `value_space:` on a field pin.** `fields.yaml` enum fields may reference a named, versioned value space (e.g. `value_space: form-an/countries`) instead of inlining `enum_values` — the engine expands the members deterministically and the model never authors them. The two are mutually exclusive per field, validated locally; reference-form enums no longer fail the "enum needs enum_values" check.
+- **feat(generate): registry sync before spec-set.** Locally-authored space files (`value_spaces/` or `shared/value_spaces/*.yaml`, wire-form `name/members/provenance`) are PUT to the engine registry before the field spec is pushed, carrying the sync-state base version so a stale checkout gets the engine's 409 ("space moved under you — pull first") instead of silently regressing the shared vocabulary. Any non-2xx aborts before spec-set naming the missing engine capability — an older engine ignores unknown pin keys and would otherwise silently drop the reference.
+- **feat(generate): registry-aware drift report.** A referenced field is verified against the registry at the exact version the generation resolved (from the job result), printing `<key> ← <space>@vN (M members verified)` — never the old "pins no enum_values ⇒ opts out" silence on exactly the migrated fields. A space that advanced between sync and generation is flagged. An unverifiable referenced field is reported, never skipped.
+- **feat(fields): `pull` preserves the migration.** A local field declaring `value_space:` keeps the reference; the server's expanded members are never written back into `fields.yaml`.
 
 ## 0.34.1 (2026-08-15)
 
