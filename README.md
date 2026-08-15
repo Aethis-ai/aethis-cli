@@ -182,7 +182,8 @@ The same contract and the same exit codes apply to
 | Command | Description |
 |---------|-------------|
 | `aethis init` | Initialise a new project in the current directory |
-| `aethis generate [--poll]` | Upload sources + guidance, trigger generation |
+| `aethis generate [--poll]` | Upload sources + guidance, trigger generation. A successful `--poll` run publishes the ruleset, making it active |
+| `aethis generate --no-publish` | The same run, leaving the ruleset an unpublished draft — for workflows where activation is separately gated |
 | `aethis status` | Check generation job progress |
 | `aethis test` | Run test cases against the latest ruleset |
 | `aethis publish [--force]` | Set the latest ruleset as active |

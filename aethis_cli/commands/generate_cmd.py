@@ -354,6 +354,11 @@ def generate(
         "--seed-ruleset-id",
         help="Ruleset to seed a refine from (defaults to the section's active ruleset)",
     ),
+    no_publish: bool = typer.Option(
+        False,
+        "--no-publish",
+        help="Leave the generated ruleset unpublished (a draft) instead of activating it",
+    ),
 ) -> None:
     """Upload sources + guidance, trigger ruleset generation, and poll until done."""
     _run_generate(
@@ -362,6 +367,7 @@ def generate(
         timeout=timeout,
         mode=mode,
         seed_ruleset_id=seed_ruleset_id,
+        no_publish=no_publish,
     )
 
 
@@ -373,8 +379,14 @@ def _run_generate(
     mode: str = "fresh",
     seed_ruleset_id: Optional[str] = None,
     extra_hint: Optional[str] = None,
+    no_publish: bool = False,
 ) -> None:
-    """Shared machinery for ``aethis generate`` and ``aethis refine``."""
+    """Shared machinery for ``aethis generate`` and ``aethis refine``.
+
+    ``no_publish`` defaults off, and ``aethis refine`` does not pass it: this
+    is the plumbing for one flag on one command, not a change of default for
+    everything that shares the machinery.
+    """
     try:
         cfg = load_project_config()
         api_key = resolve_api_key(cfg)
@@ -464,7 +476,7 @@ def _run_generate(
             return
 
         # Poll with progress spinner
-        outcome = _poll_until_done(client, pid, project_dir, timeout)
+        outcome = _poll_until_done(client, pid, project_dir, timeout, no_publish=no_publish)
 
         # Surface how the produced field vocabulary compares to what was pinned,
         # rather than letting any drift pass silently. The comparison is always
@@ -726,7 +738,14 @@ def _invalidate_stale_pointer(project_dir: Path, status: str) -> None:
     )
 
 
-def _poll_until_done(client: AethisClient, pid: str, project_dir: Path, timeout: int = 600) -> GenerationOutcome:
+def _poll_until_done(
+    client: AethisClient,
+    pid: str,
+    project_dir: Path,
+    timeout: int = 600,
+    *,
+    no_publish: bool = False,
+) -> GenerationOutcome:
     """Poll a generation to completion and report how it ended.
 
     Returns rather than raising on failure. Raising here is what made the
@@ -735,6 +754,11 @@ def _poll_until_done(client: AethisClient, pid: str, project_dir: Path, timeout:
     prints the diff, so a failed generation said "Generation failed" and
     nothing about what the model had actually produced. Exiting is the
     caller's job, after it has reported.
+
+    ``no_publish`` suppresses the publish on success and nothing else. It is
+    threaded down to here rather than handled by the caller because this is
+    where the publish happens, and a caller that published afterwards would
+    reintroduce the activation the flag exists to prevent.
     """
     deadline = time.monotonic() + timeout
     with Progress(
@@ -772,6 +796,23 @@ def _poll_until_done(client: AethisClient, pid: str, project_dir: Path, timeout:
                 if ruleset_id:
                     write_state(project_dir, {"ruleset_id": ruleset_id})
                 console.print()
+                if no_publish:
+                    # Publishing ACTIVATES the ruleset, which is the wrong
+                    # ending for authoring that must leave a draft behind. Say
+                    # the flag's name: this reads much like the publish-failed
+                    # message below, and an author needs to tell the ending
+                    # they chose from the one that happened to them.
+                    if ruleset_id:
+                        success(
+                            f"Done! Ruleset: {ruleset_id} — left unpublished (--no-publish); "
+                            f"run 'aethis publish' to activate it."
+                        )
+                    else:
+                        success(
+                            "Done! Ruleset generated and left unpublished (--no-publish) — run "
+                            "'aethis status' to get its id, then 'aethis publish' to activate it."
+                        )
+                    return GenerationOutcome("success", ruleset_id)
                 # Auto-publish so the ruleset is immediately usable
                 try:
                     client.publish(pid)
