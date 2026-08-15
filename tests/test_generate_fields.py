@@ -297,10 +297,7 @@ def test_report_field_diff_flags_drift(tmp_path, capsys):
 # ---------------------------------------------------------------------------
 
 SENTINEL_FIELDS = (
-    "fields:\n"
-    "  - key: ref.defect_waived\n"
-    "    type: enum\n"
-    "    enum_values: [waived, waived_after_referee_contact]\n"
+    "fields:\n  - key: ref.defect_waived\n    type: enum\n    enum_values: [waived, waived_after_referee_contact]\n"
 )
 
 
@@ -328,9 +325,7 @@ def test_report_field_diff_flags_a_padded_enum_member_set(tmp_path, capsys):
 def test_report_field_diff_flags_a_dropped_enum_member(tmp_path, capsys):
     _write_fields(tmp_path / "fields" / "fields.yaml", SENTINEL_FIELDS)
     client = MagicMock()
-    client.get_schema.return_value = {
-        "fields": [{"field_id": "ref.defect_waived", "enum_values": ["waived"]}]
-    }
+    client.get_schema.return_value = {"fields": [{"field_id": "ref.defect_waived", "enum_values": ["waived"]}]}
     generate_cmd._report_field_diff(client, "rs_1", tmp_path)
     out = capsys.readouterr().out
     assert "waived_after_referee_contact" in out
