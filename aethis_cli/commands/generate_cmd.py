@@ -289,14 +289,16 @@ def _local_value_space_files(project_dir: Path) -> dict:
     A registry file is the wire-form upsert payload (``name``, ``members``,
     ``provenance`` — extra generator keys like ``derived_from`` are ignored),
     found under a ``value_spaces/`` or ``shared/value_spaces/`` directory of
-    the project, its enclosing rulebook, or any ancestor directory (form-an
-    keeps them at the repo root's ``shared/value_spaces/``). Nearest wins.
+    the project, its enclosing rulebook, or any ancestor directory UP TO THE
+    REPO ROOT (form-an keeps them at the repo root's ``shared/value_spaces/``).
+    The walk stops at the first ancestor containing ``.git`` — a same-named
+    yaml lying above the repo must never be silently PUT. Nearest wins.
     """
     search_dirs: list[Path] = []
     current = project_dir.resolve()
     while True:
         search_dirs.append(current)
-        if current.parent == current:
+        if (current / ".git").exists() or current.parent == current:
             break
         current = current.parent
     rb_dir = _parent_rulebook_dir(project_dir)
@@ -316,6 +318,18 @@ def _local_value_space_files(project_dir: Path) -> dict:
     return spaces
 
 
+def _api_error_message(e: AethisAPIError) -> str:
+    """A human-readable line from an API error whose detail may be structured.
+
+    The engine's value-space conflicts carry a dict detail (reason_code +
+    message + versions); printing the dict repr buries the one sentence the
+    author needs (review advisory, PR #110).
+    """
+    if isinstance(e.detail, dict):
+        return str(e.detail.get("message") or e.detail)
+    return str(e.detail)
+
+
 def _sync_value_spaces(client: AethisClient, project_dir: Path, referenced: set) -> None:
     """PUT every locally-authored space a pin references, before spec-set.
 
@@ -333,11 +347,37 @@ def _sync_value_spaces(client: AethisClient, project_dir: Path, referenced: set)
     for name in sorted(referenced):
         space = local.get(name)
         if space is None:
-            warn(
-                f"No local registry file found for value space '{name}' "
-                f"(looked for a value_spaces/ or shared/value_spaces/ yaml declaring it). "
-                f"Assuming it is already registered on the engine — the field spec push "
-                f"will fail loudly if it is not."
+            # No local file: the space may be registered by another project —
+            # but the abort guarantee must not go vacuous on exactly this
+            # lane, so PROBE the engine rather than proceed on hope. A 2xx
+            # proves both the registry capability and tenant resolution; any
+            # non-2xx (route missing, unknown/foreign space, outage) aborts —
+            # a pre-#424 engine would 200 the spec-set and silently drop the
+            # pin (review fix, PR #110).
+            try:
+                probe = client.get_value_space(name)
+            except AethisAPIError as e:
+                if e.status_code == 404:
+                    console.print(
+                        f"[red]Value space '{name}' is not resolvable on the engine "
+                        f"(GET /api/v1/public/value-spaces/{name} returned 404): either it is "
+                        f"not registered for this tenant, or the engine lacks the "
+                        f"value-spaces registry entirely.[/red]"
+                    )
+                    console.print(
+                        "[red]Stopping before the field spec push. Add a local registry "
+                        "file (value_spaces/ or shared/value_spaces/*.yaml declaring it) "
+                        "so this run can register it, or upgrade the engine.[/red]"
+                    )
+                else:
+                    console.print(
+                        f"[red]Could not verify value space '{name}' on the engine: {_api_error_message(e)}[/red]"
+                    )
+                    console.print("[red]Stopping before the field spec push.[/red]")
+                raise typer.Exit(code=1)
+            info(
+                f"Value space '{name}': no local registry file; engine serves it at "
+                f"v{probe.get('version')} — proceeding."
             )
             continue
         try:
@@ -360,17 +400,20 @@ def _sync_value_spaces(client: AethisClient, project_dir: Path, referenced: set)
                     "value_space reference from fields.yaml.[/red]"
                 )
             else:
-                console.print(f"[red]Could not sync value space '{name}': {e.detail}[/red]")
+                console.print(f"[red]Could not sync value space '{name}': {_api_error_message(e)}[/red]")
                 console.print(
                     "[red]Stopping before the field spec push — a pin referencing an "
                     "unsynced space would fail, or bind to stale members.[/red]"
                 )
             raise typer.Exit(code=1)
+        # Record each synced version the moment its PUT lands — a later
+        # space's abort must not lose this one's base version (review
+        # advisory, PR #110: the retry would otherwise 409 against the
+        # author's own successful write).
         sync_state[name] = result.get("version")
+        write_state(project_dir, {"value_space_sync": dict(sync_state)})
         verb = "synced" if result.get("created") else "already current at"
         info(f"Value space '{name}' {verb} v{result.get('version')} ({len(space.get('members') or [])} members)")
-
-    write_state(project_dir, {"value_space_sync": sync_state})
 
 
 def _upload_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) -> None:

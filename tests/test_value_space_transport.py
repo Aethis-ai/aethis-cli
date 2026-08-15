@@ -188,18 +188,124 @@ def test_registry_sync_uses_and_records_base_version(tmp_path):
     assert read_state(project)["value_space_sync"]["form-an/countries"] == 4
 
 
-def test_reference_without_local_file_warns_but_proceeds(tmp_path, capsys):
-    """A reference with no local registry file may already be registered
-    server-side (another project authored it). The sync says so out loud and
-    lets spec-set's 422 be the loud gate for a genuinely unknown space."""
+def test_reference_without_local_file_probes_the_engine_then_proceeds(tmp_path, capsys):
+    """Review fix (PR #110): a reference with no local registry file may be
+    registered by another project — but the DX-6 abort guarantee must not be
+    vacuous on exactly this lane. The sync PROBES the engine
+    (GET /value-spaces/{name}); a 2xx proves both the capability and tenant
+    resolution, and only then does spec-set proceed."""
     project = _project_with_reference(tmp_path, space_file=False)
     client = MagicMock()
+    client.get_value_space.return_value = {
+        "name": "form-an/countries",
+        "version": 3,
+        "members": ["united_kingdom"],
+    }
 
     generate_cmd._upload_field_vocabulary(client, "proj_1", project)
 
     client.put_value_space.assert_not_called()
+    client.get_value_space.assert_called_once_with("form-an/countries")
     client.set_field_spec.assert_called_once()
     assert "form-an/countries" in _flat(capsys)
+
+
+def test_reference_without_local_file_aborts_when_engine_lacks_it(tmp_path, capsys):
+    """The 404 abort shape: unknown space OR missing registry capability —
+    either way, proceeding would let a pre-#424 engine silently drop the pin."""
+    project = _project_with_reference(tmp_path, space_file=False)
+    client = MagicMock()
+    client.get_value_space.side_effect = AethisAPIError(404, "Not Found")
+
+    with pytest.raises(typer.Exit):
+        generate_cmd._upload_field_vocabulary(client, "proj_1", project)
+
+    client.set_field_spec.assert_not_called()
+    out = _flat(capsys)
+    assert "form-an/countries" in out
+    assert "value-spaces" in out or "registry" in out
+
+
+def test_reference_without_local_file_aborts_on_any_non_2xx(tmp_path, capsys):
+    """The non-404 abort shape: a 5xx probe failure is not evidence the
+    reference will survive spec-set — abort rather than guess."""
+    project = _project_with_reference(tmp_path, space_file=False)
+    client = MagicMock()
+    client.get_value_space.side_effect = AethisAPIError(503, "Service Unavailable")
+
+    with pytest.raises(typer.Exit):
+        generate_cmd._upload_field_vocabulary(client, "proj_1", project)
+
+    client.set_field_spec.assert_not_called()
+
+
+def test_sync_state_is_written_incrementally_per_space(tmp_path):
+    """Review advisory (PR #110): a partial-sync abort must not lose the
+    versions already recorded — space A's PUT succeeded, so its version is
+    on disk even though space B's PUT aborted the run."""
+    fields = REFERENCED_FIELDS + "  - key: res.country\n    type: enum\n    value_space: form-an/regions\n"
+    _write(tmp_path / "fields" / "fields.yaml", fields)
+    _write(tmp_path / "shared" / "value_spaces" / "form-an__countries.yaml", SPACE_FILE)
+    _write(
+        tmp_path / "shared" / "value_spaces" / "form-an__regions.yaml",
+        SPACE_FILE.replace("form-an/countries", "form-an/regions"),
+    )
+    client = MagicMock()
+
+    def _put(*, name, **kwargs):
+        if name == "form-an/regions":
+            raise AethisAPIError(409, "moved under you — pull first")
+        return {"name": name, "version": 7, "created": True}
+
+    client.put_value_space.side_effect = _put
+
+    with pytest.raises(typer.Exit):
+        generate_cmd._upload_field_vocabulary(client, "proj_1", tmp_path)
+
+    # countries sorts before regions, so its successful PUT preceded the
+    # abort — and its recorded version must have survived it.
+    assert read_state(tmp_path)["value_space_sync"]["form-an/countries"] == 7
+
+
+def test_local_registry_walk_is_bounded_at_the_repo_root(tmp_path):
+    """Review advisory (PR #110): the ancestor walk stops at the repo root —
+    a same-named yaml lying above it must never be silently PUT."""
+    repo = tmp_path / "outside" / "repo"
+    project = repo / "rulesets" / "child"
+    project.mkdir(parents=True)
+    (repo / ".git").mkdir()
+    # The poisoned file sits ABOVE the repo root.
+    _write(tmp_path / "outside" / "shared" / "value_spaces" / "form-an__countries.yaml", SPACE_FILE)
+
+    spaces = generate_cmd._local_value_space_files(project)
+    assert "form-an/countries" not in spaces
+
+    # The same file INSIDE the repo root is found.
+    _write(repo / "shared" / "value_spaces" / "form-an__countries.yaml", SPACE_FILE)
+    spaces = generate_cmd._local_value_space_files(project)
+    assert "form-an/countries" in spaces
+
+
+def test_sync_abort_prints_the_engine_message_not_a_dict_repr(tmp_path, capsys):
+    """Review advisory (PR #110): a structured 409 detail is rendered by its
+    message, never as a raw dict repr."""
+    project = _project_with_reference(tmp_path)
+    client = MagicMock()
+    client.put_value_space.side_effect = AethisAPIError(
+        409,
+        {
+            "reason_code": "value_space_moved",
+            "message": "Space 'form-an/countries' moved under you (current version 3, you based on 1) — pull first",
+            "current_version": 3,
+        },
+    )
+
+    with pytest.raises(typer.Exit):
+        generate_cmd._upload_field_vocabulary(client, "proj_1", project)
+
+    out = _flat(capsys)
+    assert "moved under you" in out
+    assert "reason_code" not in out  # no raw dict repr
 
 
 # --- registry-aware drift report (C3 / C5(d)) --------------------------------
