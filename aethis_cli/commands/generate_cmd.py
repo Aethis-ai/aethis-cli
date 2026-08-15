@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Optional
+from typing import NamedTuple, Optional
 
 import typer
 import yaml
@@ -464,15 +464,27 @@ def _run_generate(
             return
 
         # Poll with progress spinner
-        _poll_until_done(client, pid, project_dir, timeout)
+        outcome = _poll_until_done(client, pid, project_dir, timeout)
 
         # Surface how the produced field vocabulary compares to what was pinned,
-        # rather than letting any drift pass silently.
-        ruleset_id = read_state(project_dir).get("ruleset_id")
-        _report_field_diff(client, ruleset_id, project_dir)
+        # rather than letting any drift pass silently. The comparison is always
+        # against the artefact THIS run produced — never whatever id happens to
+        # be on disk, which after an unsuccessful run names an earlier
+        # generation and would make a stale schema read as this one's.
+        _report_field_diff(client, outcome.ruleset_id, project_dir)
+
+        if outcome.status != "success":
+            _invalidate_stale_pointer(project_dir, outcome.status)
+            raise typer.Exit(code=1)
 
     except AethisAPIError as e:
         error_panel(e)
+        # An API error anywhere in the run — including mid-poll, where the job
+        # itself may well have succeeded — leaves the recorded id naming an
+        # earlier generation. Nothing has been ruled, so the id stands; but it
+        # is named, because otherwise this ending is the one that reintroduces
+        # the silent stale `fields pull`.
+        _invalidate_stale_pointer(project_dir, "error")
         raise typer.Exit(code=1)
 
 
@@ -546,23 +558,72 @@ def _report_field_diff(client: AethisClient, ruleset_id: Optional[str], project_
 
     Compares the fields pinned locally (``fields.yaml`` + any enclosing
     rulebook) against the fields the engine actually produced in the ruleset
-    schema. Best-effort: a fetch failure is swallowed so it never masks a
-    successful generation.
+    schema — both the *key set* and, for ENUMs, the *member set*.
+
+    The member half matters as much as the key half. Generation can return a
+    field that is present and correctly typed while its enum members have
+    grown a value nobody pinned; for an escape-hatch sentinel (defect-shapes
+    DS-55) one extra member re-arms the exploit the pin existed to remove, and
+    no golden test can catch it — a golden occupying the hostile cell would
+    *be* the exploit. Checking keys alone printed "all N pinned field(s) were
+    produced" over exactly that schema five times in a row (aethis-core#421).
+
+    ``ruleset_id`` is the artefact *this* run produced, or ``None`` when the run
+    produced none. There is deliberately no fallback to the last recorded id: a
+    diff against an earlier generation is worse than no diff, because it reads
+    exactly like one of this run.
+
+    Never fails the command — a schema that cannot be read must not turn a
+    successful generation into an error — but never silent either. Both "there
+    was nothing to compare" and "the comparison could not be made" are said out
+    loud, because the alternative is a run that prints no verdict at all and is
+    indistinguishable from a clean one.
     """
-    if not ruleset_id:
-        return
-    pinned = set(_merged_field_map(project_dir).keys())
+    pinned_map = _merged_field_map(project_dir)
+    pinned = set(pinned_map.keys())
     if not pinned:
+        return
+    if not ruleset_id:
+        warn(
+            "No ruleset was recorded for this run, so the pinned-vs-produced field "
+            "diff was not computed. Nothing was compared against an earlier ruleset."
+        )
         return
     try:
         schema = client.get_schema(ruleset_id)
-    except AethisAPIError:
+    except AethisAPIError as e:
+        warn(
+            f"Could not read the schema of ruleset {ruleset_id} ({e}), so the "
+            f"pinned-vs-produced field diff was not computed. The draft may no "
+            f"longer be retrievable."
+        )
         return
-    produced = {f.get("field_id") for f in schema.get("fields", []) or [] if f.get("field_id")}
+    schema_fields = schema.get("fields", []) or []
+    produced = {f.get("field_id") for f in schema_fields if f.get("field_id")}
+    produced_members = {f["field_id"]: set(f.get("enum_values") or []) for f in schema_fields if f.get("field_id")}
 
     missing = sorted(pinned - produced)
     extra = sorted(produced - pinned)
-    if not missing and not extra:
+
+    # Member-set drift, per field, by exact equality in both directions. A
+    # field that pins no enum_values opts out — that is the only opt-out.
+    #
+    # A produced field carrying NO members is the loudest case, not an exempt
+    # one: every pinned member was dropped, or the field came back as something
+    # other than an enum. Skipping it (as an earlier revision did, reading an
+    # empty set as "nothing to compare") reported the worst possible outcome as
+    # "all N pinned field(s) were produced".
+    member_drift: list[tuple[str, list[str], list[str]]] = []
+    for key, field in sorted(pinned_map.items()):
+        pinned_members = set(field.get("enum_values") or [])
+        if not pinned_members or key not in produced_members:
+            continue
+        actual_members = produced_members[key]
+        if actual_members == pinned_members:
+            continue
+        member_drift.append((key, sorted(actual_members - pinned_members), sorted(pinned_members - actual_members)))
+
+    if not missing and not extra and not member_drift:
         success(f"Fields: all {len(pinned)} pinned field(s) were produced.")
         return
 
@@ -570,10 +631,111 @@ def _report_field_diff(client: AethisClient, ruleset_id: Optional[str], project_
         console.print(f"[yellow]Pinned but not produced:[/yellow] {', '.join(missing)}")
     if extra:
         console.print(f"[yellow]Produced but not pinned:[/yellow] {', '.join(extra)}")
+    for key, unpinned, dropped in member_drift:
+        detail = []
+        if unpinned:
+            detail.append(f"added {', '.join(unpinned)}")
+        if dropped:
+            detail.append(f"dropped {', '.join(dropped)}")
+        if not produced_members.get(key):
+            detail.append("the produced field declares no members at all")
+        console.print(f"[red]Enum members differ from the pin:[/red] {key} — {'; '.join(detail)}")
+    if member_drift:
+        console.print(
+            "[dim]A generated member the spec did not pin can change decisions "
+            "no test case covers — check it before publishing.[/dim]"
+        )
     console.print("[dim]Run 'aethis fields pull' to sync fields.yaml with what was generated.[/dim]")
 
 
-def _poll_until_done(client: AethisClient, pid: str, project_dir: Path, timeout: int = 600) -> None:
+class GenerationOutcome(NamedTuple):
+    """How a polled generation ended, and what artefact (if any) it produced.
+
+    ``ruleset_id`` is the best available identifier for what this run produced,
+    and it is never read back from local state — a diff against a previously
+    recorded ruleset reads exactly like one of this run, which is worse than no
+    diff at all. It is ``None`` whenever nothing named one, which includes
+    every failure today: ``result_ruleset_id`` is written only on the engine's
+    success paths, so a failed job usually names no draft. Callers must treat
+    ``None`` as "nothing to compare", not as "look it up somewhere else".
+
+    What is *guaranteed* differs by source, so do not read more into it than
+    ``_resolved_ruleset_id`` provides: the job's own ``result_ruleset_id`` is
+    this run's artefact; the ``latest_ruleset_id`` fallback is the project's
+    newest, which under a concurrent generation on the same project may belong
+    to another run.
+    """
+
+    status: str  # "success" | "failed" | "timeout"
+    ruleset_id: Optional[str]
+
+
+def _resolved_ruleset_id(status_payload: dict) -> Optional[str]:
+    """The ruleset a generation produced, preferring the job's own record.
+
+    ``result_ruleset_id`` is set on the **job**, so it identifies that run's
+    artefact. ``latest_ruleset_id`` is set on the **project**, so it identifies
+    whatever was generated most recently by anyone — under two generations
+    against one project (aethis-core#420) that is not necessarily this one. The
+    fallback is kept because an engine may record no id on the job at all, but
+    it is a fallback, not an equivalent.
+    """
+    job = status_payload.get("job") or {}
+    return job.get("result_ruleset_id") or status_payload.get("latest_ruleset_id")
+
+
+def _invalidate_stale_pointer(project_dir: Path, status: str) -> None:
+    """Stop an unsuccessful run leaving a pointer that reads like its result.
+
+    ``.aethis/state.json``'s ``ruleset_id`` is written only when a generation
+    succeeds, and it is what ``aethis fields pull`` (and ``decide`` / ``explain``
+    / ``fields``) default to. After an unsuccessful run it therefore still names
+    an **earlier** generation, and the next `fields pull` syncs from that one
+    with nothing said — the author sees fields appear and reasonably reads them
+    as the ones just generated.
+
+    The unsuccessful endings are not the same and are not treated the same.
+    The discriminator is whether the run has been **ruled on**:
+
+    - **failed** — the engine has ruled on this run, and the recorded id is
+      known not to describe it. The pointer is cleared, so the next `fields
+      pull` refuses with "No ruleset_id" instead of quietly using the old
+      ruleset. The id is printed so nothing is lost: it can still be passed
+      with ``--ruleset-id``.
+    - **timeout**, **error** — nothing has been ruled; the job may still be
+      running, or may have succeeded while the poll broke, and no other command
+      writes this pointer, so clearing it would discard a live reference over a
+      client-side clock or a transient 500. The pointer stands and is named
+      instead, which is what "not silently" requires.
+    """
+    prior = read_state(project_dir).get("ruleset_id")
+    if not prior:
+        return
+    if status != "failed":
+        warn(
+            f"'.aethis/state.json' still records ruleset {prior} from an earlier generation. "
+            f"This run has not produced one, so 'aethis fields pull' would sync from that "
+            f"earlier ruleset rather than from this job."
+        )
+        return
+    write_state(project_dir, {"ruleset_id": None})
+    warn(
+        f"Cleared the recorded ruleset {prior} — it is from an earlier generation, not this "
+        f"one, so 'aethis fields pull' will refuse rather than silently sync from it. Pass "
+        f"'--ruleset-id {prior}' explicitly if that earlier ruleset is what you want."
+    )
+
+
+def _poll_until_done(client: AethisClient, pid: str, project_dir: Path, timeout: int = 600) -> GenerationOutcome:
+    """Poll a generation to completion and report how it ended.
+
+    Returns rather than raising on failure. Raising here is what made the
+    post-generation drift report unreachable in the one case it was written
+    for: the exception left the poll loop several frames below the call that
+    prints the diff, so a failed generation said "Generation failed" and
+    nothing about what the model had actually produced. Exiting is the
+    caller's job, after it has reported.
+    """
     deadline = time.monotonic() + timeout
     with Progress(
         SpinnerColumn(),
@@ -591,15 +753,20 @@ def _poll_until_done(client: AethisClient, pid: str, project_dir: Path, timeout:
 
             if job_status == "success":
                 progress.update(task, completed=100)
-                ruleset_id = result.get("latest_ruleset_id")
-                # The engine can report success a beat before latest_ruleset_id
-                # is populated. Re-poll briefly so the state write — and the
+                # The job's own id first: `latest_ruleset_id` is a property of
+                # the PROJECT, so under two generations against one project
+                # (aethis-core#420) it can name somebody else's artefact. It
+                # stays as the fallback because engines that record nothing on
+                # the job still have to yield something usable.
+                ruleset_id = _resolved_ruleset_id(result)
+                # The engine can report success a beat before either id is
+                # populated. Re-poll briefly so the state write — and the
                 # `fields pull` / field-diff steps that read it — don't miss it.
                 for _ in range(5):
                     if ruleset_id:
                         break
                     time.sleep(2)
-                    ruleset_id = client.get_status(pid).get("latest_ruleset_id")
+                    ruleset_id = _resolved_ruleset_id(client.get_status(pid))
                 # Only record a real id — never clobber a prior good one with None
                 # if the engine was slow to surface it.
                 if ruleset_id:
@@ -617,14 +784,19 @@ def _poll_until_done(client: AethisClient, pid: str, project_dir: Path, timeout:
                         success(f"Done! Ruleset: {ruleset_id} (run 'aethis publish' to activate)")
                     else:
                         success("Done! Ruleset generated (run 'aethis publish' to activate).")
-                return
+                return GenerationOutcome("success", ruleset_id)
 
             if job_status == "failed":
                 console.print()
                 console.print(f"[bold red]Generation failed:[/bold red] {job.get('error_message', 'unknown error')}")
-                raise typer.Exit(code=1)
+                # Whatever draft the engine attached to the failed job — today
+                # usually nothing, since result_ruleset_id is written only on
+                # its success paths. Read it rather than assume: if the engine
+                # ever does attach one, the diff below becomes useful for free,
+                # and there is no other id that could honestly stand in.
+                return GenerationOutcome("failed", job.get("result_ruleset_id"))
 
             time.sleep(3)
 
     console.print(f"\n[bold red]Timed out after {timeout}s.[/bold red] Use 'aethis status' to check progress.")
-    raise typer.Exit(code=1)
+    return GenerationOutcome("timeout", None)
