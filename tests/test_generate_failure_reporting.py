@@ -271,6 +271,86 @@ def test_a_success_still_records_the_ruleset_id_and_diffs_it(tmp_path, monkeypat
     assert "all 1 pinned field(s) were produced" in _flat(capsys)
 
 
+def test_a_success_prefers_the_jobs_own_ruleset_over_the_projects_newest(tmp_path, monkeypatch, capsys):
+    """`latest_ruleset_id` is a property of the PROJECT, not of this job.
+
+    Two generations running against one project (the aethis-core#420 shape)
+    make the project's newest ruleset somebody else's artefact. Where the job
+    names its own, that is the only honest answer — for the diff and for the
+    id written to disk.
+    """
+    _project(tmp_path)
+    client = _engine(
+        {
+            "job": {"status": "success", "result_ruleset_id": "rs_this_job"},
+            "latest_ruleset_id": "rs_a_concurrent_run",
+        },
+        schema={"fields": [{"field_id": "ref.defect_waived", "enum_values": PINNED_MEMBERS}]},
+    )
+    _wire(monkeypatch, tmp_path, client)
+
+    _run()
+
+    assert client.get_schema.call_args[0][0] == "rs_this_job", "the diff must not bind another run's artefact"
+    assert read_state(tmp_path)["ruleset_id"] == "rs_this_job", (
+        "the recorded id is what every later command defaults to; it must name this job's ruleset"
+    )
+
+
+def test_a_success_falls_back_to_the_projects_newest_when_the_job_names_none(tmp_path, monkeypatch, capsys):
+    """An engine that records no id on the job still has to yield something usable."""
+    _project(tmp_path)
+    client = _engine(
+        {"job": {"status": "success"}, "latest_ruleset_id": "rs_new"},
+        schema={"fields": [{"field_id": "ref.defect_waived", "enum_values": PINNED_MEMBERS}]},
+    )
+    _wire(monkeypatch, tmp_path, client)
+
+    _run()
+
+    assert read_state(tmp_path)["ruleset_id"] == "rs_new"
+
+
+def test_a_success_repolled_for_an_id_reads_the_jobs_own(tmp_path, monkeypatch, capsys):
+    """The re-poll for a late id must prefer the job's field too, not only the project's."""
+    _project(tmp_path)
+    client = _engine({"job": {"status": "success"}})
+    client.get_status.side_effect = [
+        {"job": {"status": "success"}},  # success reported before any id is populated
+        {"job": {"status": "success", "result_ruleset_id": "rs_late"}},
+    ]
+    client.get_schema.return_value = {"fields": [{"field_id": "ref.defect_waived", "enum_values": PINNED_MEMBERS}]}
+    _wire(monkeypatch, tmp_path, client)
+
+    _run()
+
+    assert read_state(tmp_path)["ruleset_id"] == "rs_late"
+    assert client.get_schema.call_args[0][0] == "rs_late"
+
+
+def test_a_mid_poll_api_error_names_the_stale_pointer(tmp_path, monkeypatch, capsys):
+    """The sixth ending: the poll itself errors out.
+
+    Like a timeout, nothing has been ruled — the job may well have succeeded —
+    so the recorded id stands. What must not stand is silence about it: it
+    names an earlier generation and `aethis fields pull` would use it.
+    """
+    _project(tmp_path)
+    write_state(tmp_path, {"ruleset_id": "rs_from_an_earlier_run"})
+    client = _engine({"job": {"status": "running", "progress_percent": 10}})
+    client.get_status.side_effect = AethisAPIError(500, "upstream unavailable")
+    _wire(monkeypatch, tmp_path, client)
+
+    with pytest.raises(typer.Exit) as exc:
+        _run()
+
+    assert exc.value.exit_code == 1
+    assert read_state(tmp_path).get("ruleset_id") == "rs_from_an_earlier_run", (
+        "an API error rules nothing out; the last known good id is not invalidated by it"
+    )
+    assert "rs_from_an_earlier_run" in _flat(capsys), "the stale pointer must be named on this ending too"
+
+
 def test_a_success_that_never_surfaces_an_id_diffs_nothing(tmp_path, monkeypatch, capsys):
     """A success with no id must not be diffed against the previous ruleset either."""
     _project(tmp_path)

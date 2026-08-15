@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -19,6 +20,20 @@ from aethis_cli.config import read_state, write_state
 def _write_fields(path, body: str):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body)
+
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _flat(capsys) -> str:
+    """Captured output with rich's presentation removed.
+
+    Rich emits style codes into captured output whenever colour is forced in
+    the environment (``FORCE_COLOR``), and its highlighter puts them *inside*
+    phrases like "all 1 pinned field(s)" — so a plain substring assertion
+    fails there about markup rather than about behaviour.
+    """
+    return re.sub(r"\s+", " ", _ANSI.sub("", capsys.readouterr().out))
 
 
 RULESET_FIELDS = """\
@@ -280,7 +295,7 @@ def test_report_field_diff_flags_drift(tmp_path, capsys):
         ]
     }
     generate_cmd._report_field_diff(client, "rs_1", tmp_path)
-    out = capsys.readouterr().out
+    out = _flat(capsys)
     assert "applicant.date_of_birth" in out  # pinned but not produced
     assert "applicant.surprise" in out  # produced but not pinned
 
@@ -314,7 +329,7 @@ def test_report_field_diff_flags_a_padded_enum_member_set(tmp_path, capsys):
         ]
     }
     generate_cmd._report_field_diff(client, "rs_1", tmp_path)
-    out = capsys.readouterr().out
+    out = _flat(capsys)
     assert "not_reviewed" in out, "the unpinned member must be named"
     assert "ref.defect_waived" in out
     assert "all 1 pinned field(s) were produced" not in out, (
@@ -327,7 +342,7 @@ def test_report_field_diff_flags_a_dropped_enum_member(tmp_path, capsys):
     client = MagicMock()
     client.get_schema.return_value = {"fields": [{"field_id": "ref.defect_waived", "enum_values": ["waived"]}]}
     generate_cmd._report_field_diff(client, "rs_1", tmp_path)
-    out = capsys.readouterr().out
+    out = _flat(capsys)
     assert "waived_after_referee_contact" in out
     assert "all 1 pinned field(s) were produced" not in out
 
@@ -345,5 +360,5 @@ def test_report_field_diff_clean_when_member_sets_match(tmp_path, capsys):
         ]
     }
     generate_cmd._report_field_diff(client, "rs_1", tmp_path)
-    out = capsys.readouterr().out
+    out = _flat(capsys)
     assert "all 1 pinned field(s) were produced" in out

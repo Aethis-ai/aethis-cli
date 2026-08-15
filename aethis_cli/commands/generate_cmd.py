@@ -479,6 +479,12 @@ def _run_generate(
 
     except AethisAPIError as e:
         error_panel(e)
+        # An API error anywhere in the run — including mid-poll, where the job
+        # itself may well have succeeded — leaves the recorded id naming an
+        # earlier generation. Nothing has been ruled, so the id stands; but it
+        # is named, because otherwise this ending is the one that reintroduces
+        # the silent stale `fields pull`.
+        _invalidate_stale_pointer(project_dir, "error")
         raise typer.Exit(code=1)
 
 
@@ -645,16 +651,37 @@ def _report_field_diff(client: AethisClient, ruleset_id: Optional[str], project_
 class GenerationOutcome(NamedTuple):
     """How a polled generation ended, and what artefact (if any) it produced.
 
-    ``ruleset_id`` is the ruleset *this* run produced — never a previously
-    recorded one. It is ``None`` whenever the engine did not name one, which
-    includes every failure today: ``result_ruleset_id`` is written only on the
-    engine's success paths, so a failed job usually names no draft at all.
-    Callers must treat ``None`` as "nothing to compare", not as "look it up
-    somewhere else".
+    ``ruleset_id`` is the best available identifier for what this run produced,
+    and it is never read back from local state — a diff against a previously
+    recorded ruleset reads exactly like one of this run, which is worse than no
+    diff at all. It is ``None`` whenever nothing named one, which includes
+    every failure today: ``result_ruleset_id`` is written only on the engine's
+    success paths, so a failed job usually names no draft. Callers must treat
+    ``None`` as "nothing to compare", not as "look it up somewhere else".
+
+    What is *guaranteed* differs by source, so do not read more into it than
+    ``_resolved_ruleset_id`` provides: the job's own ``result_ruleset_id`` is
+    this run's artefact; the ``latest_ruleset_id`` fallback is the project's
+    newest, which under a concurrent generation on the same project may belong
+    to another run.
     """
 
     status: str  # "success" | "failed" | "timeout"
     ruleset_id: Optional[str]
+
+
+def _resolved_ruleset_id(status_payload: dict) -> Optional[str]:
+    """The ruleset a generation produced, preferring the job's own record.
+
+    ``result_ruleset_id`` is set on the **job**, so it identifies that run's
+    artefact. ``latest_ruleset_id`` is set on the **project**, so it identifies
+    whatever was generated most recently by anyone — under two generations
+    against one project (aethis-core#420) that is not necessarily this one. The
+    fallback is kept because an engine may record no id on the job at all, but
+    it is a fallback, not an equivalent.
+    """
+    job = status_payload.get("job") or {}
+    return job.get("result_ruleset_id") or status_payload.get("latest_ruleset_id")
 
 
 def _invalidate_stale_pointer(project_dir: Path, status: str) -> None:
@@ -667,22 +694,24 @@ def _invalidate_stale_pointer(project_dir: Path, status: str) -> None:
     with nothing said — the author sees fields appear and reasonably reads them
     as the ones just generated.
 
-    The two unsuccessful endings are not the same and are not treated the same:
+    The unsuccessful endings are not the same and are not treated the same.
+    The discriminator is whether the run has been **ruled on**:
 
     - **failed** — the engine has ruled on this run, and the recorded id is
       known not to describe it. The pointer is cleared, so the next `fields
       pull` refuses with "No ruleset_id" instead of quietly using the old
       ruleset. The id is printed so nothing is lost: it can still be passed
       with ``--ruleset-id``.
-    - **timeout** — nothing has been ruled; the job may still be running and
-      may yet land, and no other command writes this pointer, so clearing it
-      would discard a live reference over a client-side clock. The pointer
-      stands and is named instead, which is what "not silently" requires.
+    - **timeout**, **error** — nothing has been ruled; the job may still be
+      running, or may have succeeded while the poll broke, and no other command
+      writes this pointer, so clearing it would discard a live reference over a
+      client-side clock or a transient 500. The pointer stands and is named
+      instead, which is what "not silently" requires.
     """
     prior = read_state(project_dir).get("ruleset_id")
     if not prior:
         return
-    if status == "timeout":
+    if status != "failed":
         warn(
             f"'.aethis/state.json' still records ruleset {prior} from an earlier generation. "
             f"This run has not produced one, so 'aethis fields pull' would sync from that "
@@ -724,15 +753,20 @@ def _poll_until_done(client: AethisClient, pid: str, project_dir: Path, timeout:
 
             if job_status == "success":
                 progress.update(task, completed=100)
-                ruleset_id = result.get("latest_ruleset_id")
-                # The engine can report success a beat before latest_ruleset_id
-                # is populated. Re-poll briefly so the state write — and the
+                # The job's own id first: `latest_ruleset_id` is a property of
+                # the PROJECT, so under two generations against one project
+                # (aethis-core#420) it can name somebody else's artefact. It
+                # stays as the fallback because engines that record nothing on
+                # the job still have to yield something usable.
+                ruleset_id = _resolved_ruleset_id(result)
+                # The engine can report success a beat before either id is
+                # populated. Re-poll briefly so the state write — and the
                 # `fields pull` / field-diff steps that read it — don't miss it.
                 for _ in range(5):
                     if ruleset_id:
                         break
                     time.sleep(2)
-                    ruleset_id = client.get_status(pid).get("latest_ruleset_id")
+                    ruleset_id = _resolved_ruleset_id(client.get_status(pid))
                 # Only record a real id — never clobber a prior good one with None
                 # if the engine was slow to surface it.
                 if ruleset_id:
