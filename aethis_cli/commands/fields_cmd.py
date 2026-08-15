@@ -235,7 +235,13 @@ def pull(
         existed = key in field_map
         entry["key"] = key
         entry["type"] = _safe_field_type(sf.get("field_type"), sf.get("enum_values"))
-        if entry["type"] == "enum" and sf.get("enum_values"):
+        if entry.get("value_space"):
+            # A field pinned to a named value space keeps the reference and
+            # NEVER materialises members locally — writing the server's
+            # expanded enum_values back would silently un-migrate the field
+            # to inline form on first pull (aethis-core#424, C3).
+            entry.pop("enum_values", None)
+        elif entry["type"] == "enum" and sf.get("enum_values"):
             entry["enum_values"] = sf["enum_values"]
         else:
             entry.pop("enum_values", None)

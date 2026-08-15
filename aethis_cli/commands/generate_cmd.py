@@ -174,7 +174,7 @@ _SERVER_TYPE_TO_YAML = {
 
 # Field-key order written back to ``fields.yaml`` so machine-written files read
 # the same as the hand-authored template.
-_FIELD_KEY_ORDER = ("key", "type", "label", "question", "enum_values", "hints")
+_FIELD_KEY_ORDER = ("key", "type", "label", "question", "enum_values", "value_space", "hints")
 
 
 def _normalise_field_type(t: Optional[str]) -> str:
@@ -204,8 +204,9 @@ def validate_fields_list(fields: list) -> list[str]:
     """Return human-readable validation errors for a ``fields.yaml`` field list.
 
     Checks: every entry has a key, no duplicate keys, the ``type`` is one of
-    :data:`VALID_FIELD_TYPES`, and ``enum`` types declare ``enum_values``. An
-    empty return means the list is valid.
+    :data:`VALID_FIELD_TYPES`, and ``enum`` types declare exactly one member
+    source — inline ``enum_values`` XOR a named ``value_space`` reference
+    (aethis-core#424). An empty return means the list is valid.
     """
     errors: list[str] = []
     seen: set[str] = set()
@@ -226,8 +227,16 @@ def validate_fields_list(fields: list) -> list[str]:
                 f"Field {key!r} has invalid type {f.get('type') or f.get('sort')!r} "
                 f"(must be one of: {', '.join(sorted(VALID_FIELD_TYPES))})."
             )
-        if ftype == "enum" and not f.get("enum_values"):
-            errors.append(f"Field {key!r} is type 'enum' but declares no enum_values.")
+        if f.get("value_space") and f.get("enum_values"):
+            errors.append(
+                f"Field {key!r} declares both value_space and enum_values — they are "
+                f"mutually exclusive; the named reference is authoritative, so drop the "
+                f"inline members."
+            )
+        if f.get("value_space") and ftype != "enum":
+            errors.append(f"Field {key!r} declares value_space but is type {ftype!r} — only enum fields may.")
+        if ftype == "enum" and not f.get("enum_values") and not f.get("value_space"):
+            errors.append(f"Field {key!r} is type 'enum' but declares no enum_values (or value_space).")
     return errors
 
 
@@ -274,6 +283,139 @@ def _merged_field_map(project_dir: Path) -> dict:
     return field_map
 
 
+def _local_value_space_files(project_dir: Path) -> dict:
+    """Locally-authored value-space registry files, indexed by declared name.
+
+    A registry file is the wire-form upsert payload (``name``, ``members``,
+    ``provenance`` — extra generator keys like ``derived_from`` are ignored),
+    found under a ``value_spaces/`` or ``shared/value_spaces/`` directory of
+    the project, its enclosing rulebook, or any ancestor directory UP TO THE
+    REPO ROOT (form-an keeps them at the repo root's ``shared/value_spaces/``).
+    The walk stops at the first ancestor containing ``.git`` — a same-named
+    yaml lying above the repo must never be silently PUT. Nearest wins.
+    """
+    search_dirs: list[Path] = []
+    current = project_dir.resolve()
+    while True:
+        search_dirs.append(current)
+        if (current / ".git").exists() or current.parent == current:
+            break
+        current = current.parent
+    rb_dir = _parent_rulebook_dir(project_dir)
+    if rb_dir is not None and rb_dir not in search_dirs:
+        search_dirs.insert(1, rb_dir)
+
+    spaces: dict = {}
+    for d in search_dirs:
+        for sub in (d / "value_spaces", d / "shared" / "value_spaces"):
+            if not sub.is_dir():
+                continue
+            for path in sorted(sub.glob("*.yaml")):
+                raw = _load_yaml_file(path)
+                name = raw.get("name")
+                if name and name not in spaces:
+                    spaces[name] = raw
+    return spaces
+
+
+def _api_error_message(e: AethisAPIError) -> str:
+    """A human-readable line from an API error whose detail may be structured.
+
+    The engine's value-space conflicts carry a dict detail (reason_code +
+    message + versions); printing the dict repr buries the one sentence the
+    author needs (review advisory, PR #110).
+    """
+    if isinstance(e.detail, dict):
+        return str(e.detail.get("message") or e.detail)
+    return str(e.detail)
+
+
+def _sync_value_spaces(client: AethisClient, project_dir: Path, referenced: set) -> None:
+    """PUT every locally-authored space a pin references, before spec-set.
+
+    The base version comes from the sync state (``.aethis/state.json`` →
+    ``value_space_sync``), so a stale checkout gets the engine's 409 ("space
+    moved under you — pull first") instead of silently regressing the shared
+    vocabulary. ANY non-2xx aborts before ``set_field_spec`` (design note
+    DX-6): a pre-#424 engine is extra-ignore on ExpectedFieldSpec, so
+    proceeding would drop the pin and the model would free-author the
+    members — the exact failure the reference exists to remove.
+    """
+    local = _local_value_space_files(project_dir)
+    sync_state = dict(read_state(project_dir).get("value_space_sync") or {})
+
+    for name in sorted(referenced):
+        space = local.get(name)
+        if space is None:
+            # No local file: the space may be registered by another project —
+            # but the abort guarantee must not go vacuous on exactly this
+            # lane, so PROBE the engine rather than proceed on hope. A 2xx
+            # proves both the registry capability and tenant resolution; any
+            # non-2xx (route missing, unknown/foreign space, outage) aborts —
+            # a pre-#424 engine would 200 the spec-set and silently drop the
+            # pin (review fix, PR #110).
+            try:
+                probe = client.get_value_space(name)
+            except AethisAPIError as e:
+                if e.status_code == 404:
+                    console.print(
+                        f"[red]Value space '{name}' is not resolvable on the engine "
+                        f"(GET /api/v1/public/value-spaces/{name} returned 404): either it is "
+                        f"not registered for this tenant, or the engine lacks the "
+                        f"value-spaces registry entirely.[/red]"
+                    )
+                    console.print(
+                        "[red]Stopping before the field spec push. Add a local registry "
+                        "file (value_spaces/ or shared/value_spaces/*.yaml declaring it) "
+                        "so this run can register it, or upgrade the engine.[/red]"
+                    )
+                else:
+                    console.print(
+                        f"[red]Could not verify value space '{name}' on the engine: {_api_error_message(e)}[/red]"
+                    )
+                    console.print("[red]Stopping before the field spec push.[/red]")
+                raise typer.Exit(code=1)
+            info(
+                f"Value space '{name}': no local registry file; engine serves it at "
+                f"v{probe.get('version')} — proceeding."
+            )
+            continue
+        try:
+            result = client.put_value_space(
+                name=name,
+                members=list(space.get("members") or []),
+                provenance=space.get("provenance") or {},
+                base_version=sync_state.get(name),
+            )
+        except AethisAPIError as e:
+            if e.status_code == 404:
+                console.print(
+                    f"[red]The engine does not expose the value-spaces registry "
+                    f"(PUT /api/v1/public/value-spaces/{name} returned 404).[/red]"
+                )
+                console.print(
+                    "[red]Stopping before the field spec push: an engine without this "
+                    "capability silently drops the value_space pin, and the model would "
+                    "free-author the field's members. Upgrade the engine, or remove the "
+                    "value_space reference from fields.yaml.[/red]"
+                )
+            else:
+                console.print(f"[red]Could not sync value space '{name}': {_api_error_message(e)}[/red]")
+                console.print(
+                    "[red]Stopping before the field spec push — a pin referencing an "
+                    "unsynced space would fail, or bind to stale members.[/red]"
+                )
+            raise typer.Exit(code=1)
+        # Record each synced version the moment its PUT lands — a later
+        # space's abort must not lose this one's base version (review
+        # advisory, PR #110: the retry would otherwise 409 against the
+        # author's own successful write).
+        sync_state[name] = result.get("version")
+        write_state(project_dir, {"value_space_sync": dict(sync_state)})
+        verb = "synced" if result.get("created") else "already current at"
+        info(f"Value space '{name}' {verb} v{result.get('version')} ({len(space.get('members') or [])} members)")
+
+
 def _upload_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) -> None:
     """Push the field vocabulary for this project (rulebook-level fields win).
 
@@ -310,8 +452,20 @@ def _upload_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) 
         spec = {"key": key, "sort": field.get("type") or field.get("sort")}
         if field.get("enum_values"):
             spec["enum_values"] = field["enum_values"]
+        if field.get("value_space"):
+            spec["value_space"] = field["value_space"]
         expected_fields.append(spec)
         guidance_lines.extend(_field_guidance_lines(key, field))
+
+    # Registry sync BEFORE spec-set (aethis-core#424, design note DX-6): the
+    # engine resolves a value_space reference at the spec-set boundary, so
+    # every locally-authored space must exist there first — and a pre-#424
+    # engine, which ignores unknown ExpectedFieldSpec keys, must be caught
+    # HERE rather than silently dropping the pin and letting the model
+    # free-author the vocabulary. Any non-2xx aborts before set_field_spec.
+    referenced = {f["value_space"] for f in field_map.values() if f.get("value_space")}
+    if referenced:
+        _sync_value_spaces(client, project_dir, referenced)
 
     client.set_field_spec(pid, expected_fields)
     for line in guidance_lines:
@@ -483,7 +637,7 @@ def _run_generate(
         # against the artefact THIS run produced — never whatever id happens to
         # be on disk, which after an unsuccessful run names an earlier
         # generation and would make a stale schema read as this one's.
-        _report_field_diff(client, outcome.ruleset_id, project_dir)
+        _report_field_diff(client, outcome.ruleset_id, project_dir, value_spaces_resolved=outcome.value_spaces_resolved)
 
         if outcome.status != "success":
             _invalidate_stale_pointer(project_dir, outcome.status)
@@ -565,8 +719,21 @@ def _upload_test_cases(client: AethisClient, pid: str, project_dir: Path) -> Non
     )
 
 
-def _report_field_diff(client: AethisClient, ruleset_id: Optional[str], project_dir: Path) -> None:
+def _report_field_diff(
+    client: AethisClient,
+    ruleset_id: Optional[str],
+    project_dir: Path,
+    value_spaces_resolved: Optional[dict] = None,
+) -> None:
     """After a generate, print pinned-vs-produced field drift loudly.
+
+    For a field pinned to a named ``value_space`` (aethis-core#424) the
+    expected members come from the engine registry AT THE VERSION THE JOB
+    RESULT STAMPED (``value_spaces_resolved``) — never the "pins no
+    enum_values ⇒ opts out" path, which on exactly the migrated fields would
+    print success with zero member verification. An unverifiable referenced
+    field is said out loud, and a version advance between sync and generation
+    is flagged, never invisible (design note C3, C5(d)).
 
     Compares the fields pinned locally (``fields.yaml`` + any enclosing
     rulebook) against the fields the engine actually produced in the ruleset
@@ -617,8 +784,10 @@ def _report_field_diff(client: AethisClient, ruleset_id: Optional[str], project_
     missing = sorted(pinned - produced)
     extra = sorted(produced - pinned)
 
-    # Member-set drift, per field, by exact equality in both directions. A
-    # field that pins no enum_values opts out — that is the only opt-out.
+    # Member-set drift, per field, by exact equality in both directions.
+    # An INLINE field that pins no enum_values opts out — that is the only
+    # opt-out; a field pinned to a value_space is verified against the
+    # registry below, never opted out.
     #
     # A produced field carrying NO members is the loudest case, not an exempt
     # one: every pinned member was dropped, or the field came back as something
@@ -626,7 +795,49 @@ def _report_field_diff(client: AethisClient, ruleset_id: Optional[str], project_
     # empty set as "nothing to compare") reported the worst possible outcome as
     # "all N pinned field(s) were produced".
     member_drift: list[tuple[str, list[str], list[str]]] = []
+    verified_lines: list[str] = []
+    ref_problems: list[str] = []
+    sync_state = read_state(project_dir).get("value_space_sync") or {}
     for key, field in sorted(pinned_map.items()):
+        space_name = field.get("value_space")
+        if space_name:
+            if key not in produced_members:
+                continue  # already reported under `missing`
+            resolution = (value_spaces_resolved or {}).get(key)
+            if not resolution:
+                ref_problems.append(
+                    f"{key} ← {space_name}: NOT verified — the job result carries no "
+                    f"resolved version for it (the engine may predate the value-spaces "
+                    f"registry, or the run failed before resolution)."
+                )
+                continue
+            resolved_version = resolution.get("version")
+            try:
+                space = client.get_value_space(space_name, version=resolved_version)
+            except AethisAPIError as e:
+                ref_problems.append(
+                    f"{key} ← {space_name}@v{resolved_version}: NOT verified — could not "
+                    f"read the space at that version ({e.detail})."
+                )
+                continue
+            expected_members = set(space.get("members") or [])
+            actual_members = produced_members[key]
+            synced_version = sync_state.get(space_name)
+            if synced_version is not None and synced_version != resolved_version:
+                warn(
+                    f"Value space '{space_name}' advanced to v{resolved_version} during "
+                    f"generation (this checkout synced against v{synced_version}). Legal — "
+                    f"the generation snapshot resolved the newer head — but check the delta."
+                )
+            if actual_members == expected_members:
+                verified_lines.append(
+                    f"{key} ← {space_name}@v{resolved_version} ({len(expected_members)} members verified)"
+                )
+            else:
+                member_drift.append(
+                    (key, sorted(actual_members - expected_members), sorted(expected_members - actual_members))
+                )
+            continue
         pinned_members = set(field.get("enum_values") or [])
         if not pinned_members or key not in produced_members:
             continue
@@ -635,7 +846,12 @@ def _report_field_diff(client: AethisClient, ruleset_id: Optional[str], project_
             continue
         member_drift.append((key, sorted(actual_members - pinned_members), sorted(pinned_members - actual_members)))
 
-    if not missing and not extra and not member_drift:
+    for line in verified_lines:
+        console.print(f"[dim]{line}[/dim]")
+    for problem in ref_problems:
+        warn(problem)
+
+    if not missing and not extra and not member_drift and not ref_problems:
         success(f"Fields: all {len(pinned)} pinned field(s) were produced.")
         return
 
@@ -680,6 +896,10 @@ class GenerationOutcome(NamedTuple):
 
     status: str  # "success" | "failed" | "timeout"
     ruleset_id: Optional[str]
+    # Per-field resolved {space, version, space_id} the job stamped at
+    # generation start (aethis-core#424) — what makes the drift report's
+    # registry-aware verification possible. None from engines that predate it.
+    value_spaces_resolved: Optional[dict] = None
 
 
 def _resolved_ruleset_id(status_payload: dict) -> Optional[str]:
@@ -812,7 +1032,7 @@ def _poll_until_done(
                             "Done! Ruleset generated and left unpublished (--no-publish) — run "
                             "'aethis status' to get its id, then 'aethis publish' to activate it."
                         )
-                    return GenerationOutcome("success", ruleset_id)
+                    return GenerationOutcome("success", ruleset_id, job.get("value_spaces_resolved"))
                 # Auto-publish so the ruleset is immediately usable
                 try:
                     client.publish(pid)
@@ -825,7 +1045,7 @@ def _poll_until_done(
                         success(f"Done! Ruleset: {ruleset_id} (run 'aethis publish' to activate)")
                     else:
                         success("Done! Ruleset generated (run 'aethis publish' to activate).")
-                return GenerationOutcome("success", ruleset_id)
+                return GenerationOutcome("success", ruleset_id, job.get("value_spaces_resolved"))
 
             if job_status == "failed":
                 console.print()
@@ -835,7 +1055,7 @@ def _poll_until_done(
                 # its success paths. Read it rather than assume: if the engine
                 # ever does attach one, the diff below becomes useful for free,
                 # and there is no other id that could honestly stand in.
-                return GenerationOutcome("failed", job.get("result_ruleset_id"))
+                return GenerationOutcome("failed", job.get("result_ruleset_id"), job.get("value_spaces_resolved"))
 
             time.sleep(3)
 

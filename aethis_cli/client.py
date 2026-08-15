@@ -318,7 +318,7 @@ class AethisClient:
     def set_field_spec(self, project_id: str, expected_fields: list[dict]) -> dict:
         """Pin the project's expected field vocabulary (key + type + enum values).
 
-        Each entry is ``{key, sort, enum_values?}``. This constrains generation
+        Each entry is ``{key, sort, enum_values?, value_space?}``. This constrains generation
         to the declared field keys so the same field (e.g. date of birth) is not
         re-invented under a different key. Field hints / questions are carried as
         guidance, not here — this endpoint only fixes the vocabulary.
@@ -328,6 +328,39 @@ class AethisClient:
             f"/api/v1/public/projects/{project_id}/fields/spec",
             json={"expected_fields": expected_fields},
         )
+
+    def put_value_space(
+        self,
+        *,
+        name: str,
+        members: list[str],
+        provenance: dict,
+        base_version: Optional[int] = None,
+        force: bool = False,
+    ) -> dict:
+        """Register (or supersede) a named value space on the engine registry.
+
+        Idempotent version-upsert: an identical member list is a no-op echoing
+        the current version; any change mints a new immutable version.
+        ``base_version`` is the version this checkout last synced against —
+        the engine 409s ("space moved under you — pull first") on a mismatch
+        rather than last-writer-wins. ``force`` is required for a
+        member-removing or provenance-regressing supersession.
+        """
+        payload: dict = {"members": members, "provenance": provenance, "force": force}
+        if base_version is not None:
+            payload["base_version"] = base_version
+        return self._request("PUT", f"/api/v1/public/value-spaces/{name}", json=payload)
+
+    def get_value_space(self, name: str, *, version: Optional[int] = None) -> dict:
+        """Read one version of a named value space (the active head by default).
+
+        Historical versions are immutable and therefore servable — pass
+        ``version`` to inspect exactly what a generation's stamped resolution
+        expanded (the drift report does).
+        """
+        params = {"version": version} if version is not None else None
+        return self._request("GET", f"/api/v1/public/value-spaces/{name}", params=params)
 
     def discover_fields(self, project_id: str) -> dict:
         """Run server-side field discovery over the project's uploaded sources.
