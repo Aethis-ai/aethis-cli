@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.33.0 (2026-08-15)
+
+A pinned enum's members are checked, not just its name.
+
+- **fix: `aethis generate` compares pinned enum *member sets*, not only field keys.** The post-generation drift report asked whether each pinned field was produced. It was — so a schema whose enum had quietly grown a member nobody pinned printed `✓ Fields: all N pinned field(s) were produced`. The members were already in hand locally; only the comparison was lossy. It now checks each pinned enum by exact equality in both directions and names the added or dropped members.
+- **Why it matters beyond tidiness.** A field can be present, correctly typed, and still wrong. Where an enum is used as an escape hatch — a value that keeps a decision at *undetermined* pending human review — the safety property is that no value the schema allows can turn that into a definitive "no". One unpinned member breaks it, and no test case can catch that: a test occupying the offending value would itself be the bug. Five consecutive generations of a real ruleset were scored as clean this way.
+
 ## 0.32.0 (2026-08-05)
 
 Re-uploading a test suite no longer leaves a second copy of it.

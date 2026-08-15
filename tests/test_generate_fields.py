@@ -283,3 +283,72 @@ def test_report_field_diff_flags_drift(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "applicant.date_of_birth" in out  # pinned but not produced
     assert "applicant.surprise" in out  # produced but not pinned
+
+
+# ---------------------------------------------------------------------------
+# Enum member-set drift (aethis-core#421 / DS-55)
+#
+# The engine's generator pads a pinned sentinel enum with an extra member. The
+# key-set check above cannot see it: the field IS present, so the CLI printed
+# "✓ Fields: all N pinned field(s) were produced" over a schema whose member set
+# had grown a non-clearing value — five live attempts were mis-scored that way.
+# The pinned members are already in hand here (_merged_field_map returns whole
+# field dicts), so the comparison, not the data, was the gap.
+# ---------------------------------------------------------------------------
+
+SENTINEL_FIELDS = (
+    "fields:\n"
+    "  - key: ref.defect_waived\n"
+    "    type: enum\n"
+    "    enum_values: [waived, waived_after_referee_contact]\n"
+)
+
+
+def test_report_field_diff_flags_a_padded_enum_member_set(tmp_path, capsys):
+    """The live exploit: an extra member the caller never pinned."""
+    _write_fields(tmp_path / "fields" / "fields.yaml", SENTINEL_FIELDS)
+    client = MagicMock()
+    client.get_schema.return_value = {
+        "fields": [
+            {
+                "field_id": "ref.defect_waived",
+                "enum_values": ["waived", "waived_after_referee_contact", "not_reviewed"],
+            }
+        ]
+    }
+    generate_cmd._report_field_diff(client, "rs_1", tmp_path)
+    out = capsys.readouterr().out
+    assert "not_reviewed" in out, "the unpinned member must be named"
+    assert "ref.defect_waived" in out
+    assert "all 1 pinned field(s) were produced" not in out, (
+        "a padded member set must not be reported as a clean success"
+    )
+
+
+def test_report_field_diff_flags_a_dropped_enum_member(tmp_path, capsys):
+    _write_fields(tmp_path / "fields" / "fields.yaml", SENTINEL_FIELDS)
+    client = MagicMock()
+    client.get_schema.return_value = {
+        "fields": [{"field_id": "ref.defect_waived", "enum_values": ["waived"]}]
+    }
+    generate_cmd._report_field_diff(client, "rs_1", tmp_path)
+    out = capsys.readouterr().out
+    assert "waived_after_referee_contact" in out
+    assert "all 1 pinned field(s) were produced" not in out
+
+
+def test_report_field_diff_clean_when_member_sets_match(tmp_path, capsys):
+    """Order must not matter — the pin is a set, not a sequence."""
+    _write_fields(tmp_path / "fields" / "fields.yaml", SENTINEL_FIELDS)
+    client = MagicMock()
+    client.get_schema.return_value = {
+        "fields": [
+            {
+                "field_id": "ref.defect_waived",
+                "enum_values": ["waived_after_referee_contact", "waived"],
+            }
+        ]
+    }
+    generate_cmd._report_field_diff(client, "rs_1", tmp_path)
+    out = capsys.readouterr().out
+    assert "all 1 pinned field(s) were produced" in out

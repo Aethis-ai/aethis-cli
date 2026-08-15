@@ -546,23 +546,50 @@ def _report_field_diff(client: AethisClient, ruleset_id: Optional[str], project_
 
     Compares the fields pinned locally (``fields.yaml`` + any enclosing
     rulebook) against the fields the engine actually produced in the ruleset
-    schema. Best-effort: a fetch failure is swallowed so it never masks a
-    successful generation.
+    schema — both the *key set* and, for ENUMs, the *member set*.
+
+    The member half matters as much as the key half. Generation can return a
+    field that is present and correctly typed while its enum members have
+    grown a value nobody pinned; for an escape-hatch sentinel (defect-shapes
+    DS-55) one extra member re-arms the exploit the pin existed to remove, and
+    no golden test can catch it — a golden occupying the hostile cell would
+    *be* the exploit. Checking keys alone printed "all N pinned field(s) were
+    produced" over exactly that schema five times in a row (aethis-core#421).
+
+    Best-effort: a fetch failure is swallowed so it never masks a successful
+    generation.
     """
     if not ruleset_id:
         return
-    pinned = set(_merged_field_map(project_dir).keys())
+    pinned_map = _merged_field_map(project_dir)
+    pinned = set(pinned_map.keys())
     if not pinned:
         return
     try:
         schema = client.get_schema(ruleset_id)
     except AethisAPIError:
         return
-    produced = {f.get("field_id") for f in schema.get("fields", []) or [] if f.get("field_id")}
+    schema_fields = schema.get("fields", []) or []
+    produced = {f.get("field_id") for f in schema_fields if f.get("field_id")}
+    produced_members = {f["field_id"]: set(f.get("enum_values") or []) for f in schema_fields if f.get("field_id")}
 
     missing = sorted(pinned - produced)
     extra = sorted(produced - pinned)
-    if not missing and not extra:
+
+    # Member-set drift, per field, by exact equality in both directions. A
+    # field that pins no enum_values opts out; a produced field carrying no
+    # members (a non-enum) has nothing to compare.
+    member_drift: list[tuple[str, list[str], list[str]]] = []
+    for key, field in sorted(pinned_map.items()):
+        pinned_members = set(field.get("enum_values") or [])
+        if not pinned_members or key not in produced_members:
+            continue
+        actual_members = produced_members[key]
+        if not actual_members or actual_members == pinned_members:
+            continue
+        member_drift.append((key, sorted(actual_members - pinned_members), sorted(pinned_members - actual_members)))
+
+    if not missing and not extra and not member_drift:
         success(f"Fields: all {len(pinned)} pinned field(s) were produced.")
         return
 
@@ -570,6 +597,18 @@ def _report_field_diff(client: AethisClient, ruleset_id: Optional[str], project_
         console.print(f"[yellow]Pinned but not produced:[/yellow] {', '.join(missing)}")
     if extra:
         console.print(f"[yellow]Produced but not pinned:[/yellow] {', '.join(extra)}")
+    for key, unpinned, dropped in member_drift:
+        detail = []
+        if unpinned:
+            detail.append(f"added {', '.join(unpinned)}")
+        if dropped:
+            detail.append(f"dropped {', '.join(dropped)}")
+        console.print(f"[red]Enum members differ from the pin:[/red] {key} — {'; '.join(detail)}")
+    if member_drift:
+        console.print(
+            "[dim]A generated member the spec did not pin can change decisions "
+            "no test case covers — check it before publishing.[/dim]"
+        )
     console.print("[dim]Run 'aethis fields pull' to sync fields.yaml with what was generated.[/dim]")
 
 
