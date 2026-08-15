@@ -284,6 +284,7 @@ jobs:
           # added.
           REPOS = [
               "Aethis-ai/aethis-workspace",
+              "Aethis-ai/form-an",
               "Aethis-ai/aethis-examples",
               "Aethis-ai/aethis-examples-internal",
               "Aethis-ai/aethis-mcp",
