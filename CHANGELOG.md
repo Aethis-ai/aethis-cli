@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.35.1 (2026-08-16)
+
+A member section's field pin is its own contract, not the rulebook's.
+
+- **fix: rulebook-level fields no longer extend a section's pinned field spec.** The merge pinned every rulebook field onto every member section, demanding fields the section's rules never author — and the engine historically dropped them silently (every published `referees_identity` build was missing 3-5 of the rulebook's cross-section fields). With the engine's new loud pin-presence gate, such a generation now correctly fails — which surfaced the over-broad pin on the first live canary run of the named-value-spaces epic. The rulebook's definition still **wins** on keys the section declares itself (the canonical definition is unchanged); it just never adds keys. The drift report's comparison universe changes identically, so it now reports on exactly the section's own contract.
+
 ## 0.35.0 (2026-08-15)
 
 Named value spaces reach the wire (aethis-core#424, epic aethis-workspace#980 P3). Requires an engine exposing `/api/v1/public/value-spaces` for referenced fields; projects with no `value_space:` pins are unaffected.

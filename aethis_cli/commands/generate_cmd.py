@@ -268,19 +268,38 @@ def _write_fields_yaml(path: Path, field_map: dict) -> None:
 
 
 def _merged_field_map(project_dir: Path) -> dict:
-    """The effective field vocabulary for a project: enclosing rulebook merged
-    with the project's own fields, rulebook winning on shared keys."""
-    field_map: dict = {}
+    """The effective field vocabulary for a project.
+
+    For a member section of a rulebook, the universe of fields is the
+    section's OWN ``fields.yaml``; the enclosing rulebook's definitions
+    OVERRIDE its own on shared keys (the canonical definition wins) but a
+    rulebook-only field is never added to a section's pin. Pinning the
+    rulebook's cross-section fields onto every member demanded fields the
+    section's rules never author — historically the engine dropped them
+    silently (every published referees_identity build was missing 3-5 of
+    them), and the loud pin-presence gate (aethis-core#428) now correctly
+    fails such a generation. The pin must be the section's own contract.
+
+    For a standalone project or the rulebook project itself, the own file is
+    the whole universe, unchanged.
+    """
+    own_fields = project_dir / "fields" / "fields.yaml"
+    own = _parse_fields_yaml(own_fields) if own_fields.exists() else {}
+
+    rb_map: dict = {}
     rb_dir = _parent_rulebook_dir(project_dir)
     if rb_dir is not None:
         rb_fields = rb_dir / "fields" / "fields.yaml"
         if rb_fields.exists():
-            field_map.update(_parse_fields_yaml(rb_fields))
-    own_fields = project_dir / "fields" / "fields.yaml"
-    if own_fields.exists():
-        for key, field in _parse_fields_yaml(own_fields).items():
-            field_map.setdefault(key, field)  # rulebook wins: don't overwrite
-    return field_map
+            rb_map = _parse_fields_yaml(rb_fields)
+
+    if not own:
+        # No own declaration: a section relying on discovery pins nothing
+        # (pinning another layer's fields was never a real contract), while a
+        # rulebook-level project has no parent and falls through to {} anyway.
+        return rb_map if rb_dir is None else {}
+
+    return {key: rb_map.get(key, field) for key, field in own.items()}
 
 
 def _local_value_space_files(project_dir: Path) -> dict:
