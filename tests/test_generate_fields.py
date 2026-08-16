@@ -419,5 +419,4 @@ class TestSectionPinIsOwnFields:
         import yaml as _y
         (proj / "aethis.yaml").write_text("project: solo\n")
         (proj / "fields" / "fields.yaml").write_text(_y.safe_dump({"fields": [{"key": "a.b", "type": "Str"}]}))
-        from aethis_cli.commands.generate_cmd import _merged_field_map as m
-        assert set(m(proj).keys()) == {"a.b"}
+        assert set(_merged_field_map(proj).keys()) == {"a.b"}

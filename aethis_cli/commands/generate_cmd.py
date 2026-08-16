@@ -297,7 +297,7 @@ def _merged_field_map(project_dir: Path) -> dict:
         # No own declaration: a section relying on discovery pins nothing
         # (pinning another layer's fields was never a real contract), while a
         # rulebook-level project has no parent and falls through to {} anyway.
-        return rb_map if rb_dir is None else {}
+        return {}
 
     return {key: rb_map.get(key, field) for key, field in own.items()}
 
@@ -436,12 +436,14 @@ def _sync_value_spaces(client: AethisClient, project_dir: Path, referenced: set)
 
 
 def _upload_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) -> None:
-    """Push the field vocabulary for this project (rulebook-level fields win).
+    """Push the field vocabulary for this project.
 
-    Merges the enclosing rulebook's ``fields/fields.yaml`` (if any) with the
-    project's own — the rulebook definition wins on shared keys — then pins the
-    expected field keys/types via ``/fields/spec`` and routes each field's
-    label/question/hints through guidance so a shared field is defined once.
+    The pin universe is the project's OWN ``fields.yaml``; for a member
+    section the enclosing rulebook's definition overrides shared keys (the
+    canonical definition wins) but never adds keys — see
+    ``_merged_field_map``. Pins the expected field keys/types via
+    ``/fields/spec`` and routes each field's label/question/hints through
+    guidance.
     """
     # Fail fast on a malformed vocabulary before we mutate server state. Validate
     # each contributing file's RAW list so duplicate keys *within a file* surface
