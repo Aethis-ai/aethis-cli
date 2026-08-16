@@ -376,6 +376,7 @@ class TestSectionPinIsOwnFields:
         (section / "fields").mkdir(parents=True)
         (section / ".aethis").mkdir()
         import yaml as _y
+
         (rb / "aethis.yaml").write_text("project: rb\nkind: rulebook\n")
         (section / "aethis.yaml").write_text("project: sec\nrulebook: ../..\n")
         if rb_fields is not None:
@@ -386,6 +387,7 @@ class TestSectionPinIsOwnFields:
 
     def test_rulebook_only_field_is_not_pinned_for_a_section(self, tmp_path):
         from aethis_cli.commands.generate_cmd import _merged_field_map
+
         section = self._tree(
             tmp_path,
             own_fields=[{"key": "ref.x", "type": "Bool"}],
@@ -399,6 +401,7 @@ class TestSectionPinIsOwnFields:
 
     def test_rulebook_definition_still_wins_on_a_shared_key(self, tmp_path):
         from aethis_cli.commands.generate_cmd import _merged_field_map
+
         section = self._tree(
             tmp_path,
             own_fields=[{"key": "pi.nat", "type": "Enum", "enum_values": ["stale"]}],
@@ -409,14 +412,17 @@ class TestSectionPinIsOwnFields:
 
     def test_section_without_own_fields_pins_nothing(self, tmp_path):
         from aethis_cli.commands.generate_cmd import _merged_field_map
+
         section = self._tree(tmp_path, own_fields=[], rb_fields=[{"key": "app.route", "type": "Str"}])
         assert _merged_field_map(section) == {}
 
     def test_standalone_project_unchanged(self, tmp_path):
         from aethis_cli.commands.generate_cmd import _merged_field_map
+
         proj = tmp_path / "solo"
         (proj / "fields").mkdir(parents=True)
         import yaml as _y
+
         (proj / "aethis.yaml").write_text("project: solo\n")
         (proj / "fields" / "fields.yaml").write_text(_y.safe_dump({"fields": [{"key": "a.b", "type": "Str"}]}))
         assert set(_merged_field_map(proj).keys()) == {"a.b"}
