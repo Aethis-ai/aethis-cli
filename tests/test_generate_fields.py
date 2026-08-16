@@ -362,3 +362,67 @@ def test_report_field_diff_clean_when_member_sets_match(tmp_path, capsys):
     generate_cmd._report_field_diff(client, "rs_1", tmp_path)
     out = _flat(capsys)
     assert "all 1 pinned field(s) were produced" in out
+
+
+class TestSectionPinIsOwnFields:
+    """A member section's pin universe is its OWN fields.yaml; the rulebook
+    overrides shared keys but never extends the pin (found live: the ws#980 P8
+    canary — 5 rulebook-level app.* fields pinned onto referees_identity, which
+    no build ever authored; the loud pin-presence gate then failed every run)."""
+
+    def _tree(self, tmp_path, own_fields, rb_fields):
+        rb = tmp_path / "rb"
+        section = rb / "rulesets" / "sec"
+        (section / "fields").mkdir(parents=True)
+        (section / ".aethis").mkdir()
+        import yaml as _y
+
+        (rb / "aethis.yaml").write_text("project: rb\nkind: rulebook\n")
+        (section / "aethis.yaml").write_text("project: sec\nrulebook: ../..\n")
+        if rb_fields is not None:
+            (rb / "fields").mkdir()
+            (rb / "fields" / "fields.yaml").write_text(_y.safe_dump({"fields": rb_fields}))
+        (section / "fields" / "fields.yaml").write_text(_y.safe_dump({"fields": own_fields}))
+        return section
+
+    def test_rulebook_only_field_is_not_pinned_for_a_section(self, tmp_path):
+        from aethis_cli.commands.generate_cmd import _merged_field_map
+
+        section = self._tree(
+            tmp_path,
+            own_fields=[{"key": "ref.x", "type": "Bool"}],
+            rb_fields=[
+                {"key": "app.route", "type": "Enum", "enum_values": ["a", "b"]},
+                {"key": "ref.x", "type": "Bool"},
+            ],
+        )
+        keys = set(_merged_field_map(section).keys())
+        assert keys == {"ref.x"}, keys
+
+    def test_rulebook_definition_still_wins_on_a_shared_key(self, tmp_path):
+        from aethis_cli.commands.generate_cmd import _merged_field_map
+
+        section = self._tree(
+            tmp_path,
+            own_fields=[{"key": "pi.nat", "type": "Enum", "enum_values": ["stale"]}],
+            rb_fields=[{"key": "pi.nat", "type": "Enum", "enum_values": ["canonical"]}],
+        )
+        m = _merged_field_map(section)
+        assert m["pi.nat"].get("enum_values") == ["canonical"], m
+
+    def test_section_without_own_fields_pins_nothing(self, tmp_path):
+        from aethis_cli.commands.generate_cmd import _merged_field_map
+
+        section = self._tree(tmp_path, own_fields=[], rb_fields=[{"key": "app.route", "type": "Str"}])
+        assert _merged_field_map(section) == {}
+
+    def test_standalone_project_unchanged(self, tmp_path):
+        from aethis_cli.commands.generate_cmd import _merged_field_map
+
+        proj = tmp_path / "solo"
+        (proj / "fields").mkdir(parents=True)
+        import yaml as _y
+
+        (proj / "aethis.yaml").write_text("project: solo\n")
+        (proj / "fields" / "fields.yaml").write_text(_y.safe_dump({"fields": [{"key": "a.b", "type": "Str"}]}))
+        assert set(_merged_field_map(proj).keys()) == {"a.b"}
