@@ -183,6 +183,9 @@ MUTATIONS: List[Mutation] = [
         "--json <fields> loses the enforcement record",
         detects=(
             "tests/test_json_projection_pinning.py::test_the_enforcement_record_survives_a_projection_that_omits_it",
+            # The `--json <fields>` route itself, not just the helper it calls:
+            # the rule and its wiring to the flag are separate claims.
+            "tests/test_json_projection_pinning.py::test_the_json_flag_projection_keeps_the_enforcement_record",
         ),
     ),
     # -- the test-case upload is idempotent, or says it is not -------------
@@ -439,6 +442,57 @@ def _apply(tree: Path, mutation: Mutation) -> bool:
 _SANDBOX_DESELECT = ["tests/test_release_tooling.py::test_integrity_record_binds_artefact_to_source"]
 
 
+def _validate_deselect(tree: Path) -> list:
+    """Confirm each sandbox deselect names exactly one real test.
+
+    `--deselect` matches by node-id PREFIX and silently ignores a selector
+    that matches nothing. Both halves are traps: a suffix rename leaves the
+    selector unmatched and the harness quietly stops excluding anything (so
+    the baseline goes red for a reason nobody attributes), while a future test
+    whose id extends this one would be excluded without anybody choosing that.
+
+    So the selector is checked against the collected ids by EXACT equality,
+    and the prefix set is required to be exactly that one test. Returns a list
+    of complaints; empty means the exclusion is sound.
+    """
+    completed = subprocess.run(
+        [
+            "uv",
+            "run",
+            "--project",
+            str(tree),
+            "pytest",
+            "tests/",
+            "--collect-only",
+            "-q",
+            "--no-cov",
+            "-p",
+            "no:cacheprovider",
+        ],
+        cwd=tree,
+        capture_output=True,
+        text=True,
+        timeout=SUITE_TIMEOUT,
+        check=False,
+    )
+    collected = {ln.strip() for ln in completed.stdout.splitlines() if "::" in ln and not ln.startswith("FAILED")}
+    problems = []
+    for selector in _SANDBOX_DESELECT:
+        exact = [n for n in collected if n == selector]
+        prefixed = [n for n in collected if n.startswith(selector)]
+        if not exact:
+            problems.append(
+                f"{selector} matches no collected test — it was renamed or removed. "
+                f"Update _SANDBOX_DESELECT; pytest ignores an unmatched selector silently."
+            )
+        if len(prefixed) > 1:
+            problems.append(
+                f"{selector} prefix-matches {len(prefixed)} tests ({', '.join(sorted(prefixed))}) — "
+                f"--deselect would exclude all of them, which nobody chose."
+            )
+    return problems
+
+
 def _failed_tests(output: str) -> set:
     """Test ids from pytest's short summary (`FAILED path::test - reason`)."""
     return {m.group(1) for m in re.finditer(r"^FAILED (\S+?)(?: - |\s*$)", output, re.MULTILINE)}
@@ -488,7 +542,13 @@ def main() -> int:
             baseline_tree,
             ignore=shutil.ignore_patterns(".git", ".venv", "dist", "build", "__pycache__", ".pytest_cache"),
         )
+        deselect_problems = _validate_deselect(baseline_tree)
         baseline = _run_suite(baseline_tree)
+    if deselect_problems:
+        print("SANDBOX DESELECT INVALID — the exclusion is not doing what it claims:")
+        for problem in deselect_problems:
+            print(f"  {problem}")
+        return 1
     if baseline.returncode != 0:
         print("BASELINE RED — the suite fails before any mutation is applied.")
         print("Every mutation would score as 'killed' for that reason, so no result here would mean anything.")
@@ -536,16 +596,25 @@ def main() -> int:
             print(f"{label} {mutation.mutation_id} — {mutation.kills}{detail}")
 
     killed = sum(1 for r in results if r["status"] == "killed")
+    attributed = sum(1 for r in results if r["status"] == "killed" and r.get("attributed"))
+    unattributed = killed - attributed
     survived = [r for r in results if r["status"] == "SURVIVED"]
     stale = [r for r in results if r["status"] == "STALE"]
     record = {
         "total": len(results),
         "killed": killed,
+        "killed_attributed": attributed,
+        "killed_unattributed": unattributed,
         "survived": [r["id"] for r in survived],
         "stale": [r["id"] for r in stale],
         "results": results,
     }
-    print(f"\nkilled {killed}/{len(results)}")
+    print(f"\nkilled {killed}/{len(results)} — {attributed} attributed, {unattributed} killed* (unattributed)")
+    if unattributed:
+        print(
+            "  killed* = the suite went red, but no test was named as the one that must notice, "
+            "so an unrelated failure would score the same. Weaker evidence than an attributed kill."
+        )
     if args.output:
         Path(args.output).write_text(json.dumps(record, indent=2) + "\n")
     if survived or stale:

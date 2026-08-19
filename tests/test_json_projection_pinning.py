@@ -13,6 +13,8 @@ scored every mutation as killed while its own baseline was red.
 
 from __future__ import annotations
 
+import json
+
 from aethis_cli import contract
 from aethis_cli.render import PINNED_JSON_FIELDS, _filter_fields
 
@@ -68,3 +70,53 @@ def test_the_enforcement_record_is_the_pinned_key():
     """Guards the wiring itself: a pin naming some other key would satisfy
     every assertion above while leaving the real record droppable."""
     assert contract.CONTRACT_NOTE_KEY in PINNED_JSON_FIELDS
+
+
+# --- the real --json route --------------------------------------------------
+#
+# Everything above calls the projection helper directly, which proves the rule
+# but not that the rule is WIRED to the flag a user actually types. `emit()` is
+# what `--json <fields>` reaches, and it is the layer that decides whether a
+# projection happens at all — so the pin is asserted there too, on the parsed
+# output rather than on a substring of the printed text.
+
+
+def _emit_json(data, json_fields: str, capsys) -> object:
+    from aethis_cli.render import OutputFormat, RenderOpts, emit
+
+    emit(data, opts=RenderOpts(output=OutputFormat.JSON, json_fields=json_fields))
+    return json.loads(capsys.readouterr().out)
+
+
+def test_the_json_flag_projection_keeps_the_enforcement_record(capsys):
+    guarded = {
+        "decision": "undetermined",
+        "ruleset_id": "rs_1",
+        "explanation": {"summary": "blocked"},
+        contract.CONTRACT_NOTE_KEY: NOTE,
+    }
+
+    payload = _emit_json(guarded, "decision,ruleset_id", capsys)
+
+    assert payload == {"decision": "undetermined", "ruleset_id": "rs_1", contract.CONTRACT_NOTE_KEY: NOTE}
+
+
+def test_the_json_flag_projection_keeps_it_per_record_in_a_list(capsys):
+    payload = _emit_json(
+        [{"decision": "satisfied", "x": 1}, {"decision": "undetermined", "x": 2, contract.CONTRACT_NOTE_KEY: NOTE}],
+        "decision",
+        capsys,
+    )
+
+    assert payload == [{"decision": "satisfied"}, {"decision": "undetermined", contract.CONTRACT_NOTE_KEY: NOTE}]
+
+
+def test_unprojected_json_output_is_untouched(capsys):
+    """The pin must not be doing anything when no projection was asked for."""
+    guarded = {"decision": "undetermined", "x": 1, contract.CONTRACT_NOTE_KEY: NOTE}
+
+    from aethis_cli.render import OutputFormat, RenderOpts, emit
+
+    emit(guarded, opts=RenderOpts(output=OutputFormat.JSON))
+
+    assert json.loads(capsys.readouterr().out) == guarded
