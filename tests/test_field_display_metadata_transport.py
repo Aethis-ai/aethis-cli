@@ -455,3 +455,125 @@ def test_set_fields_posts_for_real_when_the_file_declares_nothing(monkeypatch):
     rulebooks_cmd.set_fields("rb_1", path)
 
     client.set_rulebook_fields.assert_called_once()
+
+
+# --- presence, not truthiness -----------------------------------------------
+#
+# The engine's model makes both properties nullable and KEEPS an empty map:
+# aethis-core asserts `field["enum_labels"] == {}` survives ingestion, and a
+# live 0.56.0 staging engine returns 200 for `{}`, `null`, and `""`. So `{}` is
+# a declaration, distinct from the property being absent, and the CLI may not
+# collapse the two — a truthiness test drops exactly the shape the engine went
+# to the trouble of preserving, and (because the guard keys off what reached
+# the payload) silently skips the capability probe with it.
+
+EMPTY_MAP_FIELDS = """\
+fields:
+  - key: craft.propulsion
+    type: enum
+    enum_values:
+      - ion_drive
+    enum_labels: {}
+"""
+
+NULL_METADATA_FIELDS = """\
+fields:
+  - key: craft.propulsion
+    type: enum
+    enum_values:
+      - ion_drive
+    enum_labels: null
+  - key: craft.dry_mass_kg
+    type: int
+    canonical_field: null
+"""
+
+
+def test_an_empty_enum_labels_map_is_transmitted_as_declared(tmp_path):
+    client = _client()
+
+    generate_cmd._upload_field_vocabulary(client, "proj_1", _project(tmp_path, EMPTY_MAP_FIELDS))
+
+    _, expected_fields = client.set_field_spec.call_args.args
+    assert expected_fields == [
+        {"key": "craft.propulsion", "sort": "enum", "enum_values": ["ion_drive"], "enum_labels": {}}
+    ]
+
+
+def test_an_empty_enum_labels_map_still_fires_the_capability_guard(tmp_path):
+    """The bug this pairs with: a declared `{}` reached the engine's door with
+    zero probes, so an engine that drops it was never questioned."""
+    client = _client(ENGINE_WITHOUT_SUPPORT)
+
+    with pytest.raises(typer.Exit):
+        generate_cmd._upload_field_vocabulary(client, "proj_1", _project(tmp_path, EMPTY_MAP_FIELDS))
+
+    client.expected_field_spec_properties.assert_called_once()
+    client.set_field_spec.assert_not_called()
+
+
+def test_explicit_nulls_are_transmitted_as_declared(tmp_path):
+    """Both properties are nullable on the engine's model and a live engine
+    accepts null, so an explicit null is authored intent, not a typo to drop."""
+    client = _client()
+
+    generate_cmd._upload_field_vocabulary(client, "proj_1", _project(tmp_path, NULL_METADATA_FIELDS))
+
+    _, expected_fields = client.set_field_spec.call_args.args
+    assert expected_fields == [
+        {"key": "craft.propulsion", "sort": "enum", "enum_values": ["ion_drive"], "enum_labels": None},
+        {"key": "craft.dry_mass_kg", "sort": "int", "canonical_field": None},
+    ]
+
+
+def test_explicit_nulls_fire_the_capability_guard(tmp_path):
+    client = _client(ENGINE_WITHOUT_SUPPORT)
+
+    with pytest.raises(typer.Exit):
+        generate_cmd._upload_field_vocabulary(client, "proj_1", _project(tmp_path, NULL_METADATA_FIELDS))
+
+    client.set_field_spec.assert_not_called()
+
+
+def test_validation_accepts_an_empty_map_and_explicit_nulls():
+    assert (
+        generate_cmd.validate_fields_list(
+            [
+                {"key": "craft.propulsion", "type": "enum", "enum_values": ["ion_drive"], "enum_labels": {}},
+                {"key": "craft.origin", "type": "enum", "enum_values": ["esa"], "enum_labels": None},
+                {"key": "craft.dry_mass_kg", "type": "int", "canonical_field": None},
+            ]
+        )
+        == []
+    )
+
+
+def test_an_empty_map_on_a_non_enum_field_is_still_rejected():
+    """Presence-aware does not mean unchecked — `{}` is a declaration, and a
+    declaration on a field with no members is still wrong."""
+    errors = generate_cmd.validate_fields_list([{"key": "craft.dry_mass_kg", "type": "int", "enum_labels": {}}])
+    assert any("enum_labels" in e and "int" in e for e in errors)
+
+
+def test_non_text_label_keys_are_a_validation_message_not_a_crash():
+    """A YAML author writing `2024: something` gets an int key. Formatting the
+    error used to join it into a string and raise."""
+    errors = generate_cmd.validate_fields_list(
+        [{"key": "craft.propulsion", "type": "enum", "enum_values": ["ion_drive"], "enum_labels": {2024: "Ion drive"}}]
+    )
+    assert any("non-text enum_labels member" in e for e in errors)
+
+
+def test_write_back_preserves_an_explicit_empty_map():
+    """A pull must not un-author a declared `{}` by calling it empty."""
+    written = generate_cmd._field_to_yaml_dict(
+        {"key": "craft.propulsion", "type": "enum", "enum_values": ["ion_drive"], "enum_labels": {}}
+    )
+    assert "enum_labels" in written
+    assert written["enum_labels"] == {}
+
+
+def test_write_back_still_omits_a_property_that_was_never_declared():
+    written = generate_cmd._field_to_yaml_dict({"key": "craft.dry_mass_kg", "type": "int"})
+    assert "enum_labels" not in written
+    assert "canonical_field" not in written

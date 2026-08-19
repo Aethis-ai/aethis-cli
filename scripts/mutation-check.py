@@ -220,31 +220,55 @@ MUTATIONS: List[Mutation] = [
     Mutation(
         "add-tests-always-replaces",
         "aethis_cli/client.py",
-        "        if replace:\n            body[\"replace\"] = True",
-        "        if True:\n            body[\"replace\"] = True",
+        '        if replace:\n            body["replace"] = True',
+        '        if True:\n            body["replace"] = True',
         "the client sends a destructive flag nobody asked for",
     ),
     # -- authored display metadata on the field pin ------------------------
     Mutation(
-        "enum-labels-dropped-from-payload",
+        "metadata-dropped-from-payload",
         "aethis_cli/commands/generate_cmd.py",
-        '        if field.get("enum_labels"):\n            spec["enum_labels"] = dict(field["enum_labels"])\n',
+        "        for prop in _ENGINE_GATED_FIELD_KEYS:\n"
+        "            if prop in field:\n"
+        "                value = field[prop]\n"
+        "                spec[prop] = dict(value) if isinstance(value, dict) else value\n",
         "",
-        "authored member wording never reaches the engine",
+        "authored wording and the storage-key pairing never reach the engine",
     ),
     Mutation(
-        "canonical-field-dropped-from-payload",
+        "metadata-presence-collapsed-to-truthiness",
         "aethis_cli/commands/generate_cmd.py",
-        '        if field.get("canonical_field"):\n            spec["canonical_field"] = field["canonical_field"]\n',
-        "",
-        "the authored storage-key pairing never reaches the engine",
+        "            if prop in field:",
+        "            if field.get(prop):",
+        "a declared empty map is dropped, and skips the capability probe with it",
     ),
     Mutation(
-        "enum-labels-emitted-unconditionally",
+        "metadata-emitted-unconditionally",
         "aethis_cli/commands/generate_cmd.py",
-        '        if field.get("enum_labels"):\n            spec["enum_labels"] = dict(field["enum_labels"])\n',
-        '        spec["enum_labels"] = dict(field.get("enum_labels") or {})\n',
+        "            if prop in field:\n                value = field[prop]",
+        "            if True:\n                value = field.get(prop)",
         "a project declaring nothing stops producing the payload it used to",
+    ),
+    Mutation(
+        "validation-presence-collapsed-to-truthiness",
+        "aethis_cli/commands/generate_cmd.py",
+        '    if "enum_labels" in f:\n        labels = f["enum_labels"]',
+        '    if f.get("enum_labels"):\n        labels = f["enum_labels"]',
+        "a declared empty map stops being validated at all",
+    ),
+    Mutation(
+        "write-back-drops-a-declared-empty-map",
+        "aethis_cli/commands/generate_cmd.py",
+        "        if k in _ENGINE_GATED_FIELD_KEYS:\n            if k in field:\n                out[k] = field[k]\n            continue\n",
+        "",
+        "a pull un-authors a declared empty map by calling it empty",
+    ),
+    Mutation(
+        "non-text-label-keys-unreported",
+        "aethis_cli/commands/generate_cmd.py",
+        "            non_text = sorted((repr(m) for m in labels if not isinstance(m, str)), key=str)",
+        "            non_text = []",
+        "a non-text member key goes unreported (and used to crash the formatter)",
     ),
     Mutation(
         "metadata-capability-guard-skipped",
@@ -257,7 +281,7 @@ MUTATIONS: List[Mutation] = [
         "unreadable-field-spec-schema-reads-as-unsupported",
         "aethis_cli/commands/generate_cmd.py",
         "    if advertised is None:",
-        "    if False:",
+        "    if advertised is None:\n        advertised = set()\n    if False:",
         "an unreachable schema blocks an upload that would have worked",
     ),
     Mutation(
@@ -277,7 +301,7 @@ MUTATIONS: List[Mutation] = [
     Mutation(
         "enum-labels-member-check-dropped",
         "aethis_cli/commands/generate_cmd.py",
-        "                unknown = sorted(set(labels) - set(members))",
+        "                unknown = sorted(m for m in labels if isinstance(m, str) and m not in members)",
         "                unknown = []",
         "a label for a member the field does not have ships and is never rendered",
     ),
@@ -369,6 +393,26 @@ def main() -> int:
     selected = [m for m in MUTATIONS if not args.only or m.mutation_id == args.only]
     if not selected:
         sys.exit(f"no mutation named {args.only!r}")
+
+    # A kill here is "the suite failed" — which says nothing unless the suite
+    # passes UNMUTATED first. Against an already-red tree every mutation is
+    # scored as killed, including the ones nothing tests, and the run reports a
+    # clean sweep. That is the same vacuous-green shape the mutations exist to
+    # find, so the baseline is a precondition rather than a nicety.
+    with tempfile.TemporaryDirectory(prefix="aethis-mutation-baseline-") as tmp:
+        baseline_tree = Path(tmp) / "tree"
+        shutil.copytree(
+            REPO,
+            baseline_tree,
+            ignore=shutil.ignore_patterns(".git", ".venv", "dist", "build", "__pycache__", ".pytest_cache"),
+        )
+        baseline = _run_suite(baseline_tree)
+    if baseline.returncode != 0:
+        print("BASELINE RED — the suite fails before any mutation is applied.")
+        print("Every mutation would score as 'killed' for that reason, so no result here would mean anything.")
+        print(baseline.stdout[-3000:] or baseline.stderr[-3000:])
+        return 1
+    print("baseline green — the suite passes unmutated\n")
 
     results = []
     for mutation in selected:

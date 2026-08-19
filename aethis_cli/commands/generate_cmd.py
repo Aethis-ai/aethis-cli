@@ -272,27 +272,45 @@ def _validate_display_metadata(key: str, f: dict, ftype: str) -> list[str]:
     members live on the registry and only the shape is checked.
     """
     errors: list[str] = []
-    labels = f.get("enum_labels")
-    if labels is not None:
-        if not isinstance(labels, dict):
+    if "enum_labels" in f:
+        labels = f["enum_labels"]
+        if labels is None:
+            # Nullable on the engine's model, so an explicit null is a legal
+            # way to say "no labels" and is transmitted as authored.
+            pass
+        elif not isinstance(labels, dict):
             errors.append(f"Field {key!r} declares enum_labels but it is not a mapping of member → label.")
         else:
+            # An empty map is a legitimate declaration — the engine keeps it —
+            # so the checks below simply have nothing to say about it.
             if ftype != "enum":
                 errors.append(f"Field {key!r} declares enum_labels but is type {ftype!r} — only enum fields may.")
-            bad = sorted(m for m, label in labels.items() if not isinstance(label, str) or not label.strip())
+            # Members are compared as text, so a non-text key can never match
+            # one and is reported as its own fault rather than as a member the
+            # field does not declare.
+            non_text = sorted((repr(m) for m in labels if not isinstance(m, str)), key=str)
+            if non_text:
+                errors.append(f"Field {key!r} has non-text enum_labels member(s): {', '.join(non_text)}.")
+            bad = sorted(
+                (repr(m) for m, label in labels.items() if not isinstance(label, str) or not label.strip()), key=str
+            )
             if bad:
                 errors.append(f"Field {key!r} has empty or non-text enum_labels for: {', '.join(bad)}.")
             members = f.get("enum_values")
             if isinstance(members, list):
-                unknown = sorted(set(labels) - set(members))
+                unknown = sorted(m for m in labels if isinstance(m, str) and m not in members)
                 if unknown:
                     errors.append(
                         f"Field {key!r} labels member(s) it does not declare: {', '.join(unknown)} — "
                         f"a label for a member the field does not have is never shown."
                     )
-    canonical = f.get("canonical_field")
-    if canonical is not None and (not isinstance(canonical, str) or not canonical.strip()):
-        errors.append(f"Field {key!r} declares canonical_field but it is empty or not text.")
+    if "canonical_field" in f:
+        canonical = f["canonical_field"]
+        # Null is legal (the property is nullable); empty text is not. The
+        # engine accepts `""` — it is opaque there — but it publishes a pairing
+        # no consumer can resolve, so it is refused here rather than shipped.
+        if canonical is not None and (not isinstance(canonical, str) or not canonical.strip()):
+            errors.append(f"Field {key!r} declares canonical_field but it is empty or not text.")
     return errors
 
 
@@ -302,9 +320,17 @@ def _field_to_yaml_dict(field: dict) -> dict:
     Any key we don't model (e.g. a hand-authored ``description`` or ``weight``)
     is preserved after the known keys so a round-trip write never silently
     discards it. ``sort`` is folded into ``type`` and not re-emitted.
+
+    The authored display metadata is kept on **presence**, not truthiness: an
+    explicit ``enum_labels: {}`` is a declaration the engine preserves, so
+    dropping it here as an "empty" would un-author it on the first pull.
     """
     out: dict = {}
     for k in _FIELD_KEY_ORDER:
+        if k in _ENGINE_GATED_FIELD_KEYS:
+            if k in field:
+                out[k] = field[k]
+            continue
         v = (field.get("type") or field.get("sort")) if k == "type" else field.get(k)
         if v in (None, "", [], {}):
             continue
@@ -531,10 +557,16 @@ def _upload_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) 
             spec["enum_values"] = field["enum_values"]
         if field.get("value_space"):
             spec["value_space"] = field["value_space"]
-        if field.get("enum_labels"):
-            spec["enum_labels"] = dict(field["enum_labels"])
-        if field.get("canonical_field"):
-            spec["canonical_field"] = field["canonical_field"]
+        # PRESENCE, not truthiness. `enum_labels: {}` is a declaration the
+        # engine keeps and republishes as `{}` — distinct from the property
+        # being absent — so testing the value would drop exactly the shape the
+        # engine went to the trouble of preserving. Explicit `null` is accepted
+        # too (both properties are nullable on the engine's model), and it is
+        # likewise transmitted as authored rather than silently discarded.
+        for prop in _ENGINE_GATED_FIELD_KEYS:
+            if prop in field:
+                value = field[prop]
+                spec[prop] = dict(value) if isinstance(value, dict) else value
         expected_fields.append(spec)
         guidance_lines.extend(_field_guidance_lines(key, field))
 
