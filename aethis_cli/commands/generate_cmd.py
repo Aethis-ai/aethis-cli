@@ -174,7 +174,22 @@ _SERVER_TYPE_TO_YAML = {
 
 # Field-key order written back to ``fields.yaml`` so machine-written files read
 # the same as the hand-authored template.
-_FIELD_KEY_ORDER = ("key", "type", "label", "question", "enum_values", "value_space", "hints")
+_FIELD_KEY_ORDER = (
+    "key",
+    "type",
+    "label",
+    "question",
+    "enum_values",
+    "value_space",
+    "enum_labels",
+    "canonical_field",
+    "hints",
+)
+
+# Field-spec properties the engine must advertise before an authored value for
+# them is worth sending. An engine that does not model a property ignores it,
+# so the upload succeeds and the metadata is gone.
+_ENGINE_GATED_FIELD_KEYS = ("enum_labels", "canonical_field")
 
 
 def _normalise_field_type(t: Optional[str]) -> str:
@@ -206,7 +221,11 @@ def validate_fields_list(fields: list) -> list[str]:
     Checks: every entry has a key, no duplicate keys, the ``type`` is one of
     :data:`VALID_FIELD_TYPES`, and ``enum`` types declare exactly one member
     source — inline ``enum_values`` XOR a named ``value_space`` reference
-    (aethis-core#424). An empty return means the list is valid.
+    (aethis-core#424). ``enum_labels`` must be a slug→label mapping on an enum
+    field, and where the members are declared inline it may not label a member
+    the field does not have — a mislabelled key is silently inert on the
+    engine, so it is caught here. ``canonical_field`` must be a non-empty
+    string. An empty return means the list is valid.
     """
     errors: list[str] = []
     seen: set[str] = set()
@@ -237,6 +256,67 @@ def validate_fields_list(fields: list) -> list[str]:
             errors.append(f"Field {key!r} declares value_space but is type {ftype!r} — only enum fields may.")
         if ftype == "enum" and not f.get("enum_values") and not f.get("value_space"):
             errors.append(f"Field {key!r} is type 'enum' but declares no enum_values (or value_space).")
+        errors.extend(_validate_display_metadata(key, f, ftype))
+    return errors
+
+
+def _validate_display_metadata(key: str, f: dict, ftype: str) -> list[str]:
+    """Validate the authored display metadata on one field entry.
+
+    ``enum_labels`` pairs each member slug with the wording a human should see;
+    ``canonical_field`` names the storage key the field's value belongs to.
+    Both ride the field pin to the engine, which treats their contents as
+    opaque — so a label attached to a slug the field does not have is accepted
+    and never rendered. Where the members are known locally (inline
+    ``enum_values``) that is caught here; where they are a named reference the
+    members live on the registry and only the shape is checked.
+    """
+    errors: list[str] = []
+    if "enum_labels" in f:
+        labels = f["enum_labels"]
+        if labels is None:
+            # Nullable on the engine's model, so an explicit null is a legal
+            # way to say "no labels" and is transmitted as authored.
+            pass
+        elif not isinstance(labels, dict):
+            errors.append(f"Field {key!r} declares enum_labels but it is not a mapping of member → label.")
+        else:
+            # An empty map is a legitimate declaration — the engine keeps it —
+            # so the checks below simply have nothing to say about it.
+            if ftype != "enum":
+                errors.append(f"Field {key!r} declares enum_labels but is type {ftype!r} — only enum fields may.")
+            # Members are compared as text, so a non-text key can never match
+            # one and is reported as its own fault rather than as a member the
+            # field does not declare.
+            non_text = sorted((repr(m) for m in labels if not isinstance(m, str)), key=str)
+            if non_text:
+                errors.append(f"Field {key!r} has non-text enum_labels member(s): {', '.join(non_text)}.")
+            bad = sorted(
+                (repr(m) for m, label in labels.items() if not isinstance(label, str) or not label.strip()), key=str
+            )
+            if bad:
+                errors.append(f"Field {key!r} has empty or non-text enum_labels for: {', '.join(bad)}.")
+            members = f.get("enum_values")
+            if isinstance(members, list):
+                unknown = sorted(m for m in labels if isinstance(m, str) and m not in members)
+                if unknown:
+                    errors.append(
+                        f"Field {key!r} labels member(s) it does not declare: {', '.join(unknown)} — "
+                        f"a label for a member the field does not have is never shown."
+                    )
+    if "canonical_field" in f:
+        canonical = f["canonical_field"]
+        # Null is legal (the property is nullable); empty text is not. The
+        # engine accepts `""` — it is opaque there — but it publishes a pairing
+        # no consumer can resolve, so it is refused here rather than shipped.
+        if canonical is not None and not isinstance(canonical, str):
+            errors.append(f"Field {key!r} declares canonical_field but it is not text.")
+        elif isinstance(canonical, str) and not canonical.strip():
+            errors.append(
+                f"Field {key!r} declares an empty canonical_field. The engine would accept it — the value is "
+                f"opaque there — but it publishes a pairing no consumer can resolve, so it is refused here. "
+                f"Omit the key, or use null, to say there is no pairing."
+            )
     return errors
 
 
@@ -246,9 +326,17 @@ def _field_to_yaml_dict(field: dict) -> dict:
     Any key we don't model (e.g. a hand-authored ``description`` or ``weight``)
     is preserved after the known keys so a round-trip write never silently
     discards it. ``sort`` is folded into ``type`` and not re-emitted.
+
+    The authored display metadata is kept on **presence**, not truthiness: an
+    explicit ``enum_labels: {}`` is a declaration the engine preserves, so
+    dropping it here as an "empty" would un-author it on the first pull.
     """
     out: dict = {}
     for k in _FIELD_KEY_ORDER:
+        if k in _ENGINE_GATED_FIELD_KEYS:
+            if k in field:
+                out[k] = field[k]
+            continue
         v = (field.get("type") or field.get("sort")) if k == "type" else field.get(k)
         if v in (None, "", [], {}):
             continue
@@ -475,6 +563,16 @@ def _upload_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) 
             spec["enum_values"] = field["enum_values"]
         if field.get("value_space"):
             spec["value_space"] = field["value_space"]
+        # PRESENCE, not truthiness. `enum_labels: {}` is a declaration the
+        # engine keeps and republishes as `{}` — distinct from the property
+        # being absent — so testing the value would drop exactly the shape the
+        # engine went to the trouble of preserving. Explicit `null` is accepted
+        # too (both properties are nullable on the engine's model), and it is
+        # likewise transmitted as authored rather than silently discarded.
+        for prop in _ENGINE_GATED_FIELD_KEYS:
+            if prop in field:
+                value = field[prop]
+                spec[prop] = dict(value) if isinstance(value, dict) else value
         expected_fields.append(spec)
         guidance_lines.extend(_field_guidance_lines(key, field))
 
@@ -488,10 +586,53 @@ def _upload_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) 
     if referenced:
         _sync_value_spaces(client, project_dir, referenced)
 
+    check_display_metadata_support(client, expected_fields)
+
     client.set_field_spec(pid, expected_fields)
     for line in guidance_lines:
         client.add_guidance(pid, line)
     info(f"Set field spec ({len(expected_fields)} field(s))")
+
+
+def check_display_metadata_support(client: AethisClient, fields: list[dict], *, rulebook: bool = False) -> None:
+    """Refuse to push authored display metadata an engine will throw away.
+
+    An engine that predates a field-spec property does not reject it — it
+    ignores it, so the upload succeeds, the generation runs, and the labels
+    (or the canonical pairing) are simply gone. That is the one failure this
+    guard exists to make loud, and it fires only for the fields that actually
+    declare something: a project with none is untouched.
+
+    An engine whose schema cannot be read at all is a different answer from one
+    that answered "no", and only the second is evidence. The first is reported
+    and the upload proceeds.
+
+    ``rulebook`` selects which model the engine is asked about — a rulebook
+    field entry and a project field pin are different models and an engine may
+    carry the properties on one and not the other, so each upload path asks
+    about the one it actually posts.
+    """
+    declared = sorted({k for f in fields if isinstance(f, dict) for k in _ENGINE_GATED_FIELD_KEYS if k in f})
+    if not declared:
+        return
+    advertised = client.rulebook_field_spec_properties() if rulebook else client.expected_field_spec_properties()
+    if advertised is None:
+        console.print(
+            f"[yellow]Could not read the engine's field-spec schema, so it is unknown whether it "
+            f"keeps {', '.join(declared)}. Proceeding — an engine that does not model them accepts "
+            f"the upload and discards them silently, so verify the published schema afterwards.[/yellow]"
+        )
+        return
+    missing = [k for k in declared if k not in advertised]
+    if not missing:
+        return
+    console.print(f"[red]This engine does not carry {', '.join(missing)} on a field spec ({client.base_url}).[/red]")
+    console.print(
+        "[red]Stopping before the push: the upload would succeed and the authored values would "
+        "be dropped, leaving the published schema without them. Upgrade the engine, or remove "
+        "those keys from fields.yaml.[/red]"
+    )
+    raise typer.Exit(code=1)
 
 
 def _upload_rulebook_guidance(client: AethisClient, pid: str, project_dir: Path) -> None:

@@ -38,6 +38,7 @@ from rich.table import Table
 from aethis_cli import contract
 from aethis_cli.auth_helpers import resolve_cached_key
 from aethis_cli.client import make_anonymous_client
+from aethis_cli.commands.generate_cmd import check_display_metadata_support
 from aethis_cli.config import load_client_or_fallback, resolve_base_url_with_source
 from aethis_cli.decision_view import print_blocking_errors, print_identity
 from aethis_cli.errors import AethisAPIError
@@ -360,6 +361,11 @@ def set_fields(
         raise typer.BadParameter(f"{file} must contain a non-empty list of field specs.")
 
     _cfg, client = load_client_or_fallback()
+    # The file is posted as authored, so a property this engine does not model
+    # is ignored rather than rejected — the call returns 200 and the authored
+    # display metadata is gone. Refuse first; a file declaring none is
+    # untouched, and never probes.
+    check_display_metadata_support(client, fields, rulebook=True)
     try:
         result = client.set_rulebook_fields(rulebook, fields)
     except AethisAPIError as e:

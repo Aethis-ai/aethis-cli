@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.36.0 (2026-08-19)
+
+A field can now say what its members are *called*, and which stored key its
+value belongs to. Requires an engine that models both on a field spec —
+one that does not is refused before the upload, never allowed to accept it
+and drop them. Projects declaring neither are unaffected.
+
+- **feat(fields): `enum_labels:` on a field pin.** An enum field may carry a per-member map of display wording — `enum_labels: {ion_drive: Ion drive}` — beside the members themselves. The engine treats the labels as opaque text and publishes them on both the ruleset and the composed-rulebook schema, so every consumer renders the same wording from one authored source instead of each keeping its own copy of it. Optional per member: label the ones whose slug does not read well and leave the rest. Both properties are handled on **presence**, not emptiness: an explicit `enum_labels: {}` is a declaration the engine keeps and republishes as `{}`, so it is transmitted, validated and preserved across a `fields pull` rather than being discarded as an empty value — and it fires the capability check below like any other declaration.
+- **feat(fields): `canonical_field:` on a field pin.** The storage key a field's value belongs to (`canonical_field: spacecraft.propulsion`) is authored beside the field and published on the schema, rather than re-derived from the key by every consumer that needs the pairing. Any field type may declare it.
+- **feat(fields): both are validated locally before they can reach the engine.** `enum_labels` must be a mapping of member → non-empty text on an enum field, and where the members are declared inline it may not label a member the field does not have — the engine accepts such a label and simply never renders it, which is invisible at every layer afterwards. Where the members are a named `value_space` they live on the registry, so only the shape is checked. `canonical_field` must be non-empty text.
+- **feat(generate): an engine that cannot keep them is named, not written to.** A field-spec property an engine does not model is ignored rather than rejected, so the upload succeeds, the generation runs, and the authored values are gone — the same silent-drop shape the value-space pin was guarded against. The CLI reads the engine's own published schema and refuses before the push, naming the properties and the engine. An engine whose schema could not be read at all is a different answer and says so: the upload proceeds with a warning to check the published schema afterwards, because unknown is not unsupported.
+- **Unchanged for everything else.** A project declaring neither key produces the byte-identical upload payload it did before, and never triggers the capability probe — so it keeps working against any engine, of any vintage.
+- **feat(rulebooks): `set-fields` is guarded the same way.** `aethis rulebooks set-fields` posts its fields file as authored, so it already carried both properties — and would equally have had them silently discarded by an engine that does not model them. It now refuses first, asking about the rulebook field model rather than the project one, since an engine can carry the properties on one and not the other. A fields file declaring neither key is untouched and never probes. That command still performs no other validation of its file ([#114](https://github.com/Aethis-ai/aethis-cli/issues/114)).
+
 ## 0.35.1 (2026-08-16)
 
 A member section's field pin is its own contract, not the rulebook's.
