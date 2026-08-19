@@ -367,9 +367,20 @@ def _apply(tree: Path, mutation: Mutation) -> bool:
     return True
 
 
+# The mutated tree is a copy with `.git` deliberately excluded, so a test that
+# resolves the source commit from repository metadata cannot pass in it. That
+# is a property of this harness's sandbox, not of the code under test — the
+# ordinary `test` job still asserts it against the real checkout — so it is
+# excluded here rather than allowed to make every run red. A rename makes the
+# baseline fail loudly, which is the right way for this to break.
+_SANDBOX_DESELECT = ["tests/test_release_tooling.py::test_integrity_record_binds_artefact_to_source"]
+
+
 def _run_suite(tree: Path) -> subprocess.CompletedProcess:
+    deselect = [arg for test in _SANDBOX_DESELECT for arg in ("--deselect", test)]
     return subprocess.run(
-        ["uv", "run", "--project", str(tree), "pytest", "tests/", "-x", "-q", "--no-cov", "-p", "no:cacheprovider"],
+        ["uv", "run", "--project", str(tree), "pytest", "tests/", "-x", "-q", "--no-cov", "-p", "no:cacheprovider"]
+        + deselect,
         cwd=tree,
         capture_output=True,
         text=True,
