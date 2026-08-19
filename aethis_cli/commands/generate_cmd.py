@@ -309,8 +309,14 @@ def _validate_display_metadata(key: str, f: dict, ftype: str) -> list[str]:
         # Null is legal (the property is nullable); empty text is not. The
         # engine accepts `""` — it is opaque there — but it publishes a pairing
         # no consumer can resolve, so it is refused here rather than shipped.
-        if canonical is not None and (not isinstance(canonical, str) or not canonical.strip()):
-            errors.append(f"Field {key!r} declares canonical_field but it is empty or not text.")
+        if canonical is not None and not isinstance(canonical, str):
+            errors.append(f"Field {key!r} declares canonical_field but it is not text.")
+        elif isinstance(canonical, str) and not canonical.strip():
+            errors.append(
+                f"Field {key!r} declares an empty canonical_field. The engine would accept it — the value is "
+                f"opaque there — but it publishes a pairing no consumer can resolve, so it is refused here. "
+                f"Omit the key, or use null, to say there is no pairing."
+            )
     return errors
 
 

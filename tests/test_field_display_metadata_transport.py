@@ -92,8 +92,11 @@ def test_upload_transmits_labels_and_canonical_field(tmp_path):
 
     _, expected_fields = client.set_field_spec.call_args.args
     spec = next(f for f in expected_fields if f["key"] == "craft.propulsion")
-    assert spec["enum_labels"] == {"ion_drive": "Ion drive", "chemical": "Chemical"}
-    assert spec["canonical_field"] == "spacecraft.propulsion"
+    # `.get`, not subscript: a payload that dropped the key should fail on the
+    # assertion below, saying what was expected and what arrived, rather than
+    # raising KeyError — a red that reports the fixture, not the finding.
+    assert spec.get("enum_labels") == {"ion_drive": "Ion drive", "chemical": "Chemical"}
+    assert spec.get("canonical_field") == "spacecraft.propulsion"
 
 
 def test_payload_is_unchanged_for_a_project_that_declares_neither(tmp_path):
@@ -401,7 +404,15 @@ def test_set_fields_calls_the_guard_before_it_posts(monkeypatch):
 
     calls: list[str] = []
     client = _rulebook_client(ENGINE_WITHOUT_SUPPORT)
-    client.set_rulebook_fields.side_effect = lambda *a, **k: calls.append("post")
+
+    def record_post(*_args, **_kwargs):
+        calls.append("post")
+        # A realistic return value, so that removing the guard fails on the
+        # assertion below rather than crashing on a bare mock — otherwise the
+        # test is red for the fixture's shape, not for the missing guard.
+        return {"fields": RULEBOOK_FIELDS_WITH_METADATA, "field_lock_state": "unlocked"}
+
+    client.set_rulebook_fields.side_effect = record_post
 
     def refusing_guard(*_args, **_kwargs):
         calls.append("guard")
@@ -577,3 +588,19 @@ def test_write_back_still_omits_a_property_that_was_never_declared():
     written = generate_cmd._field_to_yaml_dict({"key": "craft.dry_mass_kg", "type": "int"})
     assert "enum_labels" not in written
     assert "canonical_field" not in written
+
+
+def test_the_empty_canonical_field_message_discloses_the_stricture():
+    """The CLI is stricter than the engine here, and the author is told so.
+
+    A bare "empty or not text" reads as a format complaint and sends someone
+    looking for the rule in the engine, where there isn't one. The message has
+    to say the engine would take it, why the CLI will not, and what to write
+    instead.
+    """
+    errors = generate_cmd.validate_fields_list([{"key": "craft.dry_mass_kg", "type": "int", "canonical_field": ""}])
+
+    message = next(e for e in errors if "canonical_field" in e)
+    assert "engine would accept it" in message
+    assert "no consumer can resolve" in message
+    assert "null" in message
