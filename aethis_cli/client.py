@@ -80,6 +80,8 @@ class AethisClient:
         # Cached answer to "does this engine accept `replace` on a test-case
         # upload?" — one probe per client, not one per call.
         self._test_replace_support: Any = _UNPROBED
+        # Cached property names the engine advertises on a field-spec entry.
+        self._field_spec_properties: Any = _UNPROBED
 
     def close(self) -> None:
         self._client.close()
@@ -315,10 +317,41 @@ class AethisClient:
         self._test_replace_support = answer
         return answer
 
+    def expected_field_spec_properties(self) -> Optional[set[str]]:
+        """The property names this engine advertises on a field-spec entry.
+
+        Answered from the engine's own published schema —
+        ``components.schemas.ExpectedFieldSpec.properties`` — for the same
+        reason :meth:`supports_test_replace` is: engine and CLI are deployed
+        independently, so the CLI's own version says nothing about what the
+        engine on the other end will keep.
+
+        Returns the set when the schema answered, and ``None`` when it could
+        not be read at all. **Unknown is not unsupported** — an engine that
+        does not model a property ignores it rather than rejecting it, so a
+        caller that treats an unreadable schema as a "no" would refuse uploads
+        that would have worked.
+        """
+        if self._field_spec_properties is not _UNPROBED:
+            return self._field_spec_properties  # type: ignore[return-value]
+        answer: Optional[set[str]]
+        try:
+            resp = self._client.get("/openapi.json", timeout=15.0)
+            if resp.status_code >= 400:
+                answer = None
+            else:
+                schemas = resp.json()["components"]["schemas"]
+                answer = set(schemas["ExpectedFieldSpec"]["properties"])
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            answer = None
+        self._field_spec_properties = answer
+        return answer
+
     def set_field_spec(self, project_id: str, expected_fields: list[dict]) -> dict:
         """Pin the project's expected field vocabulary (key + type + enum values).
 
-        Each entry is ``{key, sort, enum_values?, value_space?}``. This constrains generation
+        Each entry is ``{key, sort, enum_values?, value_space?, enum_labels?,
+        canonical_field?}``. This constrains generation
         to the declared field keys so the same field (e.g. date of birth) is not
         re-invented under a different key. Field hints / questions are carried as
         guidance, not here — this endpoint only fixes the vocabulary.
