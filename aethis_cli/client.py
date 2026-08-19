@@ -80,8 +80,9 @@ class AethisClient:
         # Cached answer to "does this engine accept `replace` on a test-case
         # upload?" — one probe per client, not one per call.
         self._test_replace_support: Any = _UNPROBED
-        # Cached property names the engine advertises on a field-spec entry.
-        self._field_spec_properties: Any = _UNPROBED
+        # Cached property names the engine advertises, per schema model — one
+        # probe per model per client, not one per call.
+        self._field_spec_properties: dict[str, Optional[set[str]]] = {}
 
     def close(self) -> None:
         self._client.close()
@@ -317,12 +318,12 @@ class AethisClient:
         self._test_replace_support = answer
         return answer
 
-    def expected_field_spec_properties(self) -> Optional[set[str]]:
-        """The property names this engine advertises on a field-spec entry.
+    def _schema_properties(self, model: str) -> Optional[set[str]]:
+        """The property names this engine advertises on ``model``.
 
         Answered from the engine's own published schema —
-        ``components.schemas.ExpectedFieldSpec.properties`` — for the same
-        reason :meth:`supports_test_replace` is: engine and CLI are deployed
+        ``components.schemas.<model>.properties`` — for the same reason
+        :meth:`supports_test_replace` is: engine and CLI are deployed
         independently, so the CLI's own version says nothing about what the
         engine on the other end will keep.
 
@@ -332,8 +333,8 @@ class AethisClient:
         caller that treats an unreadable schema as a "no" would refuse uploads
         that would have worked.
         """
-        if self._field_spec_properties is not _UNPROBED:
-            return self._field_spec_properties  # type: ignore[return-value]
+        if model in self._field_spec_properties:
+            return self._field_spec_properties[model]
         answer: Optional[set[str]]
         try:
             resp = self._client.get("/openapi.json", timeout=15.0)
@@ -341,11 +342,24 @@ class AethisClient:
                 answer = None
             else:
                 schemas = resp.json()["components"]["schemas"]
-                answer = set(schemas["ExpectedFieldSpec"]["properties"])
+                answer = set(schemas[model]["properties"])
         except (httpx.HTTPError, ValueError, KeyError, TypeError):
             answer = None
-        self._field_spec_properties = answer
+        self._field_spec_properties[model] = answer
         return answer
+
+    def expected_field_spec_properties(self) -> Optional[set[str]]:
+        """What a *project* field pin may carry — the generation upload path."""
+        return self._schema_properties("ExpectedFieldSpec")
+
+    def rulebook_field_spec_properties(self) -> Optional[set[str]]:
+        """What a *rulebook* field entry may carry — ``rulebooks set-fields``.
+
+        A separate model from :meth:`expected_field_spec_properties`, and the
+        two can disagree on a given engine, so the guard on each upload path
+        must ask about the model that path actually posts.
+        """
+        return self._schema_properties("RulebookFieldSpec")
 
     def set_field_spec(self, project_id: str, expected_fields: list[dict]) -> dict:
         """Pin the project's expected field vocabulary (key + type + enum values).

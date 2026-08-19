@@ -249,15 +249,15 @@ MUTATIONS: List[Mutation] = [
     Mutation(
         "metadata-capability-guard-skipped",
         "aethis_cli/commands/generate_cmd.py",
-        "    _check_display_metadata_support(client, expected_fields)\n",
+        "    check_display_metadata_support(client, expected_fields)\n",
         "",
         "an engine that discards the metadata is written to anyway",
     ),
     Mutation(
         "unreadable-field-spec-schema-reads-as-unsupported",
         "aethis_cli/commands/generate_cmd.py",
-        "    advertised = client.expected_field_spec_properties()\n    if advertised is None:",
-        "    advertised = client.expected_field_spec_properties()\n    if False:",
+        "    if advertised is None:",
+        "    if False:",
         "an unreachable schema blocks an upload that would have worked",
     ),
     Mutation(
@@ -305,9 +305,31 @@ MUTATIONS: List[Mutation] = [
     Mutation(
         "field-spec-properties-probe-answers-a-fixed-set",
         "aethis_cli/client.py",
-        '                answer = set(schemas["ExpectedFieldSpec"]["properties"])',
+        '                answer = set(schemas[model]["properties"])',
         '                answer = {"key", "sort"}',
         "the probe stops reporting what the engine actually advertises",
+    ),
+    # -- the same guard on the second upload path (rulebooks set-fields) ----
+    Mutation(
+        "set-fields-guard-removed",
+        "aethis_cli/commands/rulebooks_cmd.py",
+        "    check_display_metadata_support(client, fields, rulebook=True)\n",
+        "",
+        "the rulebook path goes back to letting an engine discard the metadata",
+    ),
+    Mutation(
+        "set-fields-guard-asks-the-wrong-model",
+        "aethis_cli/commands/rulebooks_cmd.py",
+        "    check_display_metadata_support(client, fields, rulebook=True)",
+        "    check_display_metadata_support(client, fields, rulebook=False)",
+        "the rulebook push is cleared by a model the engine does not post to",
+    ),
+    Mutation(
+        "guard-model-selection-collapsed",
+        "aethis_cli/commands/generate_cmd.py",
+        "    advertised = client.rulebook_field_spec_properties() if rulebook else client.expected_field_spec_properties()",
+        "    advertised = client.expected_field_spec_properties()",
+        "both paths ask about the project pin, whatever they actually post",
     ),
 ]
 

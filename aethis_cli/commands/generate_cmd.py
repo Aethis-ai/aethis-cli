@@ -548,7 +548,7 @@ def _upload_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) 
     if referenced:
         _sync_value_spaces(client, project_dir, referenced)
 
-    _check_display_metadata_support(client, expected_fields)
+    check_display_metadata_support(client, expected_fields)
 
     client.set_field_spec(pid, expected_fields)
     for line in guidance_lines:
@@ -556,7 +556,7 @@ def _upload_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) 
     info(f"Set field spec ({len(expected_fields)} field(s))")
 
 
-def _check_display_metadata_support(client: AethisClient, expected_fields: list[dict]) -> None:
+def check_display_metadata_support(client: AethisClient, fields: list[dict], *, rulebook: bool = False) -> None:
     """Refuse to push authored display metadata an engine will throw away.
 
     An engine that predates a field-spec property does not reject it — it
@@ -568,11 +568,16 @@ def _check_display_metadata_support(client: AethisClient, expected_fields: list[
     An engine whose schema cannot be read at all is a different answer from one
     that answered "no", and only the second is evidence. The first is reported
     and the upload proceeds.
+
+    ``rulebook`` selects which model the engine is asked about — a rulebook
+    field entry and a project field pin are different models and an engine may
+    carry the properties on one and not the other, so each upload path asks
+    about the one it actually posts.
     """
-    declared = sorted({k for f in expected_fields for k in _ENGINE_GATED_FIELD_KEYS if k in f})
+    declared = sorted({k for f in fields if isinstance(f, dict) for k in _ENGINE_GATED_FIELD_KEYS if k in f})
     if not declared:
         return
-    advertised = client.expected_field_spec_properties()
+    advertised = client.rulebook_field_spec_properties() if rulebook else client.expected_field_spec_properties()
     if advertised is None:
         console.print(
             f"[yellow]Could not read the engine's field-spec schema, so it is unknown whether it "
@@ -585,9 +590,9 @@ def _check_display_metadata_support(client: AethisClient, expected_fields: list[
         return
     console.print(f"[red]This engine does not carry {', '.join(missing)} on a field spec ({client.base_url}).[/red]")
     console.print(
-        "[red]Stopping before the field spec push: the upload would succeed and the authored "
-        "values would be dropped, leaving the published schema without them. Upgrade the engine, "
-        "or remove those keys from fields.yaml.[/red]"
+        "[red]Stopping before the push: the upload would succeed and the authored values would "
+        "be dropped, leaving the published schema without them. Upgrade the engine, or remove "
+        "those keys from fields.yaml.[/red]"
     )
     raise typer.Exit(code=1)
 

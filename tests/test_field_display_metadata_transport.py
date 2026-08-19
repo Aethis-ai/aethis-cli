@@ -16,13 +16,16 @@ not model the properties is refused rather than allowed to swallow them.
 
 from __future__ import annotations
 
+import pathlib
 import re
+import tempfile
 from unittest.mock import MagicMock
 
 import httpx
 import pytest
 import respx
 import typer
+import yaml
 
 from aethis_cli.client import AethisClient
 
@@ -214,7 +217,7 @@ def test_upload_aborts_when_the_engine_does_not_model_the_properties(tmp_path, c
     client.set_field_spec.assert_not_called()
     out = _flat(capsys)
     assert "does not carry canonical_field, enum_labels" in out
-    assert "Stopping before the field spec push" in out
+    assert "Stopping before the push" in out
 
 
 def test_upload_proceeds_but_says_so_when_the_engine_schema_is_unreadable(tmp_path, capsys):
@@ -312,3 +315,143 @@ def test_a_schema_without_the_model_at_all_is_unknown_rather_than_a_crash(respx_
     respx_mock.get("/openapi.json").mock(return_value=httpx.Response(200, json={"components": {"schemas": {}}}))
     with AethisClient("ak", BASE) as client:
         assert client.expected_field_spec_properties() is None
+
+
+# --- the second upload path: rulebooks set-fields ---------------------------
+#
+# `aethis rulebooks set-fields` posts the fields file as authored, so it already
+# TRANSMITS both properties with no code change. What it lacked was the guard:
+# against an engine that models neither, the call returns 200 and the authored
+# values are gone. It asks about RulebookFieldSpec, which is a different model
+# from the project pin's ExpectedFieldSpec and can disagree with it on the same
+# engine — prod carries the properties on neither, staging on both.
+
+RULEBOOK_FIELDS_WITH_METADATA = [
+    {
+        "key": "craft.propulsion",
+        "sort": "Enum",
+        "enum_values": ["ion_drive", "chemical"],
+        "enum_labels": {"ion_drive": "Ion drive"},
+        "canonical_field": "spacecraft.propulsion",
+    }
+]
+RULEBOOK_FIELDS_PLAIN = [{"key": "craft.dry_mass_kg", "sort": "Int"}]
+
+
+def _rulebook_client(properties) -> MagicMock:
+    client = MagicMock()
+    client.rulebook_field_spec_properties.return_value = properties
+    # The project-pin model must never be consulted by this path: an engine can
+    # carry the properties on one model and not the other.
+    client.expected_field_spec_properties.return_value = ENGINE_WITH_SUPPORT
+    client.base_url = "https://staging.api.aethis.ai"
+    return client
+
+
+def test_set_fields_refuses_an_engine_that_would_drop_the_metadata(capsys):
+    client = _rulebook_client(ENGINE_WITHOUT_SUPPORT)
+
+    with pytest.raises(typer.Exit):
+        generate_cmd.check_display_metadata_support(client, RULEBOOK_FIELDS_WITH_METADATA, rulebook=True)
+
+    assert "does not carry canonical_field, enum_labels" in _flat(capsys)
+
+
+def test_set_fields_proceeds_against_an_engine_that_carries_them():
+    client = _rulebook_client(ENGINE_WITH_SUPPORT)
+
+    generate_cmd.check_display_metadata_support(client, RULEBOOK_FIELDS_WITH_METADATA, rulebook=True)
+
+
+def test_set_fields_is_unaffected_when_the_file_declares_nothing():
+    """An existing rulebook fields file keeps working against any engine."""
+    client = _rulebook_client(ENGINE_WITHOUT_SUPPORT)
+
+    generate_cmd.check_display_metadata_support(client, RULEBOOK_FIELDS_PLAIN, rulebook=True)
+
+    client.rulebook_field_spec_properties.assert_not_called()
+
+
+def test_set_fields_asks_about_the_rulebook_model_not_the_project_one():
+    """The two models are distinct and can disagree on one engine, so asking
+    the wrong one would clear a push the engine will not honour."""
+    client = _rulebook_client(ENGINE_WITHOUT_SUPPORT)
+
+    with pytest.raises(typer.Exit):
+        generate_cmd.check_display_metadata_support(client, RULEBOOK_FIELDS_WITH_METADATA, rulebook=True)
+
+    client.rulebook_field_spec_properties.assert_called_once()
+    client.expected_field_spec_properties.assert_not_called()
+
+
+def test_generation_path_asks_about_the_project_model_not_the_rulebook_one(tmp_path):
+    client = _client()
+    client.rulebook_field_spec_properties.return_value = ENGINE_WITHOUT_SUPPORT
+
+    generate_cmd._upload_field_vocabulary(client, "proj_1", _project(tmp_path, LABELLED_FIELDS))
+
+    client.expected_field_spec_properties.assert_called_once()
+    client.rulebook_field_spec_properties.assert_not_called()
+
+
+def test_set_fields_calls_the_guard_before_it_posts(monkeypatch):
+    """Ordering is the whole point — a guard that ran after the POST would be
+    refusing an upload the engine had already accepted and discarded."""
+    from aethis_cli.commands import rulebooks_cmd
+
+    calls: list[str] = []
+    client = _rulebook_client(ENGINE_WITHOUT_SUPPORT)
+    client.set_rulebook_fields.side_effect = lambda *a, **k: calls.append("post")
+
+    def refusing_guard(*_args, **_kwargs):
+        calls.append("guard")
+        raise typer.Exit(code=1)
+
+    monkeypatch.setattr(rulebooks_cmd, "check_display_metadata_support", refusing_guard)
+    monkeypatch.setattr(rulebooks_cmd, "load_client_or_fallback", lambda: (None, client))
+
+    path = pathlib.Path(tempfile.mkdtemp()) / "fields.yaml"
+    path.write_text(yaml.safe_dump({"fields": RULEBOOK_FIELDS_WITH_METADATA}))
+
+    with pytest.raises(typer.Exit):
+        rulebooks_cmd.set_fields("rb_1", path)
+
+    assert calls == ["guard"], "the guard must run before the POST, and abort it"
+
+
+def test_set_fields_refuses_for_real_against_an_engine_missing_the_rulebook_model(monkeypatch):
+    """The command itself, guard and all — not the guard called directly.
+
+    The client here carries the properties on the PROJECT pin model and not on
+    the rulebook one, which is the state that separates a call site asking
+    about what it posts from one asking about the other model and being wrongly
+    cleared.
+    """
+    from aethis_cli.commands import rulebooks_cmd
+
+    client = _rulebook_client(ENGINE_WITHOUT_SUPPORT)
+    monkeypatch.setattr(rulebooks_cmd, "load_client_or_fallback", lambda: (None, client))
+
+    path = pathlib.Path(tempfile.mkdtemp()) / "fields.yaml"
+    path.write_text(yaml.safe_dump({"fields": RULEBOOK_FIELDS_WITH_METADATA}))
+
+    with pytest.raises(typer.Exit):
+        rulebooks_cmd.set_fields("rb_1", path)
+
+    client.set_rulebook_fields.assert_not_called()
+
+
+def test_set_fields_posts_for_real_when_the_file_declares_nothing(monkeypatch):
+    """The unaffected half: an existing rulebook fields file still posts."""
+    from aethis_cli.commands import rulebooks_cmd
+
+    client = _rulebook_client(ENGINE_WITHOUT_SUPPORT)
+    client.set_rulebook_fields.return_value = {"fields": RULEBOOK_FIELDS_PLAIN, "field_lock_state": "unlocked"}
+    monkeypatch.setattr(rulebooks_cmd, "load_client_or_fallback", lambda: (None, client))
+
+    path = pathlib.Path(tempfile.mkdtemp()) / "fields.yaml"
+    path.write_text(yaml.safe_dump({"fields": RULEBOOK_FIELDS_PLAIN}))
+
+    rulebooks_cmd.set_fields("rb_1", path)
+
+    client.set_rulebook_fields.assert_called_once()
