@@ -256,11 +256,27 @@ class AethisClient:
         """List the project's uploaded sources (metadata only, no bodies).
 
         Each entry carries ``raw_sha256`` — the digest of the exact bytes the
-        engine retained — which is what lets a caller cite an already-uploaded
-        file instead of uploading a second identical copy. The engine never
-        dedupes on upload, so this is the only guard against duplicates.
+        engine retained — which lets a caller distinguish an exact replay from
+        changed content and drive the explicit source lifecycle.
         """
         return self._request("GET", f"/api/v1/public/projects/{project_id}/sources")
+
+    def update_source(
+        self,
+        project_id: str,
+        source_id: str,
+        *,
+        status: str,
+        superseded_by: Optional[str] = None,
+    ) -> dict:
+        body = {"status": status}
+        if superseded_by is not None:
+            body["superseded_by"] = superseded_by
+        return self._request(
+            "PATCH",
+            f"/api/v1/public/projects/{project_id}/sources/{source_id}",
+            json=body,
+        )
 
     def add_tests(self, project_id: str, test_cases: list[dict], replace: bool = False) -> dict:
         """Upload golden test cases to a project.

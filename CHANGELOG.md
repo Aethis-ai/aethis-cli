@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.36.1 (2026-08-20)
+
+- **fix(generate): source upload results are truthful.** Generation reports the
+  engine's exact new and reused counts instead of calling every attempted file
+  newly uploaded.
+- **fix(generate): edited sources remain regenerable.** Before uploading changed
+  content under an existing filename, the CLI supersedes the prior active source,
+  uploads and links its replacement, and reactivates the prior source if the
+  replacement upload fails. This avoids both a hard-blocked edit loop and duplicate
+  active source text in the authoring prompt.
+
 ## 0.36.0 (2026-08-19)
 
 A field can now say what its members are *called*, and which stored key its

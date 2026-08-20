@@ -222,20 +222,144 @@ def test_upload_sources_is_idempotent(tmp_path):
     src.mkdir()
     (src / "a.md").write_text("hello")
     client = MagicMock()
+    client.list_sources.return_value = {"sources": []}
+    client.upload_sources.return_value = {
+        "new": 1,
+        "reused": 0,
+        "sources": [{"source_id": "src_1", "filename": "a.md", "reused": False}],
+    }
 
     # First upload sends the file.
-    assert generate_cmd._upload_sources(client, "proj_1", tmp_path) == 1
+    assert generate_cmd._upload_sources(client, "proj_1", tmp_path) == generate_cmd.UploadSummary(new=1, reused=0)
     assert client.upload_sources.call_count == 1
 
     # Unchanged → nothing re-uploaded (the discover→generate double-upload fix).
-    assert generate_cmd._upload_sources(client, "proj_1", tmp_path) == 0
+    assert generate_cmd._upload_sources(client, "proj_1", tmp_path) == generate_cmd.UploadSummary(new=0, reused=0)
     assert client.upload_sources.call_count == 1
 
     # Editing the file (newer mtime) makes it upload again.
     (src / "a.md").write_text("changed")
     os.utime(src / "a.md", ns=(2_000_000_000, 2_000_000_000))
-    assert generate_cmd._upload_sources(client, "proj_1", tmp_path) == 1
+    assert generate_cmd._upload_sources(client, "proj_1", tmp_path) == generate_cmd.UploadSummary(new=1, reused=0)
     assert client.upload_sources.call_count == 2
+
+
+def test_upload_reports_exact_new_and_reused_counts_from_engine(tmp_path, capsys):
+    src = tmp_path / "sources"
+    src.mkdir()
+    (src / "a.md").write_text("same")
+    (src / "b.md").write_text("new")
+    client = MagicMock()
+    client.list_sources.return_value = {"sources": []}
+    client.upload_sources.return_value = {
+        "new": 1,
+        "reused": 1,
+        "sources": [
+            {"source_id": "src_a", "filename": "a.md", "reused": True},
+            {"source_id": "src_b", "filename": "b.md", "reused": False},
+        ],
+    }
+
+    assert generate_cmd._upload_sources(client, "proj_1", tmp_path) == generate_cmd.UploadSummary(new=1, reused=1)
+    assert "Sources: 1 new, 1 reused" in _flat(capsys)
+
+
+def test_all_reused_upload_never_says_the_sources_are_new(tmp_path, capsys):
+    src = tmp_path / "sources"
+    src.mkdir()
+    (src / "a.md").write_text("same")
+    client = MagicMock()
+    client.list_sources.return_value = {"sources": []}
+    client.upload_sources.return_value = {
+        "new": 0,
+        "reused": 1,
+        "sources": [{"source_id": "src_a", "filename": "a.md", "reused": True}],
+    }
+
+    assert generate_cmd._upload_sources(client, "proj_1", tmp_path) == generate_cmd.UploadSummary(new=0, reused=1)
+    rendered = _flat(capsys)
+    assert "Sources: 0 new, 1 reused" in rendered
+    assert "Uploaded 1" not in rendered
+
+
+def test_changed_source_is_superseded_then_linked_to_replacement(tmp_path):
+    src = tmp_path / "sources"
+    src.mkdir()
+    (src / "law.md").write_text("new law")
+    client = MagicMock()
+    client.list_sources.return_value = {
+        "sources": [
+            {
+                "source_id": "src_old",
+                "filename": "law.md",
+                "raw_sha256": "0" * 64,
+                "status": "active",
+            }
+        ]
+    }
+    client.upload_sources.return_value = {
+        "new": 1,
+        "reused": 0,
+        "sources": [{"source_id": "src_new", "filename": "law.md", "reused": False}],
+    }
+
+    summary = generate_cmd._upload_sources(client, "proj_1", tmp_path)
+
+    assert summary == generate_cmd.UploadSummary(new=1, reused=0)
+    assert client.update_source.call_args_list == [
+        (("proj_1", "src_old"), {"status": "superseded"}),
+        (("proj_1", "src_old"), {"status": "superseded", "superseded_by": "src_new"}),
+    ]
+
+
+def test_failed_replacement_upload_reactivates_old_source(tmp_path):
+    src = tmp_path / "sources"
+    src.mkdir()
+    (src / "law.md").write_text("new law")
+    client = MagicMock()
+    client.list_sources.return_value = {
+        "sources": [
+            {
+                "source_id": "src_old",
+                "filename": "law.md",
+                "raw_sha256": "0" * 64,
+                "status": "active",
+            }
+        ]
+    }
+    original = RuntimeError("upload failed")
+    client.upload_sources.side_effect = original
+
+    with pytest.raises(RuntimeError, match="upload failed"):
+        generate_cmd._upload_sources(client, "proj_1", tmp_path)
+
+    assert client.update_source.call_args_list == [
+        (("proj_1", "src_old"), {"status": "superseded"}),
+        (("proj_1", "src_old"), {"status": "active"}),
+    ]
+
+
+def test_failed_rollback_does_not_disguise_original_upload_error(tmp_path):
+    src = tmp_path / "sources"
+    src.mkdir()
+    (src / "law.md").write_text("new law")
+    client = MagicMock()
+    client.list_sources.return_value = {
+        "sources": [
+            {
+                "source_id": "src_old",
+                "filename": "law.md",
+                "raw_sha256": "0" * 64,
+                "status": "active",
+            }
+        ]
+    }
+    original = RuntimeError("original upload failure")
+    client.upload_sources.side_effect = original
+    client.update_source.side_effect = [None, RuntimeError("rollback failure")]
+
+    with pytest.raises(RuntimeError, match="original upload failure"):
+        generate_cmd._upload_sources(client, "proj_1", tmp_path)
 
 
 def test_safe_field_type_clamps_unknown_and_valueless_enum():
