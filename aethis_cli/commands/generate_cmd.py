@@ -266,6 +266,12 @@ _ENGINE_GATED_FIELD_KEYS = (
     "x_ui_widget",
 )
 
+# Rulebook vocabulary is intentionally slimmer than a generation pin. Keep its
+# capability gate scoped to properties that RulebookFieldSpec actually carries;
+# otherwise a project-only property in a shared authoring file would make the
+# rulebook command refuse an engine that is fully compatible with that route.
+_RULEBOOK_GATED_FIELD_KEYS = ("enum_labels", "canonical_field")
+
 
 def _normalise_field_type(t: Optional[str]) -> str:
     """Fold a server/long type name into the short ``fields.yaml`` form."""
@@ -693,7 +699,8 @@ def check_display_metadata_support(client: AethisClient, fields: list[dict], *, 
     carry the properties on one and not the other, so each upload path asks
     about the one it actually posts.
     """
-    declared = sorted({k for f in fields if isinstance(f, dict) for k in _ENGINE_GATED_FIELD_KEYS if k in f})
+    gated_keys = _RULEBOOK_GATED_FIELD_KEYS if rulebook else _ENGINE_GATED_FIELD_KEYS
+    declared = sorted({k for f in fields if isinstance(f, dict) for k in gated_keys if k in f})
     if not declared:
         return
     advertised = client.rulebook_field_spec_properties() if rulebook else client.expected_field_spec_properties()
