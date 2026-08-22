@@ -202,8 +202,8 @@ def _parse_fields_yaml(path: Path) -> dict:
 def _field_guidance_lines(key: str, field: dict) -> list[str]:
     """Natural-language guidance derived from a field's label/question/hints.
 
-    The ``/fields/spec`` endpoint only fixes key + type, so the human-facing
-    phrasing and the "why we ask" notes ride along as guidance instead.
+    Guidance remains useful context for the model, but explicitly authored
+    behaviour also rides the field pin and wins deterministically downstream.
     """
     lines: list[str] = []
     if field.get("question"):
@@ -241,13 +241,36 @@ _FIELD_KEY_ORDER = (
     "value_space",
     "enum_labels",
     "canonical_field",
+    "weight",
+    "elicitation_owner",
+    "injection_source",
+    "injection_phase",
+    "recoverable_from",
+    "x_ui_widget",
     "hints",
 )
 
 # Field-spec properties the engine must advertise before an authored value for
 # them is worth sending. An engine that does not model a property ignores it,
 # so the upload succeeds and the metadata is gone.
-_ENGINE_GATED_FIELD_KEYS = ("enum_labels", "canonical_field")
+_ENGINE_GATED_FIELD_KEYS = (
+    "enum_labels",
+    "canonical_field",
+    "label",
+    "question",
+    "weight",
+    "elicitation_owner",
+    "injection_source",
+    "injection_phase",
+    "recoverable_from",
+    "x_ui_widget",
+)
+
+# Rulebook vocabulary is intentionally slimmer than a generation pin. Keep its
+# capability gate scoped to properties that RulebookFieldSpec actually carries;
+# otherwise a project-only property in a shared authoring file would make the
+# rulebook command refuse an engine that is fully compatible with that route.
+_RULEBOOK_GATED_FIELD_KEYS = ("enum_labels", "canonical_field")
 
 
 def _normalise_field_type(t: Optional[str]) -> str:
@@ -631,6 +654,12 @@ def _upload_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) 
             if prop in field:
                 value = field[prop]
                 spec[prop] = dict(value) if isinstance(value, dict) else value
+        # In fields.yaml, omitting a question on a declared non-applicant fact
+        # is intentional: there is no applicant question. Make that absence
+        # explicit on the wire so a model-invented question is cleared rather
+        # than mistaken for legacy abstention.
+        if field.get("elicitation_owner") not in (None, "applicant") and "question" not in field:
+            spec["question"] = None
         expected_fields.append(spec)
         guidance_lines.extend(_field_guidance_lines(key, field))
 
@@ -653,11 +682,11 @@ def _upload_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) 
 
 
 def check_display_metadata_support(client: AethisClient, fields: list[dict], *, rulebook: bool = False) -> None:
-    """Refuse to push authored display metadata an engine will throw away.
+    """Refuse to push authored field metadata an engine will throw away.
 
     An engine that predates a field-spec property does not reject it — it
     ignores it, so the upload succeeds, the generation runs, and the labels
-    (or the canonical pairing) are simply gone. That is the one failure this
+    (or the ownership/question contract) are simply gone. That is the one failure this
     guard exists to make loud, and it fires only for the fields that actually
     declare something: a project with none is untouched.
 
@@ -670,7 +699,8 @@ def check_display_metadata_support(client: AethisClient, fields: list[dict], *, 
     carry the properties on one and not the other, so each upload path asks
     about the one it actually posts.
     """
-    declared = sorted({k for f in fields if isinstance(f, dict) for k in _ENGINE_GATED_FIELD_KEYS if k in f})
+    gated_keys = _RULEBOOK_GATED_FIELD_KEYS if rulebook else _ENGINE_GATED_FIELD_KEYS
+    declared = sorted({k for f in fields if isinstance(f, dict) for k in gated_keys if k in f})
     if not declared:
         return
     advertised = client.rulebook_field_spec_properties() if rulebook else client.expected_field_spec_properties()

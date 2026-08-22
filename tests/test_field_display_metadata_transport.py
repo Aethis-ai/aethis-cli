@@ -375,6 +375,24 @@ def test_set_fields_is_unaffected_when_the_file_declares_nothing():
     client.rulebook_field_spec_properties.assert_not_called()
 
 
+def test_set_fields_does_not_gate_on_project_only_behaviour_metadata():
+    """Project pins and rulebook vocabulary advertise different models."""
+    client = _rulebook_client(ENGINE_WITHOUT_SUPPORT)
+    fields = [
+        {
+            "key": "case.review_date",
+            "sort": "Date",
+            "elicitation_owner": "caseworker",
+            "injection_source": "adviser_selected",
+            "injection_phase": "pre_submission",
+        }
+    ]
+
+    generate_cmd.check_display_metadata_support(client, fields, rulebook=True)
+
+    client.rulebook_field_spec_properties.assert_not_called()
+
+
 def test_set_fields_asks_about_the_rulebook_model_not_the_project_one():
     """The two models are distinct and can disagree on one engine, so asking
     the wrong one would clear a push the engine will not honour."""

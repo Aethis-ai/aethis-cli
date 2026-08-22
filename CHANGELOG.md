@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.37.0 (2026-08-22)
+
+- **fix(generate): authored field behaviour is deterministic.** Generation
+  uploads now carry explicitly authored labels, questions, ownership,
+  injection source/phase, ordering weight, recovery capabilities, and UI hints
+  on the field pin. The engine's normalisation seam can therefore preserve the
+  authoring contract instead of accepting model-invented replacements.
+- **fix(generate): an omitted question on a non-applicant field is explicit.**
+  When a field declares a caseworker, system, or derived owner and has no
+  `question`, the CLI sends `question: null`; this clears any question invented
+  by the generation model. Legacy fields that declare none of the new metadata
+  retain their previous upload shape.
+- **fix(generate): capability checks cover behavioural metadata.** An older
+  engine that would silently discard any declared property is refused before
+  the field-spec push, just as it already was for enum labels and canonical
+  storage mappings.
+
 ## 0.36.1 (2026-08-20)
 
 - **fix(generate): source upload results are truthful.** Generation reports the
