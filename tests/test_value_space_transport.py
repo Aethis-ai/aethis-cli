@@ -63,6 +63,12 @@ members:
   - germany
 """
 
+FIELD_SPEC_PROPERTIES = {"key", "sort", "enum_values", "value_space", "question"}
+
+
+def _advertise_field_spec(client: MagicMock) -> None:
+    client.expected_field_spec_properties.return_value = FIELD_SPEC_PROPERTIES
+
 
 def _write(path, body: str):
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -113,6 +119,7 @@ def test_validate_rejects_value_space_on_non_enum():
 def test_upload_transmits_value_space_on_the_pin(tmp_path):
     project = _project_with_reference(tmp_path)
     client = MagicMock()
+    _advertise_field_spec(client)
     client.put_value_space.return_value = {"name": "form-an/countries", "version": 1, "created": True}
 
     generate_cmd._upload_field_vocabulary(client, "proj_1", project)
@@ -127,6 +134,7 @@ def test_upload_transmits_value_space_on_the_pin(tmp_path):
 def test_registry_sync_puts_before_spec_set(tmp_path):
     project = _project_with_reference(tmp_path)
     client = MagicMock()
+    _advertise_field_spec(client)
     client.put_value_space.return_value = {"name": "form-an/countries", "version": 1, "created": True}
 
     generate_cmd._upload_field_vocabulary(client, "proj_1", project)
@@ -180,6 +188,7 @@ def test_registry_sync_uses_and_records_base_version(tmp_path):
     project = _project_with_reference(tmp_path)
     write_state(project, {"value_space_sync": {"form-an/countries": 3}})
     client = MagicMock()
+    _advertise_field_spec(client)
     client.put_value_space.return_value = {"name": "form-an/countries", "version": 4, "created": True}
 
     generate_cmd._upload_field_vocabulary(client, "proj_1", project)
@@ -196,6 +205,7 @@ def test_reference_without_local_file_probes_the_engine_then_proceeds(tmp_path, 
     resolution, and only then does spec-set proceed."""
     project = _project_with_reference(tmp_path, space_file=False)
     client = MagicMock()
+    _advertise_field_spec(client)
     client.get_value_space.return_value = {
         "name": "form-an/countries",
         "version": 3,

@@ -55,6 +55,15 @@ fields:
     question: "Please give your date of birth."
 """
 
+FIELD_SPEC_PROPERTIES = {
+    "key",
+    "sort",
+    "enum_values",
+    "value_space",
+    "label",
+    "question",
+}
+
 
 # --- pure parsing ----------------------------------------------------------
 
@@ -93,6 +102,7 @@ def test_parent_rulebook_dir_detection(tmp_path):
 def test_upload_field_vocabulary_standalone(tmp_path):
     _write_fields(tmp_path / "fields" / "fields.yaml", RULESET_FIELDS)
     client = MagicMock()
+    client.expected_field_spec_properties.return_value = FIELD_SPEC_PROPERTIES
     generate_cmd._upload_field_vocabulary(client, "proj_1", tmp_path)
 
     client.set_field_spec.assert_called_once()
@@ -111,6 +121,7 @@ def test_upload_field_vocabulary_rulebook_wins(tmp_path):
     _write_fields(child / "fields" / "fields.yaml", RULESET_FIELDS)
 
     client = MagicMock()
+    client.expected_field_spec_properties.return_value = FIELD_SPEC_PROPERTIES
     generate_cmd._upload_field_vocabulary(client, "proj_1", child)
 
     _, expected_fields = client.set_field_spec.call_args.args
