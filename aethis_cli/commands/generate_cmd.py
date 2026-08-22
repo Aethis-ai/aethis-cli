@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import time
 from pathlib import Path
 from typing import NamedTuple, Optional
@@ -26,6 +27,20 @@ from aethis_cli.output import console, error_panel, info, success, warn
 def _chunks(lst: list, n: int):
     for i in range(0, len(lst), n):
         yield lst[i : i + n]
+
+
+class UploadSummary(NamedTuple):
+    new: int
+    reused: int
+
+
+def _upload_counts(response: dict) -> UploadSummary:
+    """Read the engine's authoritative upload disposition."""
+    new = response.get("new")
+    reused = response.get("reused")
+    if not isinstance(new, int) or not isinstance(reused, int):
+        raise AethisAPIError(502, "The source upload response did not report integer new/reused counts.")
+    return UploadSummary(new=new, reused=reused)
 
 
 def _collect_source_files(project_dir: Path) -> list[Path]:
@@ -60,16 +75,17 @@ def _resolve_or_create_project(client: AethisClient, cfg, project_id: Optional[s
     return pid
 
 
-def _upload_sources(client: AethisClient, pid: str, project_dir: Path) -> int:
+def _upload_sources(client: AethisClient, pid: str, project_dir: Path) -> UploadSummary:
     """Upload source files new or changed since the last upload, batched in 5s.
 
     A per-file mtime ledger in ``.aethis/state.json`` keeps this idempotent, so a
     ``discover`` followed by a ``generate`` (or repeated generates) doesn't
-    re-push unchanged sources. Returns the number uploaded.
+    re-push unchanged sources. Edited files replace their active same-name
+    predecessor through the engine's reversible source lifecycle.
     """
     files = _collect_source_files(project_dir)
     if not files:
-        return 0
+        return UploadSummary(new=0, reused=0)
     root = (project_dir / "sources").resolve()
     ledger = dict(read_state(project_dir).get("uploaded_sources") or {})
     to_upload = []
@@ -80,12 +96,54 @@ def _upload_sources(client: AethisClient, pid: str, project_dir: Path) -> int:
             to_upload.append(f)
         ledger[rel] = mtime
     if not to_upload:
-        return 0
-    for batch in _chunks(to_upload, 5):
-        client.upload_sources(pid, batch)
+        return UploadSummary(new=0, reused=0)
+
+    listed = client.list_sources(pid) or {}
+    active_by_filename = {
+        source.get("filename"): source
+        for source in (listed.get("sources") or [])
+        if isinstance(source, dict) and source.get("filename") and source.get("status", "active") == "active"
+    }
+    replacements: list[tuple[Path, dict]] = []
+    ordinary: list[Path] = []
+    for path in to_upload:
+        active = active_by_filename.get(path.name)
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if active and active.get("raw_sha256") != digest:
+            replacements.append((path, active))
+        else:
+            ordinary.append(path)
+
+    summary = UploadSummary(new=0, reused=0)
+    for batch in _chunks(ordinary, 5):
+        counts = _upload_counts(client.upload_sources(pid, batch) or {})
+        summary = UploadSummary(new=summary.new + counts.new, reused=summary.reused + counts.reused)
+
+    for path, prior in replacements:
+        prior_id = prior.get("source_id")
+        if not isinstance(prior_id, str) or not prior_id:
+            raise AethisAPIError(502, f"The active source metadata for {path.name} has no source_id.")
+        client.update_source(pid, prior_id, status="superseded")
+        try:
+            response = client.upload_sources(pid, [path]) or {}
+        except Exception:
+            try:
+                client.update_source(pid, prior_id, status="active")
+            except Exception as rollback_error:  # noqa: BLE001 — preserve the upload failure
+                warn(f"Replacement upload failed and source {prior_id} could not be reactivated: {rollback_error}")
+            raise
+        sources = response.get("sources") or []
+        replacement_id = sources[0].get("source_id") if sources and isinstance(sources[0], dict) else None
+        if not isinstance(replacement_id, str) or not replacement_id:
+            client.update_source(pid, prior_id, status="active")
+            raise AethisAPIError(502, f"The replacement upload for {path.name} returned no source_id.")
+        client.update_source(pid, prior_id, status="superseded", superseded_by=replacement_id)
+        counts = _upload_counts(response)
+        summary = UploadSummary(new=summary.new + counts.new, reused=summary.reused + counts.reused)
+
     write_state(project_dir, {"uploaded_sources": ledger})
-    info(f"Uploaded {len(to_upload)} source(s)")
-    return len(to_upload)
+    info(f"Sources: {summary.new} new, {summary.reused} reused")
+    return summary
 
 
 def _load_yaml_file(path: Path) -> dict:

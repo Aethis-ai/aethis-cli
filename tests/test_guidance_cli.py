@@ -27,7 +27,17 @@ def _setup_generate_mocks(mock_router, project_id: str = "proj_1") -> object:
         return_value=httpx.Response(201, json={"hint_id": "h1"})
     )
     mock_router.post(f"/api/v1/public/projects/{project_id}/sources").mock(
-        return_value=httpx.Response(201, json={"uploaded": 1})
+        return_value=httpx.Response(
+            201,
+            json={
+                "new": 1,
+                "reused": 0,
+                "sources": [{"source_id": "src_1", "filename": "policy.md", "reused": False}],
+            },
+        )
+    )
+    mock_router.get(f"/api/v1/public/projects/{project_id}/sources").mock(
+        return_value=httpx.Response(200, json={"sources": []})
     )
     mock_router.get(f"/api/v1/public/projects/{project_id}").mock(
         return_value=httpx.Response(200, json={"project_id": project_id})

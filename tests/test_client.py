@@ -189,6 +189,18 @@ def test_upload_sources(respx_mock, tmp_path):
 
 
 @respx.mock(base_url=BASE)
+def test_update_source_uses_project_scoped_patch(respx_mock):
+    route = respx_mock.patch("/api/v1/public/projects/proj_abc/sources/src_old").mock(
+        return_value=httpx.Response(200, json={"source_id": "src_old", "status": "superseded"})
+    )
+
+    result = AethisClient("ak", BASE).update_source("proj_abc", "src_old", status="superseded", superseded_by="src_new")
+
+    assert result["status"] == "superseded"
+    assert route.calls.last.request.content == b'{"status":"superseded","superseded_by":"src_new"}'
+
+
+@respx.mock(base_url=BASE)
 def test_add_tests(respx_mock):
     respx_mock.post("/api/v1/public/projects/proj_abc/tests").mock(
         return_value=httpx.Response(201, json={"added": 2, "test_case_ids": ["tc_1", "tc_2"]})

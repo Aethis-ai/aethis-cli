@@ -85,6 +85,12 @@ def _wire(monkeypatch, tmp_path, client) -> None:
 
 def _engine(status_payload: dict, schema: dict | None = None, schema_error: Exception | None = None) -> MagicMock:
     client = MagicMock()
+    client.list_sources.return_value = {"sources": []}
+    client.upload_sources.return_value = {
+        "new": 1,
+        "reused": 0,
+        "sources": [{"source_id": "src_1", "filename": "a.md", "reused": False}],
+    }
     client.generate.return_value = {"job_id": "job_1"}
     client.last_rate_limit = None
     client.get_status.return_value = status_payload
