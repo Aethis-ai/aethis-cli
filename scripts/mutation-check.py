@@ -377,8 +377,8 @@ MUTATIONS: List[Mutation] = [
     Mutation(
         "metadata-missing-from-canonical-key-order",
         "aethis_cli/commands/generate_cmd.py",
-        '    "enum_labels",\n    "canonical_field",\n    "hints",',
-        '    "hints",',
+        '    "value_space",\n    "enum_labels",\n    "canonical_field",\n    "weight",',
+        '    "value_space",\n    "weight",',
         "a pull rewrites the metadata out of its modelled place in fields.yaml",
         detects=("tests/test_field_display_metadata_transport.py::test_fields_yaml_write_back_preserves_the_metadata",),
     ),
