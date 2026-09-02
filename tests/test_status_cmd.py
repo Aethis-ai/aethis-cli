@@ -214,6 +214,7 @@ def test_status_with_project_id_shows_generation_progress(tmp_project, monkeypat
     }
     fake_gen = {
         "generation_contract_version": 1,
+        "telemetry_availability": "current",
         "worker_lifecycle": "terminal",
         "retry_readiness": "ready",
         "project_status": "ready",
@@ -243,6 +244,7 @@ def test_status_with_project_id_shows_generation_progress(tmp_project, monkeypat
     assert "proj_abc" in clean
     assert "ready" in clean
     assert "terminal" in clean
+    assert "current" in clean
     assert "test:20260419-abc1234" in clean
     assert "turn 11/20" in clean
     assert "best 31/42 tests" in clean

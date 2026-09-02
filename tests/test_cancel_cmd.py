@@ -21,6 +21,7 @@ def _client(response: dict | None = None) -> MagicMock:
     client.cancel_generation.return_value = response or {
         "job_id": "job_1",
         "status": "failed",
+        "outcome": "cancelled",
         "project_released": True,
         "detail": "Ownership released. An already-running worker may continue.",
     }
@@ -71,6 +72,7 @@ def test_cancel_json_emits_the_server_contract_without_human_prose():
     response = {
         "job_id": "job_json",
         "status": "failed",
+        "outcome": "already_cancelled",
         "project_released": True,
         "detail": "An already-running worker may continue.",
     }
@@ -84,6 +86,23 @@ def test_cancel_json_emits_the_server_contract_without_human_prose():
 
     assert result.exit_code == 0, result.output
     assert json.loads(result.output) == response
+
+
+def test_cancel_renders_idempotent_already_cancelled_outcome():
+    client = _client(
+        {
+            "job_id": "job_1",
+            "status": "failed",
+            "outcome": "already_cancelled",
+            "project_released": True,
+            "detail": "The exact job was already cancelled.",
+        }
+    )
+    with patch("aethis_cli.commands.cancel_cmd.load_client_or_fallback", return_value=(MagicMock(), client)):
+        result = CliRunner().invoke(app, ["cancel", "-p", "proj_abc", "--yes"], catch_exceptions=False)
+
+    assert result.exit_code == 0, result.output
+    assert "already cancelled" in result.output
 
 
 def test_cancel_without_project_context_fails_before_auth_or_network(tmp_path, monkeypatch):

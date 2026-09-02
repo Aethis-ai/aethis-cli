@@ -193,6 +193,7 @@ def _print_generation_section(project_id: str) -> None:
     console.print(f"\n[bold]Generation[/bold] — {project_id}")
     console.print(f"  Project: [bold {color}]{ps}[/bold {color}]")
     if result.get("generation_contract_version") == 1:
+        console.print(f"  Telemetry: {result.get('telemetry_availability', 'unknown')}")
         console.print(f"  Worker:  {result.get('worker_lifecycle', 'unknown')}")
         console.print(f"  Retry:   {result.get('retry_readiness', 'unknown')}")
     else:

@@ -85,9 +85,12 @@ def cancel(
         return
 
     job_id = result.get("job_id", "unknown")
-    outcome = result.get("outcome", "cancelled")
+    outcome = result.get("outcome")
     if result.get("project_released") is True:
-        success(f"Generation {job_id} {outcome.replace('_', ' ')}; project {pid} released.")
+        if outcome in ("cancelled", "already_cancelled"):
+            success(f"Generation {job_id} {outcome.replace('_', ' ')}; project {pid} released.")
+        else:
+            warn(f"Generation {job_id} returned an unknown cancellation outcome; project {pid} released.")
     else:
         warn(f"Generation {job_id} was marked failed, but project {pid} was not released by this request.")
     detail = result.get("detail")
