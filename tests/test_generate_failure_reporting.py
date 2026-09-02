@@ -30,6 +30,7 @@ import re
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
 import typer
 
@@ -357,6 +358,306 @@ def test_a_mid_poll_api_error_names_the_stale_pointer(tmp_path, monkeypatch, cap
     assert "rs_from_an_earlier_run" in _flat(capsys), "the stale pointer must be named on this ending too"
 
 
+# ---------------------------------------------------------------------------
+# Defect 4 (#122) — the same ending, reached by the exception that actually
+# interrupts a long poll
+# ---------------------------------------------------------------------------
+#
+# The guard above is correct and, on the failure most likely to trigger it, it
+# never ran. A dropped connection, a DNS failure, a TLS error or a read timeout
+# raises `httpx.HTTPError`, not `AethisAPIError`: `AethisClient._request` wraps
+# only HTTP *status* failures, so a transport failure unwinds past this
+# handler to the top-level boundary in `main.py`, which renders one line and
+# exits. `_invalidate_stale_pointer` is skipped, so the id is kept — right —
+# and never named — wrong, and silently so.
+#
+# The tests below pin the whole path, not just the reported ending: a blip that
+# the poll can simply survive should not end the run at all.
+
+
+def test_a_mid_poll_transport_failure_names_the_stale_pointer(tmp_path, monkeypatch, capsys):
+    """The reported defect: the guard must cover the transport error too.
+
+    The twin of `test_a_mid_poll_api_error_names_the_stale_pointer`. Nothing has
+    been ruled — the job may well have succeeded — so the id stands and must be
+    named, and the recovery is one command away, so the warning carries it.
+    """
+    _project(tmp_path)
+    write_state(tmp_path, {"ruleset_id": "rs_from_an_earlier_run"})
+    client = _engine({"job": {"status": "running", "progress_percent": 10}})
+    client.get_status.side_effect = httpx.RemoteProtocolError("Server disconnected without sending a response.")
+    _wire(monkeypatch, tmp_path, client)
+
+    with pytest.raises(typer.Exit) as exc:
+        _run()
+
+    assert exc.value.exit_code == 1
+    assert read_state(tmp_path).get("ruleset_id") == "rs_from_an_earlier_run", (
+        "a transport failure rules nothing out; the last known good id is not invalidated by it"
+    )
+    out = _flat(capsys)
+    assert "rs_from_an_earlier_run" in out, "the stale pointer must be named on this ending too"
+    assert "projects show" in out, "the warning must carry the command that recovers the real id"
+
+
+def test_a_blip_mid_poll_does_not_end_the_generation(tmp_path, monkeypatch, capsys):
+    """Better than naming the stale id: don't strand the run in the first place.
+
+    A single dropped connection is the common form of this incident, and the
+    job behind it usually finishes. Absorbing the blip turns the whole class
+    from "silent stale pointer" into "no incident".
+    """
+    _project(tmp_path)
+    write_state(tmp_path, {"ruleset_id": "rs_from_an_earlier_run"})
+    client = _engine({"job": {"status": "running", "progress_percent": 10}})
+    client.get_status.side_effect = [
+        httpx.RemoteProtocolError("Server disconnected without sending a response."),
+        {"job": {"status": "success", "result_ruleset_id": "rs_from_this_run"}},
+    ]
+    _wire(monkeypatch, tmp_path, client)
+
+    _run()
+
+    assert read_state(tmp_path)["ruleset_id"] == "rs_from_this_run", (
+        "the poll survived the blip, so this run's id must be the one recorded"
+    )
+
+
+def test_a_blip_in_the_post_success_repoll_still_records_the_id(tmp_path, monkeypatch, capsys):
+    """The seam that is strictly worse than the reported one.
+
+    After the engine reports success the loop re-polls for the id. A transport
+    failure *there* strands a generation the CLI already knows succeeded.
+    """
+    _project(tmp_path)
+    write_state(tmp_path, {"ruleset_id": "rs_from_an_earlier_run"})
+    client = _engine({"job": {"status": "running", "progress_percent": 10}})
+    client.get_status.side_effect = [
+        {"job": {"status": "success"}},  # success, id not yet populated
+        httpx.ReadTimeout("timed out"),  # the re-poll blips
+        {"job": {"status": "success", "result_ruleset_id": "rs_from_this_run"}},
+    ]
+    _wire(monkeypatch, tmp_path, client)
+
+    _run()
+
+    assert read_state(tmp_path)["ruleset_id"] == "rs_from_this_run", (
+        "a blip while waiting for the id must not discard an id the next attempt returns"
+    )
+
+
+def test_a_transport_failure_on_publish_still_reports_the_ruleset(tmp_path, monkeypatch, capsys):
+    """Publishing is the last step, and its failure is not the generation's.
+
+    The id was recorded before the publish. Reporting only "Could not reach the
+    Aethis API" would have the author read a successful generation as a failed
+    one, and re-run it.
+    """
+    _project(tmp_path)
+    client = _engine({"job": {"status": "success", "result_ruleset_id": "rs_from_this_run"}})
+    client.publish.side_effect = httpx.ConnectError("connection refused")
+    _wire(monkeypatch, tmp_path, client)
+
+    _run()
+
+    out = _flat(capsys)
+    assert "rs_from_this_run" in out, "the generation succeeded and its id must be reported"
+    assert "aethis publish" in out, "the un-run step must be named so it can be run"
+    assert read_state(tmp_path)["ruleset_id"] == "rs_from_this_run"
+
+
+def test_a_success_that_never_surfaces_an_id_names_the_stale_pointer(tmp_path, monkeypatch, capsys):
+    """A success with no id leaves the same silent stale pointer.
+
+    The id is deliberately not clobbered (nothing better is known), so this
+    ending has exactly the shape the guard exists for: `fields pull` would sync
+    from the earlier generation with nothing said.
+    """
+    _project(tmp_path)
+    write_state(tmp_path, {"ruleset_id": "rs_from_an_earlier_run"})
+    client = _engine({"job": {"status": "success"}})
+    _wire(monkeypatch, tmp_path, client)
+
+    _run()
+
+    assert read_state(tmp_path)["ruleset_id"] == "rs_from_an_earlier_run", "a success never clobbers a prior good id"
+    assert "rs_from_an_earlier_run" in _flat(capsys), (
+        "a success that produced no id must still name the pointer it did not replace"
+    )
+
+
+def test_a_success_whose_field_diff_loses_the_connection_is_still_a_success(tmp_path, monkeypatch, capsys):
+    """The guard must never fire on the run that recorded the pointer.
+
+    The field diff runs *after* the new id is written. A transport failure
+    there once escaped to the stale-pointer guard, so a generation that had
+    succeeded and recorded exactly the right id announced "Done! Ruleset: X"
+    and then insisted X was from an earlier generation — a false claim about
+    the one fact the guard exists to keep honest, and the same shape of defect
+    as the one it was written to fix.
+    """
+    _project(tmp_path)
+    write_state(tmp_path, {"ruleset_id": "rs_from_an_earlier_run"})
+    client = _engine({"job": {"status": "success", "result_ruleset_id": "rs_from_this_run"}})
+    client.get_schema.side_effect = httpx.ConnectError("connection reset")
+    _wire(monkeypatch, tmp_path, client)
+
+    _run()  # must not raise: a diff that cannot be fetched is not a failed generation
+
+    out = _flat(capsys)
+    assert read_state(tmp_path)["ruleset_id"] == "rs_from_this_run", "this run's id was recorded and must stand"
+    assert "from an earlier generation" not in out, (
+        "the pointer this run just wrote is not stale, and must never be called stale"
+    )
+
+
+def test_the_guard_never_calls_this_runs_own_pointer_stale(tmp_path, capsys):
+    """The invariant directly, independent of the route that reaches it."""
+    write_state(tmp_path, {"ruleset_id": "rs_from_this_run", "project_id": "proj_abc"})
+
+    generate_cmd._invalidate_stale_pointer(tmp_path, "error", produced_id="rs_from_this_run")
+
+    assert "from an earlier generation" not in _flat(capsys), "the id this run produced is not an earlier one"
+    assert read_state(tmp_path)["ruleset_id"] == "rs_from_this_run"
+
+
+def test_a_persistent_outage_is_reported_as_unreachable_not_as_a_timeout(tmp_path, monkeypatch, capsys):
+    """The blip budget has to be *bounded*, and nothing else asserted that.
+
+    Without this the budget is a free variable: raise it and the poll simply
+    absorbs a real outage until the deadline, then reports "Timed out" — which
+    reads as a slow job and sends the author looking in the wrong place. Every
+    other assertion here stays green under that mutation, because the timeout
+    ending also names the stale pointer.
+    """
+    _project(tmp_path)
+    write_state(tmp_path, {"ruleset_id": "rs_from_an_earlier_run"})
+    client = _engine({"job": {"status": "running", "progress_percent": 10}})
+    client.get_status.side_effect = httpx.ConnectError("connection refused")
+    _wire(monkeypatch, tmp_path, client)
+
+    with pytest.raises(typer.Exit):
+        _run(timeout=5)
+
+    out = _flat(capsys)
+    assert "Timed out" not in out, "a dead connection is not a slow job and must not be reported as one"
+    assert client.get_status.call_count == generate_cmd._TRANSPORT_BLIP_BUDGET + 1, (
+        "the poll must give up after the budget, not grind on to the deadline"
+    )
+
+
+def test_a_lossy_but_working_connection_still_completes(tmp_path, monkeypatch, capsys):
+    """The regression a total blip cap caused, pinned so it cannot come back.
+
+    A flapping link (fail, ok, fail, ok …) never trips the *consecutive* bound,
+    and it must not be aborted by any other bound either: the job behind it is
+    progressing, and killing it one poll short of success delivers exactly the
+    #122 experience — run dead, pointer naming an earlier generation — from the
+    code written to prevent it. An absolute cap got this wrong because its
+    tolerance shrinks as a job gets longer, which is backwards.
+    """
+    _project(tmp_path)
+    write_state(tmp_path, {"ruleset_id": "rs_from_an_earlier_run"})
+    running = {"job": {"status": "running", "progress_percent": 10}}
+    # 20 dropped connections spread across the poll, never 3 in a row.
+    steps: list = []
+    for _ in range(20):
+        steps.extend([httpx.ConnectError("flap"), running])
+    steps.append({"job": {"status": "success", "result_ruleset_id": "rs_from_this_run"}})
+    client = _engine(running)
+    client.get_status.side_effect = steps
+    _wire(monkeypatch, tmp_path, client)
+
+    _run(timeout=600)
+
+    assert read_state(tmp_path)["ruleset_id"] == "rs_from_this_run", (
+        "a lossy link that keeps working must reach the success it was heading for"
+    )
+
+
+def test_an_absorbed_blip_leaves_a_durable_trace(tmp_path, monkeypatch, capsys):
+    """The progress description is overwritten and invisible off a TTY.
+
+    An absorbed blip is the event that used to strand generations, so it should
+    leave a line worth grepping rather than only a spinner frame.
+    """
+    _project(tmp_path)
+    client = _engine({"job": {"status": "running", "progress_percent": 10}})
+    client.get_status.side_effect = [
+        httpx.ConnectError("flap"),
+        {"job": {"status": "success", "result_ruleset_id": "rs_from_this_run"}},
+    ]
+    _wire(monkeypatch, tmp_path, client)
+
+    _run()
+
+    assert "Lost the connection" in _flat(capsys), "an absorbed blip must be visible after the fact"
+
+
+def test_a_timeout_after_blips_says_the_network_may_be_the_cause(tmp_path, monkeypatch, capsys):
+    """Otherwise a flapping link is indistinguishable from a slow job.
+
+    This is what the removed total-blip cap was really for, delivered without
+    aborting anybody's run to get it.
+    """
+    _project(tmp_path)
+    running = {"job": {"status": "running", "progress_percent": 10}}
+    client = _engine(running)
+
+    # An endless alternation rather than a fixed list: a list long enough for
+    # the deadline is a guess, and when the guess is short the test reds with
+    # StopIteration — passing for a reason it does not claim.
+    state = {"n": 0}
+
+    def flap(_pid):
+        state["n"] += 1
+        if state["n"] % 2:
+            raise httpx.ConnectError("flap")
+        return running
+
+    client.get_status.side_effect = flap
+    _wire(monkeypatch, tmp_path, client)
+
+    # A virtual clock. Against the real one this test spent ~5s of wall time
+    # and emitted 17,000 lines to reach an ending that is purely a function of
+    # poll count; advancing 3s per reading — the loop's own cadence — makes it
+    # instant and makes the number of polls deterministic rather than a
+    # property of how loaded the machine is.
+    clock = {"t": 0.0}
+
+    def monotonic():
+        clock["t"] += 3.0
+        return clock["t"]
+
+    monkeypatch.setattr(generate_cmd.time, "monotonic", monotonic)
+
+    with pytest.raises(typer.Exit):
+        _run(timeout=20)
+
+    out = _flat(capsys)
+    assert "Timed out" in out
+    assert "network problem" in out, "a poll full of dropped connections is not a slow job"
+
+
+def test_a_failed_publish_says_why(tmp_path, monkeypatch, capsys):
+    """A green tick over a ruleset that was never activated, with no reason.
+
+    The generation did succeed, so it is reported as one — but silence about
+    the publish leaves this ending indistinguishable from the deliberate
+    `--no-publish` one, and the author is not told why the ruleset is inactive.
+    """
+    _project(tmp_path)
+    client = _engine({"job": {"status": "success", "result_ruleset_id": "rs_from_this_run"}})
+    client.publish.side_effect = httpx.ConnectError("connection refused")
+    _wire(monkeypatch, tmp_path, client)
+
+    _run()
+
+    out = _flat(capsys)
+    assert "Publish did not run" in out, "the step that failed must be named"
+    assert "connection refused" in out, "and so must the reason"
+
+
 def test_a_success_that_never_surfaces_an_id_diffs_nothing(tmp_path, monkeypatch, capsys):
     """A success with no id must not be diffed against the previous ruleset either."""
     _project(tmp_path)
@@ -436,3 +737,160 @@ def test_nothing_pinned_stays_quiet(tmp_path, capsys):
     client = MagicMock()
     generate_cmd._report_field_diff(client, None, tmp_path)
     assert not _flat(capsys).strip()
+
+
+VALUE_SPACE_FIELDS = "fields:\n  - key: pi.nationality\n    type: enum\n    value_space: nationality\n"
+
+
+def test_a_transport_failure_reading_a_value_space_does_not_crash(tmp_path, monkeypatch, capsys):
+    """The branch the widened catch actually broke.
+
+    `_report_field_diff` verifies a value_space-pinned field against the
+    registry, and its handler formatted `{e.detail}` — an AethisAPIError-only
+    attribute. Widening the catch to httpx therefore turned a dropped
+    connection into an AttributeError, which no handler here or at the boundary
+    catches: a successful generation ended in a raw traceback.
+
+    Every other test pins members INLINE, so none of them enters this branch —
+    which is exactly how the defect reached CI green.
+    """
+    (tmp_path / "sources").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "sources" / "a.md").write_text("the source document")
+    (tmp_path / "fields").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "fields" / "fields.yaml").write_text(VALUE_SPACE_FIELDS)
+
+    client = _engine(
+        {
+            "job": {
+                "status": "success",
+                "result_ruleset_id": "rs_from_this_run",
+                "value_spaces_resolved": {"pi.nationality": {"space": "nationality", "version": 3}},
+            }
+        },
+        schema={"fields": [{"field_id": "pi.nationality", "enum_values": ["gbr", "usa"]}]},
+    )
+
+    def value_space(name, version=None):
+        if version is None:
+            return {"name": name, "members": ["gbr", "usa"]}  # the pre-generation probe succeeds
+        raise httpx.ConnectError("connection reset")  # the diff-phase read drops
+
+    client.get_value_space.side_effect = value_space
+    _wire(monkeypatch, tmp_path, client)
+
+    _run()  # must not raise AttributeError, and must not fail the generation
+
+    out = _flat(capsys)
+    assert "NOT verified" in out, "the unverifiable reference must still be reported"
+    assert "connection reset" in out, "and the reason must be the transport error, readably"
+    assert read_state(tmp_path)["ruleset_id"] == "rs_from_this_run"
+
+
+def test_an_api_error_reading_the_schema_keeps_its_status_code(tmp_path, monkeypatch, capsys):
+    """The code is what makes the sentence after it true or false.
+
+    The warning continues "The draft may no longer be retrievable" — a claim a
+    404 supports and a 403 or a 500 does not. A first draft of the shared
+    reason formatter dropped the code, and nothing noticed.
+    """
+    _project(tmp_path)
+    client = _engine(
+        {"job": {"status": "success", "result_ruleset_id": "rs_from_this_run"}},
+        schema_error=AethisAPIError(404, "Ruleset not found"),
+    )
+    _wire(monkeypatch, tmp_path, client)
+
+    _run()
+
+    out = _flat(capsys)
+    assert "HTTP 404" in out, "the status code is the diagnostic half of this message"
+    assert "Ruleset not found" in out
+
+
+def test_a_structured_value_space_conflict_reads_as_a_sentence(tmp_path, monkeypatch, capsys):
+    """A dict detail must not reach the author as a repr.
+
+    The engine's value-space conflicts carry `{reason_code, message, versions}`.
+    Printing the dict buries the one sentence that says what to do, which is
+    the whole reason `_api_error_message` exists — and the reason the shared
+    formatter delegates to it instead of calling `str()` on the detail.
+    """
+    (tmp_path / "sources").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "sources" / "a.md").write_text("the source document")
+    (tmp_path / "fields").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "fields" / "fields.yaml").write_text(VALUE_SPACE_FIELDS)
+
+    client = _engine(
+        {
+            "job": {
+                "status": "success",
+                "result_ruleset_id": "rs_from_this_run",
+                "value_spaces_resolved": {"pi.nationality": {"space": "nationality", "version": 3}},
+            }
+        },
+        schema={"fields": [{"field_id": "pi.nationality", "enum_values": ["gbr", "usa"]}]},
+    )
+
+    conflict = AethisAPIError(
+        409,
+        {"reason_code": "version_conflict", "message": "Space nationality is at v4, you sent v3"},
+    )
+
+    def value_space(name, version=None):
+        if version is None:
+            return {"name": name, "members": ["gbr", "usa"]}
+        raise conflict
+
+    client.get_value_space.side_effect = value_space
+    _wire(monkeypatch, tmp_path, client)
+
+    _run()
+
+    out = _flat(capsys)
+    assert "Space nationality is at v4, you sent v3" in out, "the actionable sentence must survive"
+    assert "reason_code" not in out, "the raw dict repr buries it"
+
+
+def test_the_absorbed_blip_trace_is_said_once_not_once_per_recovery(tmp_path, monkeypatch, capsys):
+    """A flapping poll would otherwise emit the same line ~100 times.
+
+    Nothing bounds the recoveries now that the total cap is gone, so the trace
+    has to bound itself; the running total is reported once at the timeout.
+    """
+    _project(tmp_path)
+    running = {"job": {"status": "running", "progress_percent": 10}}
+    steps: list = []
+    for _ in range(10):
+        steps.extend([httpx.ConnectError("flap"), running])
+    steps.append({"job": {"status": "success", "result_ruleset_id": "rs_from_this_run"}})
+    client = _engine(running)
+    client.get_status.side_effect = steps
+    _wire(monkeypatch, tmp_path, client)
+
+    _run(timeout=600)
+
+    assert _flat(capsys).count("Lost the connection") == 1, "ten recoveries, one line"
+
+
+def test_a_failed_run_still_clears_the_pointer_even_if_the_ids_match(tmp_path, capsys):
+    """The suppression must never reach the ending whose job is to nullify.
+
+    `produced_id` means "this run produced it"; the pointer means "this run
+    recorded it". Those diverge on the failed path, where the engine may attach
+    a draft id that was never written to disk — and there, suppressing would
+    skip the clear, leaving `fields pull` free to sync from a ruleset the
+    engine has ruled against.
+
+    Unreachable through the command today (nothing passes `produced_id` with a
+    failed status), so it is driven directly: an unreachable clause is still a
+    claim, and an untested claim is the one that turns out to be wrong when a
+    later caller makes it reachable.
+    """
+    write_state(tmp_path, {"ruleset_id": "rs_draft", "project_id": "proj_abc"})
+
+    generate_cmd._invalidate_stale_pointer(tmp_path, "failed", produced_id="rs_draft")
+
+    assert read_state(tmp_path)["ruleset_id"] is None, (
+        "a failed ending clears the pointer regardless of which run produced it"
+    )
+    assert "Cleared the recorded ruleset" in _flat(capsys)

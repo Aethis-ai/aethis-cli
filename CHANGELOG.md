@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.37.1 (2026-09-02)
+
+- **fix(generate): a dropped connection mid-poll no longer strands the run on a
+  stale ruleset id.** `--poll` guards against an interrupted generation leaving
+  `.aethis/state.json` naming an *earlier* ruleset, but the guard only covered
+  `AethisAPIError`. A dropped connection, DNS failure, TLS error or read timeout
+  raises `httpx.HTTPError`, which unwound past it — so the failure most likely
+  to interrupt a long poll was the one that bypassed the guard, and every later
+  `decide`, `test`, `explain` and `fields pull` silently answered from the wrong
+  ruleset. The poll now absorbs a short connection blip and finishes normally;
+  where the API is genuinely unreachable it names the stale id and prints the
+  command that recovers the real one.
+- **fix(generate): the stale-pointer guard can no longer fire on a run that
+  succeeded.** The pinned-vs-produced field diff runs *after* the new id is
+  recorded, so a connection lost during it made the CLI announce
+  "Done! Ruleset: X" and then insist X was from an earlier generation — a false
+  claim about the exact fact the guard exists to keep honest. The diff now
+  honours its own "never fails the command" contract for transport errors, and
+  the guard never describes a pointer this run recorded as stale.
+- **fix(generate): a blip while waiting for the new ruleset id no longer
+  discards it.** After the engine reports success the CLI re-polls for the id.
+  A transport failure there stranded a generation the CLI already knew had
+  succeeded; those attempts are now individually tolerant.
+- **fix(generate): a persistent outage is reported as unreachable, not as a
+  timeout.** The retry is bounded by consecutive failures, so a dead connection
+  surfaces as one rather than being absorbed to the deadline and reported as a
+  slow job. A *flapping* link is deliberately not aborted — it is working, and
+  killing it one poll short of success would deliver the very failure above —
+  so a poll that suffered dropped connections says so when it does time out.
+- **fix(generate): a failed publish no longer reads as a failed generation, and
+  says why.** A transport error on the auto-publish reported only "Could not
+  reach the Aethis API", so a successful generation looked like a failure and
+  got re-run. It now reports the ruleset, names the reason the publish did not
+  run, and names `aethis publish` as the step to re-run — previously the
+  API-error half of this path gave a green tick with no reason at all.
+- **fix(generate): a success that never surfaces an id says so.** That ending
+  also leaves the recorded pointer naming an earlier generation, and was silent.
+- **fix(generate): an unreadable value space is reported, not raised.** The
+  field diff verifies value-space-pinned fields against the registry and
+  formatted the failure as if it were always an API error, so a dropped
+  connection there raised `AttributeError` — an unhandled traceback on an
+  otherwise successful generation.
+- **fix: an unreachable API cannot crash the error reporter.** `httpx` exposes
+  `.request` as a property that raises when unbound, so the defensive
+  `getattr(e, "request", None)` in the transport-error path could raise
+  `RuntimeError` — a traceback about the error handler in place of the one
+  actionable line. The rendering now has a single home shared by the top-level
+  boundary and the commands that must clean up before exiting. `generate` and
+  `refine` name the host they were actually configured with rather than the
+  public default; other commands still report via the top-level boundary, which
+  reads `AETHIS_BASE_URL`.
+
 ## 0.37.0 (2026-08-22)
 
 - **fix(generate): authored field behaviour is deterministic.** Generation

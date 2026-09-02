@@ -13,7 +13,7 @@ import typer
 from aethis_cli._version import __version__
 from aethis_cli.auth_helpers import RUNTIME
 from aethis_cli.errors import AethisAPIError, AuthenticationError, AuthRequired, ConfigError
-from aethis_cli.output import console, format_error_detail, render_api_error
+from aethis_cli.output import console, format_error_detail, render_api_error, render_transport_error
 from aethis_cli.render import RUNTIME as RENDER_RUNTIME, OutputFormat
 from aethis_cli.commands.account_cmd import account_app
 from aethis_cli.commands.rulebooks_cmd import rulebooks_app
@@ -242,18 +242,9 @@ def cli() -> None:
     except httpx.HTTPError as e:
         # Unreachable / slow API, DNS failure, TLS error, etc. Render one
         # actionable line instead of a raw traceback (pretty_exceptions is
-        # disabled). The base URL the client tried lives on the request, when
-        # httpx attached one (RequestError subclasses carry .request).
-        target = os.environ.get("AETHIS_BASE_URL", "https://api.aethis.ai")
-        request = getattr(e, "request", None)
-        if request is not None:
-            target = str(request.url)
-        reason = str(e) or e.__class__.__name__
-        console.print(
-            f"[red]Could not reach the Aethis API at {target}: {reason}.[/red]",
-            highlight=False,
-        )
-        console.print("[dim]Check your connection or try again shortly.[/dim]")
+        # disabled). A command that has cleanup of its own to do on this path
+        # catches it first and renders the same line via the same helper.
+        render_transport_error(e)
         raise SystemExit(1)
 
 
