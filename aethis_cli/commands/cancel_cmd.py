@@ -9,7 +9,7 @@ import typer
 from aethis_cli.config import load_client_or_fallback, load_project_config
 from aethis_cli.errors import AethisAPIError, ConfigError
 from aethis_cli.output import console, error_panel, success, warn
-from aethis_cli.prompts import confirm_or_abort
+from aethis_cli.prompts import confirm_or_abort, is_noninteractive
 from aethis_cli.render import emit, is_json_requested
 
 
@@ -61,12 +61,31 @@ def cancel(
     current_job = status.get("job") if isinstance(status, dict) else None
     observed_job_id = current_job.get("job_id") if isinstance(current_job, dict) else None
     observed_status = current_job.get("status") if isinstance(current_job, dict) else None
-    if not isinstance(observed_job_id, str) or observed_status not in ("queued", "running"):
+    error_detail = current_job.get("error_detail") if isinstance(current_job, dict) else None
+    already_cancelled = (
+        observed_status == "failed"
+        and isinstance(error_detail, dict)
+        and error_detail.get("reason_code") == "generation_cancelled"
+    )
+    if not isinstance(observed_job_id, str):
         console.print("[red]No in-flight generation job was observed for this project.[/red]")
         raise typer.Exit(code=1)
     if job_id is not None and job_id != observed_job_id:
         console.print(
             f"[red]Refusing: expected job {job_id}, but the project currently reports {observed_job_id}.[/red]"
+        )
+        raise typer.Exit(code=1)
+    if observed_status not in ("queued", "running") and not (
+        job_id == observed_job_id and already_cancelled
+    ):
+        console.print(
+            "[red]No cancellable generation was observed. To retry an ambiguous prior cancellation, "
+            "pass the exact terminal --job-id; only generation_cancelled is replayable.[/red]"
+        )
+        raise typer.Exit(code=1)
+    if not yes and is_noninteractive():
+        console.print(
+            "[red]Cancellation in a non-interactive environment requires explicit --yes.[/red]"
         )
         raise typer.Exit(code=1)
     confirm_or_abort(

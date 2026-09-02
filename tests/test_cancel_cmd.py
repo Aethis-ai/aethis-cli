@@ -53,7 +53,7 @@ def test_cancel_declined_observes_target_but_never_calls_cancel():
     client.cancel_generation.assert_not_called()
 
 
-def test_cancel_in_ci_never_blocks_on_stdin_and_announces_the_bypass():
+def test_cancel_in_ci_requires_explicit_yes_and_never_calls_cancel():
     client = _client()
     with patch("aethis_cli.commands.cancel_cmd.load_client_or_fallback", return_value=(MagicMock(), client)):
         result = CliRunner().invoke(
@@ -63,9 +63,9 @@ def test_cancel_in_ci_never_blocks_on_stdin_and_announces_the_bypass():
             catch_exceptions=False,
         )
 
-    assert result.exit_code == 0, result.output
-    assert "Non-interactive (CI set)" in result.output
-    client.cancel_generation.assert_called_once_with("proj_ci", "job_1")
+    assert result.exit_code == 1, result.output
+    assert "requires explicit --yes" in result.output
+    client.cancel_generation.assert_not_called()
 
 
 def test_cancel_json_emits_the_server_contract_without_human_prose():
@@ -102,6 +102,33 @@ def test_cancel_renders_idempotent_already_cancelled_outcome():
         result = CliRunner().invoke(app, ["cancel", "-p", "proj_abc", "--yes"], catch_exceptions=False)
 
     assert result.exit_code == 0, result.output
+    assert "already cancelled" in result.output
+
+
+def test_cancel_replays_exact_already_cancelled_job_after_lost_response():
+    client = _client(
+        {
+            "job_id": "job_1",
+            "status": "failed",
+            "outcome": "already_cancelled",
+            "project_released": True,
+            "detail": "The exact job was already cancelled.",
+        }
+    )
+    client.get_status.return_value["job"] = {
+        "job_id": "job_1",
+        "status": "failed",
+        "error_detail": {"reason_code": "generation_cancelled"},
+    }
+    with patch("aethis_cli.commands.cancel_cmd.load_client_or_fallback", return_value=(MagicMock(), client)):
+        result = CliRunner().invoke(
+            app,
+            ["cancel", "-p", "proj_abc", "--job-id", "job_1", "--yes"],
+            catch_exceptions=False,
+        )
+
+    assert result.exit_code == 0, result.output
+    client.cancel_generation.assert_called_once_with("proj_abc", "job_1")
     assert "already cancelled" in result.output
 
 
