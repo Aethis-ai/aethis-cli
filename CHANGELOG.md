@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.37.1 (2026-09-02)
+
+- **fix(generate): a dropped connection mid-poll no longer strands the run on a
+  stale ruleset id.** `--poll` guards against an interrupted generation leaving
+  `.aethis/state.json` naming an *earlier* ruleset, but the guard only covered
+  `AethisAPIError`. A dropped connection, DNS failure, TLS error or read timeout
+  raises `httpx.HTTPError`, which unwound past it — so the failure most likely
+  to interrupt a long poll was the one that bypassed the guard, and every later
+  `decide`, `test`, `explain` and `fields pull` silently answered from the wrong
+  ruleset. The poll now absorbs a short connection blip and finishes normally;
+  where the API is genuinely unreachable it names the stale id and prints the
+  command that recovers the real one.
+- **fix(generate): a blip while waiting for the new ruleset id no longer
+  discards it.** After the engine reports success the CLI re-polls for the id.
+  A transport failure there stranded a generation the CLI already knew had
+  succeeded; those attempts are now individually tolerant.
+- **fix(generate): a failed publish no longer reads as a failed generation.**
+  A transport error on the auto-publish reported only "Could not reach the
+  Aethis API", so a successful generation looked like a failure and got re-run.
+  It now reports the ruleset and names `aethis publish` as the step to re-run.
+- **fix(generate): a success that never surfaces an id says so.** That ending
+  also leaves the recorded pointer naming an earlier generation, and was silent.
+- **fix: an unreachable API cannot crash the error reporter.** `httpx` exposes
+  `.request` as a property that raises when unbound, so the defensive
+  `getattr(e, "request", None)` in the transport-error path could raise
+  `RuntimeError` — a traceback about the error handler in place of the one
+  actionable line. The rendering now has a single home shared by the top-level
+  boundary and the commands that must clean up before exiting.
+
 ## 0.37.0 (2026-08-22)
 
 - **fix(generate): authored field behaviour is deterministic.** Generation

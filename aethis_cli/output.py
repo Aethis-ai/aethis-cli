@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+
+import httpx
 from rich.console import Console
 
 from aethis_cli.errors import AethisAPIError
@@ -95,6 +98,37 @@ def render_api_error(status_code: int, detail: object) -> None:
 def error_panel(e: AethisAPIError) -> None:
     """Render an API error as a readable line (+ hint when present)."""
     render_api_error(e.status_code, e.detail)
+
+
+def render_transport_error(e: httpx.HTTPError) -> None:
+    """Render a failure to reach the API at all — no response, so no envelope.
+
+    This lives here rather than at the ``main.py`` boundary that first needed
+    it because it is no longer only a boundary concern: a command that must
+    *do* something before the process ends (``generate`` names the ruleset
+    pointer its interrupted poll has left stale) has to render the error
+    itself, and two renderings of one fact drift. One home, two callers.
+    """
+    # The base URL the client tried lives on the request, when httpx attached
+    # one (RequestError subclasses carry .request).
+    target = os.environ.get("AETHIS_BASE_URL", "https://api.aethis.ai")
+    try:
+        request = getattr(e, "request", None)
+    except RuntimeError:
+        # `.request` is a *property* that raises when httpx never bound one, so
+        # the `getattr(..., None)` default never applies and this reporter
+        # would fail while reporting — a traceback about the error handler in
+        # place of the one actionable line, on the path where the API is
+        # already unreachable. Ask forgiveness, not permission.
+        request = None
+    if request is not None:
+        target = str(request.url)
+    reason = str(e) or e.__class__.__name__
+    console.print(
+        f"[red]Could not reach the Aethis API at {target}: {reason}.[/red]",
+        highlight=False,
+    )
+    console.print("[dim]Check your connection or try again shortly.[/dim]")
 
 
 def success(msg: str) -> None:

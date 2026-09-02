@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from typing import NamedTuple, Optional
 
+import httpx
 import typer
 import yaml
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
@@ -21,7 +22,7 @@ from aethis_cli.config import (
     write_state,
 )
 from aethis_cli.errors import AethisAPIError, ConfigError
-from aethis_cli.output import console, error_panel, info, success, warn
+from aethis_cli.output import console, error_panel, info, render_transport_error, success, warn
 
 
 def _chunks(lst: list, n: int):
@@ -903,6 +904,23 @@ def _run_generate(
         _invalidate_stale_pointer(project_dir, "error")
         raise typer.Exit(code=1)
 
+    except httpx.HTTPError as e:
+        # The ending the handler above was written for and could not catch.
+        # `AethisClient._request` wraps only HTTP *status* failures, so a
+        # dropped connection, a DNS failure, a TLS error or a read timeout
+        # raises `httpx.HTTPError` and unwound straight past it to the
+        # boundary in `main.py` — skipping the invalidation, so the stale
+        # pointer was kept (right) and never named (wrong, and silently). That
+        # is the failure most likely to interrupt a long poll, so the guard was
+        # missing on the path that needs it most (#122).
+        #
+        # Rendered here rather than re-raised so the error stays ahead of the
+        # warning explaining what it cost; `main.py` renders the same line from
+        # the same helper for every command that has no cleanup of its own.
+        render_transport_error(e)
+        _invalidate_stale_pointer(project_dir, "error")
+        raise typer.Exit(code=1)
+
 
 def _upload_test_cases(client: AethisClient, pid: str, project_dir: Path) -> None:
     """Upload `tests/scenarios.yaml` as the project's test cases.
@@ -1190,14 +1208,23 @@ def _invalidate_stale_pointer(project_dir: Path, status: str) -> None:
       client-side clock or a transient 500. The pointer stands and is named
       instead, which is what "not silently" requires.
     """
-    prior = read_state(project_dir).get("ruleset_id")
+    state = read_state(project_dir)
+    prior = state.get("ruleset_id")
     if not prior:
         return
     if status != "failed":
         warn(
             f"'.aethis/state.json' still records ruleset {prior} from an earlier generation. "
-            f"This run has not produced one, so 'aethis fields pull' would sync from that "
+            f"This run has not recorded one, so 'aethis fields pull' would sync from that "
             f"earlier ruleset rather than from this job."
+        )
+        # The recovery is one call away and the id needed to make it is on
+        # disk, so print the command rather than the situation. `latest_ruleset_id`
+        # is a property of the project, which is why this is offered as
+        # something to compare rather than written back automatically.
+        console.print(
+            f"[dim]  If the job in fact finished, 'aethis --output json projects show "
+            f"{state.get('project_id') or '<project-id>'}' names it as 'latest_ruleset_id'.[/dim]"
         )
         return
     write_state(project_dir, {"ruleset_id": None})
@@ -1206,6 +1233,11 @@ def _invalidate_stale_pointer(project_dir: Path, status: str) -> None:
         f"one, so 'aethis fields pull' will refuse rather than silently sync from it. Pass "
         f"'--ruleset-id {prior}' explicitly if that earlier ruleset is what you want."
     )
+
+
+# How many consecutive transport failures a poll absorbs before reporting the
+# API as unreachable. See the handler in the loop below for why it is bounded.
+_TRANSPORT_BLIP_BUDGET = 3
 
 
 def _poll_until_done(
@@ -1238,8 +1270,29 @@ def _poll_until_done(
         console=console,
     ) as progress:
         task = progress.add_task("Generating ruleset...", total=100)
+        blips = 0
         while time.monotonic() < deadline:
-            result = client.get_status(pid)
+            try:
+                result = client.get_status(pid)
+            except httpx.HTTPError:
+                # A poll runs for minutes, which makes it the command most
+                # exposed to a transient network fault and the one where giving
+                # up costs most: the job behind it usually finishes, and the
+                # caller is then left holding a pointer to an earlier
+                # generation. Absorbing a short blip turns the common form of
+                # #122 into no incident at all.
+                #
+                # Bounded, because tolerating indefinitely would report a real
+                # outage as a timeout — which reads as a slow job and sends the
+                # author looking in the wrong place. Four consecutive failures
+                # (~12s with the sleep below) surfaces it as what it is.
+                blips += 1
+                if blips > _TRANSPORT_BLIP_BUDGET:
+                    raise
+                progress.update(task, description="[yellow]lost the connection — retrying[/yellow]")
+                time.sleep(3)
+                continue
+            blips = 0
             job = result.get("job") or {}
             pct = job.get("progress_percent", 0)
             job_status = job.get("status", "unknown")
@@ -1260,11 +1313,24 @@ def _poll_until_done(
                     if ruleset_id:
                         break
                     time.sleep(2)
-                    ruleset_id = _resolved_ruleset_id(client.get_status(pid))
+                    try:
+                        ruleset_id = _resolved_ruleset_id(client.get_status(pid))
+                    except httpx.HTTPError:
+                        # Strictly worse than the reported case if it escaped:
+                        # the job has already reported success, so raising here
+                        # would strand a generation the CLI knows finished. The
+                        # blip costs this attempt and nothing else.
+                        continue
                 # Only record a real id — never clobber a prior good one with None
                 # if the engine was slow to surface it.
                 if ruleset_id:
                     write_state(project_dir, {"ruleset_id": ruleset_id})
+                else:
+                    # A success that never surfaced an id leaves the pointer
+                    # naming an earlier generation — the same silent shape the
+                    # unsuccessful endings are guarded against, arrived at from
+                    # the one ending that reads like it worked.
+                    _invalidate_stale_pointer(project_dir, "no-id")
                 console.print()
                 if no_publish:
                     # Publishing ACTIVATES the ruleset, which is the wrong
@@ -1290,7 +1356,11 @@ def _poll_until_done(
                         success(f"Done! Ruleset published: {ruleset_id}")
                     else:
                         success("Done! Ruleset generated — run 'aethis status' to get its id.")
-                except AethisAPIError:
+                except (AethisAPIError, httpx.HTTPError):
+                    # Benign for state — the id was recorded above — but not for
+                    # the reader: "Could not reach the Aethis API" as the last
+                    # word on a successful generation reads as a failed one, and
+                    # gets it re-run.
                     if ruleset_id:
                         success(f"Done! Ruleset: {ruleset_id} (run 'aethis publish' to activate)")
                     else:
