@@ -1192,10 +1192,15 @@ def _error_reason(e: Exception) -> str:
     empty `str()`. A formatter that assumes either shape fails on the other —
     which is exactly how widening a catch to httpx produced an AttributeError
     on a successful run.
+
+    The API half delegates to `_api_error_message` rather than re-deriving it:
+    that helper exists because a value-space conflict's detail is a *dict*, and
+    `str()` on it buries the one sentence the author needs under a repr (PR
+    #110). A first draft of this function reimplemented the easy half and lost
+    both that and the status code.
     """
-    detail = getattr(e, "detail", None)
-    if detail:
-        return str(detail)
+    if isinstance(e, AethisAPIError):
+        return f"HTTP {e.status_code}: {_api_error_message(e)}"
     return str(e) or e.__class__.__name__
 
 
@@ -1241,7 +1246,7 @@ def _invalidate_stale_pointer(project_dir: Path, status: str, *, produced_id: Op
     prior = state.get("ruleset_id")
     if not prior:
         return
-    if produced_id is not None and prior == produced_id:
+    if status != "failed" and produced_id is not None and prior == produced_id:
         # This run recorded the pointer, so there is nothing stale to warn
         # about however the run ended afterwards. Without this the guard fires
         # on its own success: a transport failure *after* the id was written
@@ -1318,6 +1323,7 @@ def _poll_until_done(
         task = progress.add_task("Generating ruleset...", total=100)
         blips = 0
         total_blips = 0  # reported at the deadline, never used to abort
+        blip_trace_shown = False
         while time.monotonic() < deadline:
             try:
                 result = client.get_status(pid)
@@ -1340,12 +1346,18 @@ def _poll_until_done(
                 progress.update(task, description="[yellow]lost the connection — retrying[/yellow]")
                 time.sleep(3)
                 continue
-            if blips:
+            if blips and not blip_trace_shown:
                 # A durable line, because the transient progress description is
                 # overwritten by the next poll and is invisible off a TTY —
                 # and an absorbed blip is the event that used to strand a
                 # generation, so it should leave a trace worth grepping.
-                warn(f"Lost the connection to the API {blips} time(s) during the poll; recovered and carried on.")
+                #
+                # Once, not once per recovery: the total cap that used to bound
+                # this at 8 is gone, so a flapping 600s poll would otherwise
+                # emit ~100 identical lines through the progress bar. The
+                # timeout ending reports the running total in one line.
+                blip_trace_shown = True
+                warn("Lost the connection to the API during the poll; recovered and carried on.")
             blips = 0
             job = result.get("job") or {}
             pct = job.get("progress_percent", 0)

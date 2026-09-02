@@ -618,8 +618,21 @@ def test_a_timeout_after_blips_says_the_network_may_be_the_cause(tmp_path, monke
     client.get_status.side_effect = flap
     _wire(monkeypatch, tmp_path, client)
 
+    # A virtual clock. Against the real one this test spent ~5s of wall time
+    # and emitted 17,000 lines to reach an ending that is purely a function of
+    # poll count; advancing 3s per reading — the loop's own cadence — makes it
+    # instant and makes the number of polls deterministic rather than a
+    # property of how loaded the machine is.
+    clock = {"t": 0.0}
+
+    def monotonic():
+        clock["t"] += 3.0
+        return clock["t"]
+
+    monkeypatch.setattr(generate_cmd.time, "monotonic", monotonic)
+
     with pytest.raises(typer.Exit):
-        _run(timeout=5)
+        _run(timeout=20)
 
     out = _flat(capsys)
     assert "Timed out" in out
@@ -771,3 +784,89 @@ def test_a_transport_failure_reading_a_value_space_does_not_crash(tmp_path, monk
     assert "NOT verified" in out, "the unverifiable reference must still be reported"
     assert "connection reset" in out, "and the reason must be the transport error, readably"
     assert read_state(tmp_path)["ruleset_id"] == "rs_from_this_run"
+
+
+def test_an_api_error_reading_the_schema_keeps_its_status_code(tmp_path, monkeypatch, capsys):
+    """The code is what makes the sentence after it true or false.
+
+    The warning continues "The draft may no longer be retrievable" — a claim a
+    404 supports and a 403 or a 500 does not. A first draft of the shared
+    reason formatter dropped the code, and nothing noticed.
+    """
+    _project(tmp_path)
+    client = _engine(
+        {"job": {"status": "success", "result_ruleset_id": "rs_from_this_run"}},
+        schema_error=AethisAPIError(404, "Ruleset not found"),
+    )
+    _wire(monkeypatch, tmp_path, client)
+
+    _run()
+
+    out = _flat(capsys)
+    assert "HTTP 404" in out, "the status code is the diagnostic half of this message"
+    assert "Ruleset not found" in out
+
+
+def test_a_structured_value_space_conflict_reads_as_a_sentence(tmp_path, monkeypatch, capsys):
+    """A dict detail must not reach the author as a repr.
+
+    The engine's value-space conflicts carry `{reason_code, message, versions}`.
+    Printing the dict buries the one sentence that says what to do, which is
+    the whole reason `_api_error_message` exists — and the reason the shared
+    formatter delegates to it instead of calling `str()` on the detail.
+    """
+    (tmp_path / "sources").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "sources" / "a.md").write_text("the source document")
+    (tmp_path / "fields").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "fields" / "fields.yaml").write_text(VALUE_SPACE_FIELDS)
+
+    client = _engine(
+        {
+            "job": {
+                "status": "success",
+                "result_ruleset_id": "rs_from_this_run",
+                "value_spaces_resolved": {"pi.nationality": {"space": "nationality", "version": 3}},
+            }
+        },
+        schema={"fields": [{"field_id": "pi.nationality", "enum_values": ["gbr", "usa"]}]},
+    )
+
+    conflict = AethisAPIError(
+        409,
+        {"reason_code": "version_conflict", "message": "Space nationality is at v4, you sent v3"},
+    )
+
+    def value_space(name, version=None):
+        if version is None:
+            return {"name": name, "members": ["gbr", "usa"]}
+        raise conflict
+
+    client.get_value_space.side_effect = value_space
+    _wire(monkeypatch, tmp_path, client)
+
+    _run()
+
+    out = _flat(capsys)
+    assert "Space nationality is at v4, you sent v3" in out, "the actionable sentence must survive"
+    assert "reason_code" not in out, "the raw dict repr buries it"
+
+
+def test_the_absorbed_blip_trace_is_said_once_not_once_per_recovery(tmp_path, monkeypatch, capsys):
+    """A flapping poll would otherwise emit the same line ~100 times.
+
+    Nothing bounds the recoveries now that the total cap is gone, so the trace
+    has to bound itself; the running total is reported once at the timeout.
+    """
+    _project(tmp_path)
+    running = {"job": {"status": "running", "progress_percent": 10}}
+    steps: list = []
+    for _ in range(10):
+        steps.extend([httpx.ConnectError("flap"), running])
+    steps.append({"job": {"status": "success", "result_ruleset_id": "rs_from_this_run"}})
+    client = _engine(running)
+    client.get_status.side_effect = steps
+    _wire(monkeypatch, tmp_path, client)
+
+    _run(timeout=600)
+
+    assert _flat(capsys).count("Lost the connection") == 1, "ten recoveries, one line"
