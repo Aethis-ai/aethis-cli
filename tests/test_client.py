@@ -276,10 +276,11 @@ def test_cancel_generation(respx_mock):
         )
     )
 
-    result = AethisClient("ak", BASE).cancel_generation("proj_abc")
+    result = AethisClient("ak", BASE).cancel_generation("proj_abc", "job_1")
 
     assert result["project_released"] is True
     assert route.called
+    assert route.calls.last.request.url.params["job_id"] == "job_1"
     assert route.calls.last.request.content in (b"", None)
 
 

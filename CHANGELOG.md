@@ -3,8 +3,9 @@
 ## 0.38.0 (2026-09-02)
 
 - **feat: explicitly recover an authoring project from an abandoned generation.**
-  `aethis cancel [-p PROJECT]` calls the engine's cancellation endpoint after a
-  confirmation (`--yes` for automation), marks the current job failed, and
+  `aethis cancel [-p PROJECT]` first observes and displays the exact active job,
+  then calls the engine's job-bound cancellation endpoint after a confirmation
+  (`--yes` for automation), marks that job failed, and
   releases its ownership of the project. It reports the engine's honest
   limitation: an already-running worker may continue even though a new run can
   now be admitted. Polling never cancels automatically.

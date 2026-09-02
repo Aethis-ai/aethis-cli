@@ -32,7 +32,12 @@ def cancel(
         None,
         "--project-id",
         "-p",
-        help="Project whose latest in-flight generation should be cancelled (defaults to aethis.yaml).",
+        help="Project whose observed in-flight generation should be cancelled (defaults to aethis.yaml).",
+    ),
+    job_id: Optional[str] = typer.Option(
+        None,
+        "--job-id",
+        help="Expected active job. Refuses if the project's current job differs.",
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
 ) -> None:
@@ -42,14 +47,30 @@ def cancel(
     action is never invoked automatically by ``generate`` or ``status``.
     """
     pid = _resolve_project_id(project_id)
+    _cfg, client = load_client_or_fallback()
+    try:
+        status = client.get_status(pid)
+    except AethisAPIError as e:
+        error_panel(e)
+        raise typer.Exit(code=1)
+    current_job = status.get("job") if isinstance(status, dict) else None
+    observed_job_id = current_job.get("job_id") if isinstance(current_job, dict) else None
+    observed_status = current_job.get("status") if isinstance(current_job, dict) else None
+    if not isinstance(observed_job_id, str) or observed_status not in ("queued", "running"):
+        console.print("[red]No in-flight generation job was observed for this project.[/red]")
+        raise typer.Exit(code=1)
+    if job_id is not None and job_id != observed_job_id:
+        console.print(
+            f"[red]Refusing: expected job {job_id}, but the project currently reports {observed_job_id}.[/red]"
+        )
+        raise typer.Exit(code=1)
     confirm_or_abort(
-        f"Cancel the in-flight generation for {pid}? This marks the job failed and releases the project",
+        f"Cancel generation {observed_job_id} for {pid}? This marks that job failed and releases its ownership",
         assume_yes=yes,
     )
 
-    _cfg, client = load_client_or_fallback()
     try:
-        result = client.cancel_generation(pid)
+        result = client.cancel_generation(pid, observed_job_id)
     except AethisAPIError as e:
         error_panel(e)
         raise typer.Exit(code=1)
