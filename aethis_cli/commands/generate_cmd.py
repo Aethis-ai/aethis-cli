@@ -905,7 +905,7 @@ def _run_generate(
         # earlier generation. Nothing has been ruled, so the id stands; but it
         # is named, because otherwise this ending is the one that reintroduces
         # the silent stale `fields pull`.
-        _invalidate_stale_pointer(project_dir, "error")
+        _invalidate_stale_pointer(project_dir, "error", produced_id=outcome.ruleset_id if outcome else None)
         raise typer.Exit(code=1)
 
     except httpx.HTTPError as e:
@@ -1048,7 +1048,7 @@ def _report_field_diff(
         schema = client.get_schema(ruleset_id)
     except (AethisAPIError, httpx.HTTPError) as e:
         warn(
-            f"Could not read the schema of ruleset {ruleset_id} ({e}), so the "
+            f"Could not read the schema of ruleset {ruleset_id} ({_error_reason(e)}), so the "
             f"pinned-vs-produced field diff was not computed. The draft may no "
             f"longer be retrievable."
         )
@@ -1091,9 +1091,16 @@ def _report_field_diff(
             try:
                 space = client.get_value_space(space_name, version=resolved_version)
             except (AethisAPIError, httpx.HTTPError) as e:
+                # `{e}`, never `{e.detail}`: `.detail` exists only on
+                # AethisAPIError, so formatting it raised AttributeError for
+                # every httpx error this clause was widened to catch — and
+                # AttributeError is caught by no handler here or at the
+                # boundary, so a successful generation ended in a raw
+                # traceback. Widening a catch means widening the formatting.
+                reason = _error_reason(e)
                 ref_problems.append(
                     f"{key} ← {space_name}@v{resolved_version}: NOT verified — could not "
-                    f"read the space at that version ({e.detail})."
+                    f"read the space at that version ({reason})."
                 )
                 continue
             expected_members = set(space.get("members") or [])
@@ -1178,6 +1185,20 @@ class GenerationOutcome(NamedTuple):
     value_spaces_resolved: Optional[dict] = None
 
 
+def _error_reason(e: Exception) -> str:
+    """A readable reason for either error family this module now catches.
+
+    `AethisAPIError` carries `.detail`; httpx errors do not, and some carry an
+    empty `str()`. A formatter that assumes either shape fails on the other —
+    which is exactly how widening a catch to httpx produced an AttributeError
+    on a successful run.
+    """
+    detail = getattr(e, "detail", None)
+    if detail:
+        return str(detail)
+    return str(e) or e.__class__.__name__
+
+
 def _resolved_ruleset_id(status_payload: dict) -> Optional[str]:
     """The ruleset a generation produced, preferring the job's own record.
 
@@ -1251,15 +1272,18 @@ def _invalidate_stale_pointer(project_dir: Path, status: str, *, produced_id: Op
     )
 
 
-# How many transport failures a poll absorbs before reporting the API as
-# unreachable — consecutively, and in total across the run. The total matters
-# because the consecutive counter resets on every success, so a *flapping*
-# link (fail, fail, fail, ok, fail, fail, fail, ok …) would never trip the
-# consecutive bound and would run to the deadline — reported as a timeout,
-# which is precisely the misreport the bound exists to prevent. Bad wifi is a
-# commoner shape than a clean sustained outage.
+# How many CONSECUTIVE transport failures a poll absorbs before reporting the
+# API as unreachable.
+#
+# Deliberately consecutive-only. A total cap was tried and removed: because it
+# is absolute rather than rate-relative, its tolerance shrinks as a job gets
+# longer (~40% of polls on a 60s job, ~4% on a 600s one) — strictest exactly
+# where exposure to blips is greatest. It aborted lossy-but-working runs one
+# poll short of the success they were about to receive, which is the #122
+# experience this module exists to prevent. What it bought was only a better
+# *message* on a flapping link, and not even that much: the timeout ending
+# already names the stale pointer, so nothing was silent either way.
 _TRANSPORT_BLIP_BUDGET = 3
-_TRANSPORT_BLIP_TOTAL = 8
 
 
 def _poll_until_done(
@@ -1293,7 +1317,7 @@ def _poll_until_done(
     ) as progress:
         task = progress.add_task("Generating ruleset...", total=100)
         blips = 0
-        total_blips = 0
+        total_blips = 0  # reported at the deadline, never used to abort
         while time.monotonic() < deadline:
             try:
                 result = client.get_status(pid)
@@ -1311,7 +1335,7 @@ def _poll_until_done(
                 # consecutive one alone cannot see a flapping link.
                 blips += 1
                 total_blips += 1
-                if blips > _TRANSPORT_BLIP_BUDGET or total_blips > _TRANSPORT_BLIP_TOTAL:
+                if blips > _TRANSPORT_BLIP_BUDGET:
                     raise
                 progress.update(task, description="[yellow]lost the connection — retrying[/yellow]")
                 time.sleep(3)
@@ -1415,4 +1439,11 @@ def _poll_until_done(
             time.sleep(3)
 
     console.print(f"\n[bold red]Timed out after {timeout}s.[/bold red] Use 'aethis status' to check progress.")
+    if total_blips:
+        # Without this, a flapping link is indistinguishable from a slow job —
+        # which sends the author to look at the engine rather than the network.
+        warn(
+            f"The connection to the API dropped {total_blips} time(s) during this poll, so the "
+            f"job may have been progressing normally and the timeout may be a network problem."
+        )
     return GenerationOutcome("timeout", None)

@@ -546,26 +546,84 @@ def test_a_persistent_outage_is_reported_as_unreachable_not_as_a_timeout(tmp_pat
     )
 
 
-def test_a_flapping_connection_is_also_reported_as_unreachable(tmp_path, monkeypatch, capsys):
-    """The consecutive counter resets on success, so it cannot see a flap.
+def test_a_lossy_but_working_connection_still_completes(tmp_path, monkeypatch, capsys):
+    """The regression a total blip cap caused, pinned so it cannot come back.
 
-    fail, fail, fail, ok, fail, fail, fail, ok … never trips a consecutive
-    bound, and bad wifi is a commoner shape than a clean sustained outage.
+    A flapping link (fail, ok, fail, ok …) never trips the *consecutive* bound,
+    and it must not be aborted by any other bound either: the job behind it is
+    progressing, and killing it one poll short of success delivers exactly the
+    #122 experience — run dead, pointer naming an earlier generation — from the
+    code written to prevent it. An absolute cap got this wrong because its
+    tolerance shrinks as a job gets longer, which is backwards.
     """
     _project(tmp_path)
     write_state(tmp_path, {"ruleset_id": "rs_from_an_earlier_run"})
     running = {"job": {"status": "running", "progress_percent": 10}}
-    flap = []
+    # 20 dropped connections spread across the poll, never 3 in a row.
+    steps: list = []
     for _ in range(20):
-        flap.extend([httpx.ConnectError("flap"), httpx.ConnectError("flap"), running])
+        steps.extend([httpx.ConnectError("flap"), running])
+    steps.append({"job": {"status": "success", "result_ruleset_id": "rs_from_this_run"}})
     client = _engine(running)
+    client.get_status.side_effect = steps
+    _wire(monkeypatch, tmp_path, client)
+
+    _run(timeout=600)
+
+    assert read_state(tmp_path)["ruleset_id"] == "rs_from_this_run", (
+        "a lossy link that keeps working must reach the success it was heading for"
+    )
+
+
+def test_an_absorbed_blip_leaves_a_durable_trace(tmp_path, monkeypatch, capsys):
+    """The progress description is overwritten and invisible off a TTY.
+
+    An absorbed blip is the event that used to strand generations, so it should
+    leave a line worth grepping rather than only a spinner frame.
+    """
+    _project(tmp_path)
+    client = _engine({"job": {"status": "running", "progress_percent": 10}})
+    client.get_status.side_effect = [
+        httpx.ConnectError("flap"),
+        {"job": {"status": "success", "result_ruleset_id": "rs_from_this_run"}},
+    ]
+    _wire(monkeypatch, tmp_path, client)
+
+    _run()
+
+    assert "Lost the connection" in _flat(capsys), "an absorbed blip must be visible after the fact"
+
+
+def test_a_timeout_after_blips_says_the_network_may_be_the_cause(tmp_path, monkeypatch, capsys):
+    """Otherwise a flapping link is indistinguishable from a slow job.
+
+    This is what the removed total-blip cap was really for, delivered without
+    aborting anybody's run to get it.
+    """
+    _project(tmp_path)
+    running = {"job": {"status": "running", "progress_percent": 10}}
+    client = _engine(running)
+
+    # An endless alternation rather than a fixed list: a list long enough for
+    # the deadline is a guess, and when the guess is short the test reds with
+    # StopIteration — passing for a reason it does not claim.
+    state = {"n": 0}
+
+    def flap(_pid):
+        state["n"] += 1
+        if state["n"] % 2:
+            raise httpx.ConnectError("flap")
+        return running
+
     client.get_status.side_effect = flap
     _wire(monkeypatch, tmp_path, client)
 
     with pytest.raises(typer.Exit):
         _run(timeout=5)
 
-    assert "Timed out" not in _flat(capsys), "a flapping link must surface as unreachable, not as a timeout"
+    out = _flat(capsys)
+    assert "Timed out" in out
+    assert "network problem" in out, "a poll full of dropped connections is not a slow job"
 
 
 def test_a_failed_publish_says_why(tmp_path, monkeypatch, capsys):
@@ -666,3 +724,50 @@ def test_nothing_pinned_stays_quiet(tmp_path, capsys):
     client = MagicMock()
     generate_cmd._report_field_diff(client, None, tmp_path)
     assert not _flat(capsys).strip()
+
+
+VALUE_SPACE_FIELDS = "fields:\n  - key: pi.nationality\n    type: enum\n    value_space: nationality\n"
+
+
+def test_a_transport_failure_reading_a_value_space_does_not_crash(tmp_path, monkeypatch, capsys):
+    """The branch the widened catch actually broke.
+
+    `_report_field_diff` verifies a value_space-pinned field against the
+    registry, and its handler formatted `{e.detail}` — an AethisAPIError-only
+    attribute. Widening the catch to httpx therefore turned a dropped
+    connection into an AttributeError, which no handler here or at the boundary
+    catches: a successful generation ended in a raw traceback.
+
+    Every other test pins members INLINE, so none of them enters this branch —
+    which is exactly how the defect reached CI green.
+    """
+    (tmp_path / "sources").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "sources" / "a.md").write_text("the source document")
+    (tmp_path / "fields").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "fields" / "fields.yaml").write_text(VALUE_SPACE_FIELDS)
+
+    client = _engine(
+        {
+            "job": {
+                "status": "success",
+                "result_ruleset_id": "rs_from_this_run",
+                "value_spaces_resolved": {"pi.nationality": {"space": "nationality", "version": 3}},
+            }
+        },
+        schema={"fields": [{"field_id": "pi.nationality", "enum_values": ["gbr", "usa"]}]},
+    )
+
+    def value_space(name, version=None):
+        if version is None:
+            return {"name": name, "members": ["gbr", "usa"]}  # the pre-generation probe succeeds
+        raise httpx.ConnectError("connection reset")  # the diff-phase read drops
+
+    client.get_value_space.side_effect = value_space
+    _wire(monkeypatch, tmp_path, client)
+
+    _run()  # must not raise AttributeError, and must not fail the generation
+
+    out = _flat(capsys)
+    assert "NOT verified" in out, "the unverifiable reference must still be reported"
+    assert "connection reset" in out, "and the reason must be the transport error, readably"
+    assert read_state(tmp_path)["ruleset_id"] == "rs_from_this_run"

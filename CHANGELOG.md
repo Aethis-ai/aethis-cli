@@ -23,10 +23,12 @@
   discards it.** After the engine reports success the CLI re-polls for the id.
   A transport failure there stranded a generation the CLI already knew had
   succeeded; those attempts are now individually tolerant.
-- **fix(generate): a persistent or flapping connection is reported as
-  unreachable, not as a timeout.** The retry is bounded both consecutively and
-  in total, so an intermittent link cannot be absorbed to the deadline and then
-  reported as a slow job.
+- **fix(generate): a persistent outage is reported as unreachable, not as a
+  timeout.** The retry is bounded by consecutive failures, so a dead connection
+  surfaces as one rather than being absorbed to the deadline and reported as a
+  slow job. A *flapping* link is deliberately not aborted — it is working, and
+  killing it one poll short of success would deliver the very failure above —
+  so a poll that suffered dropped connections says so when it does time out.
 - **fix(generate): a failed publish no longer reads as a failed generation, and
   says why.** A transport error on the auto-publish reported only "Could not
   reach the Aethis API", so a successful generation looked like a failure and
@@ -35,13 +37,20 @@
   API-error half of this path gave a green tick with no reason at all.
 - **fix(generate): a success that never surfaces an id says so.** That ending
   also leaves the recorded pointer naming an earlier generation, and was silent.
+- **fix(generate): an unreadable value space is reported, not raised.** The
+  field diff verifies value-space-pinned fields against the registry and
+  formatted the failure as if it were always an API error, so a dropped
+  connection there raised `AttributeError` — an unhandled traceback on an
+  otherwise successful generation.
 - **fix: an unreachable API cannot crash the error reporter.** `httpx` exposes
   `.request` as a property that raises when unbound, so the defensive
   `getattr(e, "request", None)` in the transport-error path could raise
   `RuntimeError` — a traceback about the error handler in place of the one
   actionable line. The rendering now has a single home shared by the top-level
-  boundary and the commands that must clean up before exiting, and names the
-  host actually configured rather than always the public default.
+  boundary and the commands that must clean up before exiting. `generate` and
+  `refine` name the host they were actually configured with rather than the
+  public default; other commands still report via the top-level boundary, which
+  reads `AETHIS_BASE_URL`.
 
 ## 0.37.0 (2026-08-22)
 
