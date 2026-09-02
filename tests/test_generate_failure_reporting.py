@@ -486,6 +486,107 @@ def test_a_success_that_never_surfaces_an_id_names_the_stale_pointer(tmp_path, m
     )
 
 
+def test_a_success_whose_field_diff_loses_the_connection_is_still_a_success(tmp_path, monkeypatch, capsys):
+    """The guard must never fire on the run that recorded the pointer.
+
+    The field diff runs *after* the new id is written. A transport failure
+    there once escaped to the stale-pointer guard, so a generation that had
+    succeeded and recorded exactly the right id announced "Done! Ruleset: X"
+    and then insisted X was from an earlier generation — a false claim about
+    the one fact the guard exists to keep honest, and the same shape of defect
+    as the one it was written to fix.
+    """
+    _project(tmp_path)
+    write_state(tmp_path, {"ruleset_id": "rs_from_an_earlier_run"})
+    client = _engine({"job": {"status": "success", "result_ruleset_id": "rs_from_this_run"}})
+    client.get_schema.side_effect = httpx.ConnectError("connection reset")
+    _wire(monkeypatch, tmp_path, client)
+
+    _run()  # must not raise: a diff that cannot be fetched is not a failed generation
+
+    out = _flat(capsys)
+    assert read_state(tmp_path)["ruleset_id"] == "rs_from_this_run", "this run's id was recorded and must stand"
+    assert "from an earlier generation" not in out, (
+        "the pointer this run just wrote is not stale, and must never be called stale"
+    )
+
+
+def test_the_guard_never_calls_this_runs_own_pointer_stale(tmp_path, capsys):
+    """The invariant directly, independent of the route that reaches it."""
+    write_state(tmp_path, {"ruleset_id": "rs_from_this_run", "project_id": "proj_abc"})
+
+    generate_cmd._invalidate_stale_pointer(tmp_path, "error", produced_id="rs_from_this_run")
+
+    assert "from an earlier generation" not in _flat(capsys), "the id this run produced is not an earlier one"
+    assert read_state(tmp_path)["ruleset_id"] == "rs_from_this_run"
+
+
+def test_a_persistent_outage_is_reported_as_unreachable_not_as_a_timeout(tmp_path, monkeypatch, capsys):
+    """The blip budget has to be *bounded*, and nothing else asserted that.
+
+    Without this the budget is a free variable: raise it and the poll simply
+    absorbs a real outage until the deadline, then reports "Timed out" — which
+    reads as a slow job and sends the author looking in the wrong place. Every
+    other assertion here stays green under that mutation, because the timeout
+    ending also names the stale pointer.
+    """
+    _project(tmp_path)
+    write_state(tmp_path, {"ruleset_id": "rs_from_an_earlier_run"})
+    client = _engine({"job": {"status": "running", "progress_percent": 10}})
+    client.get_status.side_effect = httpx.ConnectError("connection refused")
+    _wire(monkeypatch, tmp_path, client)
+
+    with pytest.raises(typer.Exit):
+        _run(timeout=5)
+
+    out = _flat(capsys)
+    assert "Timed out" not in out, "a dead connection is not a slow job and must not be reported as one"
+    assert client.get_status.call_count == generate_cmd._TRANSPORT_BLIP_BUDGET + 1, (
+        "the poll must give up after the budget, not grind on to the deadline"
+    )
+
+
+def test_a_flapping_connection_is_also_reported_as_unreachable(tmp_path, monkeypatch, capsys):
+    """The consecutive counter resets on success, so it cannot see a flap.
+
+    fail, fail, fail, ok, fail, fail, fail, ok … never trips a consecutive
+    bound, and bad wifi is a commoner shape than a clean sustained outage.
+    """
+    _project(tmp_path)
+    write_state(tmp_path, {"ruleset_id": "rs_from_an_earlier_run"})
+    running = {"job": {"status": "running", "progress_percent": 10}}
+    flap = []
+    for _ in range(20):
+        flap.extend([httpx.ConnectError("flap"), httpx.ConnectError("flap"), running])
+    client = _engine(running)
+    client.get_status.side_effect = flap
+    _wire(monkeypatch, tmp_path, client)
+
+    with pytest.raises(typer.Exit):
+        _run(timeout=5)
+
+    assert "Timed out" not in _flat(capsys), "a flapping link must surface as unreachable, not as a timeout"
+
+
+def test_a_failed_publish_says_why(tmp_path, monkeypatch, capsys):
+    """A green tick over a ruleset that was never activated, with no reason.
+
+    The generation did succeed, so it is reported as one — but silence about
+    the publish leaves this ending indistinguishable from the deliberate
+    `--no-publish` one, and the author is not told why the ruleset is inactive.
+    """
+    _project(tmp_path)
+    client = _engine({"job": {"status": "success", "result_ruleset_id": "rs_from_this_run"}})
+    client.publish.side_effect = httpx.ConnectError("connection refused")
+    _wire(monkeypatch, tmp_path, client)
+
+    _run()
+
+    out = _flat(capsys)
+    assert "Publish did not run" in out, "the step that failed must be named"
+    assert "connection refused" in out, "and so must the reason"
+
+
 def test_a_success_that_never_surfaces_an_id_diffs_nothing(tmp_path, monkeypatch, capsys):
     """A success with no id must not be diffed against the previous ruleset either."""
     _project(tmp_path)

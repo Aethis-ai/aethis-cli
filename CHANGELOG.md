@@ -12,14 +12,27 @@
   ruleset. The poll now absorbs a short connection blip and finishes normally;
   where the API is genuinely unreachable it names the stale id and prints the
   command that recovers the real one.
+- **fix(generate): the stale-pointer guard can no longer fire on a run that
+  succeeded.** The pinned-vs-produced field diff runs *after* the new id is
+  recorded, so a connection lost during it made the CLI announce
+  "Done! Ruleset: X" and then insist X was from an earlier generation — a false
+  claim about the exact fact the guard exists to keep honest. The diff now
+  honours its own "never fails the command" contract for transport errors, and
+  the guard never describes a pointer this run recorded as stale.
 - **fix(generate): a blip while waiting for the new ruleset id no longer
   discards it.** After the engine reports success the CLI re-polls for the id.
   A transport failure there stranded a generation the CLI already knew had
   succeeded; those attempts are now individually tolerant.
-- **fix(generate): a failed publish no longer reads as a failed generation.**
-  A transport error on the auto-publish reported only "Could not reach the
-  Aethis API", so a successful generation looked like a failure and got re-run.
-  It now reports the ruleset and names `aethis publish` as the step to re-run.
+- **fix(generate): a persistent or flapping connection is reported as
+  unreachable, not as a timeout.** The retry is bounded both consecutively and
+  in total, so an intermittent link cannot be absorbed to the deadline and then
+  reported as a slow job.
+- **fix(generate): a failed publish no longer reads as a failed generation, and
+  says why.** A transport error on the auto-publish reported only "Could not
+  reach the Aethis API", so a successful generation looked like a failure and
+  got re-run. It now reports the ruleset, names the reason the publish did not
+  run, and names `aethis publish` as the step to re-run — previously the
+  API-error half of this path gave a green tick with no reason at all.
 - **fix(generate): a success that never surfaces an id says so.** That ending
   also leaves the recorded pointer naming an earlier generation, and was silent.
 - **fix: an unreachable API cannot crash the error reporter.** `httpx` exposes
@@ -27,7 +40,8 @@
   `getattr(e, "request", None)` in the transport-error path could raise
   `RuntimeError` — a traceback about the error handler in place of the one
   actionable line. The rendering now has a single home shared by the top-level
-  boundary and the commands that must clean up before exiting.
+  boundary and the commands that must clean up before exiting, and names the
+  host actually configured rather than always the public default.
 
 ## 0.37.0 (2026-08-22)
 

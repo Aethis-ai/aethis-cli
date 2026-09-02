@@ -100,7 +100,7 @@ def error_panel(e: AethisAPIError) -> None:
     render_api_error(e.status_code, e.detail)
 
 
-def render_transport_error(e: httpx.HTTPError) -> None:
+def render_transport_error(e: httpx.HTTPError, *, base_url: str | None = None) -> None:
     """Render a failure to reach the API at all — no response, so no envelope.
 
     This lives here rather than at the ``main.py`` boundary that first needed
@@ -111,7 +111,10 @@ def render_transport_error(e: httpx.HTTPError) -> None:
     """
     # The base URL the client tried lives on the request, when httpx attached
     # one (RequestError subclasses carry .request).
-    target = os.environ.get("AETHIS_BASE_URL", "https://api.aethis.ai")
+    # Prefer the host the caller actually configured: naming the public default
+    # at an author pointed to a private or staging engine describes a request
+    # that was never made.
+    target = base_url or os.environ.get("AETHIS_BASE_URL", "https://api.aethis.ai")
     try:
         request = getattr(e, "request", None)
     except RuntimeError:

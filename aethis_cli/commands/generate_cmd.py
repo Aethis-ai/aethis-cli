@@ -812,6 +812,10 @@ def _run_generate(
         )
         raise typer.Exit(code=1)
 
+    # Held outside the try so the transport handler can tell "this run never
+    # recorded an id" from "it did, and the failure came afterwards".
+    outcome: Optional[GenerationOutcome] = None
+
     try:
         pid = _resolve_or_create_project(client, cfg, project_id)
 
@@ -917,8 +921,8 @@ def _run_generate(
         # Rendered here rather than re-raised so the error stays ahead of the
         # warning explaining what it cost; `main.py` renders the same line from
         # the same helper for every command that has no cleanup of its own.
-        render_transport_error(e)
-        _invalidate_stale_pointer(project_dir, "error")
+        render_transport_error(e, base_url=cfg.base_url)
+        _invalidate_stale_pointer(project_dir, "error", produced_id=outcome.ruleset_id if outcome else None)
         raise typer.Exit(code=1)
 
 
@@ -1020,7 +1024,11 @@ def _report_field_diff(
     diff against an earlier generation is worse than no diff, because it reads
     exactly like one of this run.
 
-    Never fails the command — a schema that cannot be read must not turn a
+    Never fails the command — including when the API becomes unreachable
+    mid-diff. This runs *after* the new id has been recorded, so letting a
+    transport error escape here made the caller's stale-pointer guard fire on a
+    run that had succeeded and recorded the right id: the CLI asserted the
+    correct pointer was stale and exited 1. A schema that cannot be read must not turn a
     successful generation into an error — but never silent either. Both "there
     was nothing to compare" and "the comparison could not be made" are said out
     loud, because the alternative is a run that prints no verdict at all and is
@@ -1038,7 +1046,7 @@ def _report_field_diff(
         return
     try:
         schema = client.get_schema(ruleset_id)
-    except AethisAPIError as e:
+    except (AethisAPIError, httpx.HTTPError) as e:
         warn(
             f"Could not read the schema of ruleset {ruleset_id} ({e}), so the "
             f"pinned-vs-produced field diff was not computed. The draft may no "
@@ -1082,7 +1090,7 @@ def _report_field_diff(
             resolved_version = resolution.get("version")
             try:
                 space = client.get_value_space(space_name, version=resolved_version)
-            except AethisAPIError as e:
+            except (AethisAPIError, httpx.HTTPError) as e:
                 ref_problems.append(
                     f"{key} ← {space_name}@v{resolved_version}: NOT verified — could not "
                     f"read the space at that version ({e.detail})."
@@ -1184,7 +1192,7 @@ def _resolved_ruleset_id(status_payload: dict) -> Optional[str]:
     return job.get("result_ruleset_id") or status_payload.get("latest_ruleset_id")
 
 
-def _invalidate_stale_pointer(project_dir: Path, status: str) -> None:
+def _invalidate_stale_pointer(project_dir: Path, status: str, *, produced_id: Optional[str] = None) -> None:
     """Stop an unsuccessful run leaving a pointer that reads like its result.
 
     ``.aethis/state.json``'s ``ruleset_id`` is written only when a generation
@@ -1212,6 +1220,14 @@ def _invalidate_stale_pointer(project_dir: Path, status: str) -> None:
     prior = state.get("ruleset_id")
     if not prior:
         return
+    if produced_id is not None and prior == produced_id:
+        # This run recorded the pointer, so there is nothing stale to warn
+        # about however the run ended afterwards. Without this the guard fires
+        # on its own success: a transport failure *after* the id was written
+        # made the CLI announce "Done! Ruleset: X" and then insist X was from
+        # an earlier generation — a false claim about the exact fact this
+        # whole guard exists to keep honest.
+        return
     if status != "failed":
         warn(
             f"'.aethis/state.json' still records ruleset {prior} from an earlier generation. "
@@ -1235,9 +1251,15 @@ def _invalidate_stale_pointer(project_dir: Path, status: str) -> None:
     )
 
 
-# How many consecutive transport failures a poll absorbs before reporting the
-# API as unreachable. See the handler in the loop below for why it is bounded.
+# How many transport failures a poll absorbs before reporting the API as
+# unreachable — consecutively, and in total across the run. The total matters
+# because the consecutive counter resets on every success, so a *flapping*
+# link (fail, fail, fail, ok, fail, fail, fail, ok …) would never trip the
+# consecutive bound and would run to the deadline — reported as a timeout,
+# which is precisely the misreport the bound exists to prevent. Bad wifi is a
+# commoner shape than a clean sustained outage.
 _TRANSPORT_BLIP_BUDGET = 3
+_TRANSPORT_BLIP_TOTAL = 8
 
 
 def _poll_until_done(
@@ -1271,6 +1293,7 @@ def _poll_until_done(
     ) as progress:
         task = progress.add_task("Generating ruleset...", total=100)
         blips = 0
+        total_blips = 0
         while time.monotonic() < deadline:
             try:
                 result = client.get_status(pid)
@@ -1284,14 +1307,21 @@ def _poll_until_done(
                 #
                 # Bounded, because tolerating indefinitely would report a real
                 # outage as a timeout — which reads as a slow job and sends the
-                # author looking in the wrong place. Four consecutive failures
-                # (~12s with the sleep below) surfaces it as what it is.
+                # author looking in the wrong place. Two bounds, because the
+                # consecutive one alone cannot see a flapping link.
                 blips += 1
-                if blips > _TRANSPORT_BLIP_BUDGET:
+                total_blips += 1
+                if blips > _TRANSPORT_BLIP_BUDGET or total_blips > _TRANSPORT_BLIP_TOTAL:
                     raise
                 progress.update(task, description="[yellow]lost the connection — retrying[/yellow]")
                 time.sleep(3)
                 continue
+            if blips:
+                # A durable line, because the transient progress description is
+                # overwritten by the next poll and is invisible off a TTY —
+                # and an absorbed blip is the event that used to strand a
+                # generation, so it should leave a trace worth grepping.
+                warn(f"Lost the connection to the API {blips} time(s) during the poll; recovered and carried on.")
             blips = 0
             job = result.get("job") or {}
             pct = job.get("progress_percent", 0)
@@ -1356,11 +1386,16 @@ def _poll_until_done(
                         success(f"Done! Ruleset published: {ruleset_id}")
                     else:
                         success("Done! Ruleset generated — run 'aethis status' to get its id.")
-                except (AethisAPIError, httpx.HTTPError):
+                except (AethisAPIError, httpx.HTTPError) as e:
                     # Benign for state — the id was recorded above — but not for
                     # the reader: "Could not reach the Aethis API" as the last
                     # word on a successful generation reads as a failed one, and
-                    # gets it re-run.
+                    # gets it re-run. The generation is therefore reported as
+                    # the success it was — but the reason is named too, or a
+                    # green tick is all the author gets for a ruleset that was
+                    # never activated, and this ending becomes indistinguishable
+                    # from the deliberate --no-publish one above.
+                    warn(f"Publish did not run: {e}")
                     if ruleset_id:
                         success(f"Done! Ruleset: {ruleset_id} (run 'aethis publish' to activate)")
                     else:
