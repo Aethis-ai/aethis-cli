@@ -870,3 +870,27 @@ def test_the_absorbed_blip_trace_is_said_once_not_once_per_recovery(tmp_path, mo
     _run(timeout=600)
 
     assert _flat(capsys).count("Lost the connection") == 1, "ten recoveries, one line"
+
+
+def test_a_failed_run_still_clears_the_pointer_even_if_the_ids_match(tmp_path, capsys):
+    """The suppression must never reach the ending whose job is to nullify.
+
+    `produced_id` means "this run produced it"; the pointer means "this run
+    recorded it". Those diverge on the failed path, where the engine may attach
+    a draft id that was never written to disk — and there, suppressing would
+    skip the clear, leaving `fields pull` free to sync from a ruleset the
+    engine has ruled against.
+
+    Unreachable through the command today (nothing passes `produced_id` with a
+    failed status), so it is driven directly: an unreachable clause is still a
+    claim, and an untested claim is the one that turns out to be wrong when a
+    later caller makes it reachable.
+    """
+    write_state(tmp_path, {"ruleset_id": "rs_draft", "project_id": "proj_abc"})
+
+    generate_cmd._invalidate_stale_pointer(tmp_path, "failed", produced_id="rs_draft")
+
+    assert read_state(tmp_path)["ruleset_id"] is None, (
+        "a failed ending clears the pointer regardless of which run produced it"
+    )
+    assert "Cleared the recorded ruleset" in _flat(capsys)
