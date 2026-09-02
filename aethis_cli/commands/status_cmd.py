@@ -192,6 +192,11 @@ def _print_generation_section(project_id: str) -> None:
     color = {"ready": "green", "failed": "red", "generating": "yellow"}.get(ps, "white")
     console.print(f"\n[bold]Generation[/bold] — {project_id}")
     console.print(f"  Project: [bold {color}]{ps}[/bold {color}]")
+    if result.get("generation_contract_version") == 1:
+        console.print(f"  Worker:  {result.get('worker_lifecycle', 'unknown')}")
+        console.print(f"  Retry:   {result.get('retry_readiness', 'unknown')}")
+    else:
+        console.print("  Worker:  [dim]lifecycle telemetry unavailable for this engine[/dim]")
     job = result.get("job")
     if job:
         console.print(f"  Job:     {job.get('status')} ({job.get('progress_percent', 0)}%)")

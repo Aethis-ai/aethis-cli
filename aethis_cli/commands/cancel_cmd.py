@@ -53,6 +53,11 @@ def cancel(
     except AethisAPIError as e:
         error_panel(e)
         raise typer.Exit(code=1)
+    if status.get("generation_contract_version") != 1:
+        console.print(
+            "[red]Cancellation is unavailable: this engine has not advertised the job-bound recovery contract.[/red]"
+        )
+        raise typer.Exit(code=1)
     current_job = status.get("job") if isinstance(status, dict) else None
     observed_job_id = current_job.get("job_id") if isinstance(current_job, dict) else None
     observed_status = current_job.get("status") if isinstance(current_job, dict) else None
@@ -80,8 +85,9 @@ def cancel(
         return
 
     job_id = result.get("job_id", "unknown")
+    outcome = result.get("outcome", "cancelled")
     if result.get("project_released") is True:
-        success(f"Generation {job_id} cancelled; project {pid} released.")
+        success(f"Generation {job_id} {outcome.replace('_', ' ')}; project {pid} released.")
     else:
         warn(f"Generation {job_id} was marked failed, but project {pid} was not released by this request.")
     detail = result.get("detail")

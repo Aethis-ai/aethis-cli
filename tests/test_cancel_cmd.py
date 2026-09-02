@@ -13,6 +13,8 @@ from aethis_cli.main import app
 def _client(response: dict | None = None) -> MagicMock:
     client = MagicMock()
     client.get_status.return_value = {
+        "generation_contract_version": 1,
+        "retry_readiness": "blocked",
         "project_status": "generating",
         "job": {"job_id": "job_1", "status": "running"},
     }
@@ -109,4 +111,19 @@ def test_cancel_refuses_when_expected_job_differs_from_observed_job():
     assert result.exit_code == 1
     assert "expected job job_old" in result.output
     assert "currently reports job_1" in result.output
+    client.cancel_generation.assert_not_called()
+
+
+def test_cancel_refuses_engine_without_job_bound_contract():
+    client = _client()
+    client.get_status.return_value.pop("generation_contract_version")
+    with patch(
+        "aethis_cli.commands.cancel_cmd.load_client_or_fallback",
+        return_value=(MagicMock(), client),
+    ):
+        result = CliRunner().invoke(app, ["cancel", "-p", "proj_abc", "--yes"])
+
+    assert result.exit_code == 1
+    assert "Cancellation is unavailable" in result.output
+    assert "recovery contract" in result.output
     client.cancel_generation.assert_not_called()
