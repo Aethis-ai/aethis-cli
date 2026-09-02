@@ -25,6 +25,7 @@ from aethis_cli.commands.projects_cmd import projects_app
 from aethis_cli.commands.init_cmd import init
 from aethis_cli.commands.login_cmd import login
 from aethis_cli.commands.generate_cmd import generate
+from aethis_cli.commands.cancel_cmd import cancel
 from aethis_cli.commands.refine_cmd import refine
 from aethis_cli.commands.status_cmd import status
 from aethis_cli.commands.test_cmd import test
@@ -71,6 +72,7 @@ https://aethis.ai/developer-access:
     aethis projects list                # see all projects + latest rulesets
     aethis init                         # scaffold a new project dir
     aethis generate --poll              # generate + poll until done
+    aethis cancel --project-id <id> --yes  # explicitly release a stuck run
     aethis test && aethis publish       # gate on tests, then publish
 
 Exit codes: 0 success · 1 the call failed · 3 an input was rejected, so no
@@ -183,6 +185,7 @@ app.add_typer(fields_app, name="fields")
 app.command()(init)
 app.command()(login)
 app.command()(generate)
+app.command()(cancel)
 app.command()(refine)
 app.command()(status)
 app.command(name="test")(test)

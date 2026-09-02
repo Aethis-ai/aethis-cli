@@ -184,10 +184,18 @@ The same contract and the same exit codes apply to
 | `aethis init` | Initialise a new project in the current directory |
 | `aethis generate [--poll]` | Upload sources + guidance, trigger generation. A successful `--poll` run publishes the ruleset, making it active |
 | `aethis generate --no-publish` | The same run, leaving the ruleset an unpublished draft — for workflows where activation is separately gated |
-| `aethis status` | Check generation job progress |
+| `aethis status [-p <project_id>]` | Check generation progress, turn/test convergence, last tool, and heartbeat age |
+| `aethis cancel [-p <project_id>] [--yes]` | Explicitly mark the in-flight job failed and release its project ownership |
 | `aethis test` | Run test cases against the latest ruleset |
 | `aethis publish [--force]` | Set the latest ruleset as active |
 | `aethis publish --source-targets <file>` | Publish with citations resolved from a YAML/JSON targets file |
+
+If polling times out, inspect the server-side run with `aethis status`. A run
+whose heartbeat has stopped is not cancelled automatically: use `aethis cancel`
+only when you intend to abandon it. Cancellation releases the project so a new
+run can be admitted, but it may not stop an already-running worker. The command
+asks for confirmation; automation must pass `--yes` (or use the repository-wide
+`AETHIS_NONINTERACTIVE=1` / `CI=1` prompt bypass).
 
 ### Citations at publish (`--source-targets`)
 

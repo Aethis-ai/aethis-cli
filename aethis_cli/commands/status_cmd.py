@@ -19,6 +19,7 @@ from aethis_cli.config import (
     resolve_base_url_with_source,
 )
 from aethis_cli.errors import AethisAPIError, ConfigError
+from aethis_cli.generation_status import format_heartbeat, format_progress_detail
 from aethis_cli.output import console, error_panel
 from aethis_cli.render import emit, is_json_requested
 
@@ -194,6 +195,12 @@ def _print_generation_section(project_id: str) -> None:
     job = result.get("job")
     if job:
         console.print(f"  Job:     {job.get('status')} ({job.get('progress_percent', 0)}%)")
+        progress_detail = format_progress_detail(job)
+        if progress_detail:
+            console.print(f"  Progress: {progress_detail}")
+        heartbeat = format_heartbeat(job)
+        if heartbeat:
+            console.print(f"  Heartbeat: {heartbeat}")
         if job.get("error_message"):
             console.print(f"  Error:   [red]{job['error_message']}[/red]")
     bid = result.get("latest_ruleset_id")

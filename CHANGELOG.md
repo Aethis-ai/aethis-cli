@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.38.0 (2026-09-02)
+
+- **feat: explicitly recover an authoring project from an abandoned generation.**
+  `aethis cancel [-p PROJECT]` calls the engine's cancellation endpoint after a
+  confirmation (`--yes` for automation), marks the current job failed, and
+  releases its ownership of the project. It reports the engine's honest
+  limitation: an already-running worker may continue even though a new run can
+  now be admitted. Polling never cancels automatically.
+- **feat: generation status shows live convergence and heartbeat telemetry.**
+  `aethis status` and the live `generate` progress line consume the engine's
+  turn count, best test pass rate, tool count, last tool, and
+  `seconds_since_progress`. Older engines remain compatible: absent telemetry
+  is omitted rather than guessed. A client-side timeout now names the exact
+  status and cancel recovery commands.
+
 ## 0.37.1 (2026-09-02)
 
 - **fix(generate): a dropped connection mid-poll no longer strands the run on a
