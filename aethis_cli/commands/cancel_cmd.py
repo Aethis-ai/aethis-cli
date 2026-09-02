@@ -37,7 +37,10 @@ def cancel(
     job_id: Optional[str] = typer.Option(
         None,
         "--job-id",
-        help="Expected active job. Refuses if the project's current job differs.",
+        help=(
+            "Expected generation job. Refuses if the project's current job differs; "
+            "the exact cancelled job may be supplied to replay an ambiguous prior request."
+        ),
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
 ) -> None:

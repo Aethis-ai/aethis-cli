@@ -197,8 +197,9 @@ only when you intend to abandon it. The command observes and displays the exact
 active job before confirmation; `--job-id` additionally refuses if that target
 has changed. Cancellation releases the project so a new
 run can be admitted, but it may not stop an already-running worker. The command
-asks for confirmation; automation must pass `--yes` (or use the repository-wide
-`AETHIS_NONINTERACTIVE=1` / `CI=1` prompt bypass).
+asks for confirmation; automation must pass `--yes`. Unlike other prompts, this
+destructive command deliberately refuses to treat `AETHIS_NONINTERACTIVE=1` or
+`CI=1` as approval.
 
 ### Citations at publish (`--source-targets`)
 
