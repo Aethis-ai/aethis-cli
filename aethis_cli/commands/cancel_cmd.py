@@ -78,18 +78,14 @@ def cancel(
             f"[red]Refusing: expected job {job_id}, but the project currently reports {observed_job_id}.[/red]"
         )
         raise typer.Exit(code=1)
-    if observed_status not in ("queued", "running") and not (
-        job_id == observed_job_id and already_cancelled
-    ):
+    if observed_status not in ("queued", "running") and not (job_id == observed_job_id and already_cancelled):
         console.print(
             "[red]No cancellable generation was observed. To retry an ambiguous prior cancellation, "
             "pass the exact terminal --job-id; only generation_cancelled is replayable.[/red]"
         )
         raise typer.Exit(code=1)
     if not yes and is_noninteractive():
-        console.print(
-            "[red]Cancellation in a non-interactive environment requires explicit --yes.[/red]"
-        )
+        console.print("[red]Cancellation in a non-interactive environment requires explicit --yes.[/red]")
         raise typer.Exit(code=1)
     confirm_or_abort(
         f"Cancel generation {observed_job_id} for {pid}? This marks that job failed and releases its ownership",
