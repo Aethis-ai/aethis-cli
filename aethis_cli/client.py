@@ -456,6 +456,20 @@ class AethisClient:
     def get_status(self, project_id: str) -> dict:
         return self._request("GET", f"/api/v1/public/projects/{project_id}/status")
 
+    def cancel_generation(self, project_id: str, job_id: str) -> dict:
+        """Cancel the observed generation and release only its project ownership.
+
+        The engine deliberately does not claim that this stops an already
+        running worker; the response's ``detail`` carries that limitation to
+        callers. Cancellation is an explicit operator recovery action, never
+        something polling invokes automatically.
+        """
+        return self._request(
+            "POST",
+            f"/api/v1/public/projects/{project_id}/generate/cancel",
+            params={"job_id": job_id},
+        )
+
     def run_tests(self, project_id: str) -> dict:
         return self._request("POST", f"/api/v1/public/projects/{project_id}/test-run")
 

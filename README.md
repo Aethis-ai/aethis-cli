@@ -184,10 +184,22 @@ The same contract and the same exit codes apply to
 | `aethis init` | Initialise a new project in the current directory |
 | `aethis generate [--poll]` | Upload sources + guidance, trigger generation. A successful `--poll` run publishes the ruleset, making it active |
 | `aethis generate --no-publish` | The same run, leaving the ruleset an unpublished draft — for workflows where activation is separately gated |
-| `aethis status` | Check generation job progress |
+| `aethis status [-p <project_id>]` | Check generation progress, telemetry availability, server-authoritative worker lifecycle, and retry readiness |
+| `aethis cancel [-p <project_id>] [--job-id <observed_job_id>] [--yes]` | Observe and explicitly cancel that exact in-flight job, then release only its project ownership |
 | `aethis test` | Run test cases against the latest ruleset |
 | `aethis publish [--force]` | Set the latest ruleset as active |
 | `aethis publish --source-targets <file>` | Publish with citations resolved from a YAML/JSON targets file |
+
+If polling times out, inspect the server-side run with `aethis status`. An old
+heartbeat is monitoring evidence, not proof that the worker died, and never
+triggers cancellation automatically: use `aethis cancel`
+only when you intend to abandon it. The command observes and displays the exact
+active job before confirmation; `--job-id` additionally refuses if that target
+has changed. Cancellation releases the project so a new
+run can be admitted, but it may not stop an already-running worker. The command
+asks for confirmation; automation must pass `--yes`. Unlike other prompts, this
+destructive command deliberately refuses to treat `AETHIS_NONINTERACTIVE=1` or
+`CI=1` as approval.
 
 ### Citations at publish (`--source-targets`)
 

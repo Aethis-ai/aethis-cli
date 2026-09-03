@@ -263,6 +263,28 @@ def test_get_status(respx_mock):
 
 
 @respx.mock(base_url=BASE)
+def test_cancel_generation(respx_mock):
+    route = respx_mock.post("/api/v1/public/projects/proj_abc/generate/cancel").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "job_id": "job_1",
+                "status": "failed",
+                "project_released": True,
+                "detail": "The worker may continue.",
+            },
+        )
+    )
+
+    result = AethisClient("ak", BASE).cancel_generation("proj_abc", "job_1")
+
+    assert result["project_released"] is True
+    assert route.called
+    assert route.calls.last.request.url.params["job_id"] == "job_1"
+    assert route.calls.last.request.content in (b"", None)
+
+
+@respx.mock(base_url=BASE)
 def test_run_tests(respx_mock):
     respx_mock.post("/api/v1/public/projects/proj_abc/test-run").mock(
         return_value=httpx.Response(

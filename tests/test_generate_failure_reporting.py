@@ -259,6 +259,9 @@ def test_a_timeout_keeps_the_recorded_id_but_names_it_as_stale(tmp_path, monkeyp
     )
     out = _flat(capsys)
     assert "Timed out" in out
+    assert "aethis status -p" in out
+    assert "aethis cancel -p" in out
+    assert "may not stop an already-running worker" in out
     assert "rs_from_an_earlier_run" in out, "the stale pointer must be named rather than left to be discovered"
 
 

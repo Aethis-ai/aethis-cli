@@ -22,6 +22,7 @@ from aethis_cli.config import (
     write_state,
 )
 from aethis_cli.errors import AethisAPIError, ConfigError
+from aethis_cli.generation_status import format_poll_description
 from aethis_cli.output import console, error_panel, info, render_transport_error, success, warn
 
 
@@ -1361,8 +1362,10 @@ def _poll_until_done(
             blips = 0
             job = result.get("job") or {}
             pct = job.get("progress_percent", 0)
+            if isinstance(pct, bool) or not isinstance(pct, (int, float)):
+                pct = 0
             job_status = job.get("status", "unknown")
-            progress.update(task, completed=pct, description=f"[cyan]{job_status}[/cyan] — {pct}%")
+            progress.update(task, completed=pct, description=f"[cyan]{format_poll_description(job)}[/cyan]")
 
             if job_status == "success":
                 progress.update(task, completed=100)
@@ -1450,7 +1453,14 @@ def _poll_until_done(
 
             time.sleep(3)
 
-    console.print(f"\n[bold red]Timed out after {timeout}s.[/bold red] Use 'aethis status' to check progress.")
+    console.print(
+        f"\n[bold red]Timed out after {timeout}s.[/bold red] "
+        f"Use 'aethis status -p {pid}' to inspect the server heartbeat and convergence."
+    )
+    console.print(
+        f"[dim]If you intend to abandon a stale run, use 'aethis cancel -p {pid}'. "
+        "Cancellation releases the project but may not stop an already-running worker.[/dim]"
+    )
     if total_blips:
         # Without this, a flapping link is indistinguishable from a slow job —
         # which sends the author to look at the engine rather than the network.
