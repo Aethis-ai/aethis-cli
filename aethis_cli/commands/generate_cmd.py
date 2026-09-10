@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import time
 from pathlib import Path
 from typing import NamedTuple, Optional
@@ -249,6 +250,7 @@ _FIELD_KEY_ORDER = (
     "injection_phase",
     "recoverable_from",
     "x_ui_widget",
+    "notes",
     "hints",
 )
 
@@ -266,6 +268,7 @@ _ENGINE_GATED_FIELD_KEYS = (
     "injection_phase",
     "recoverable_from",
     "x_ui_widget",
+    "notes",
 )
 
 # Rulebook vocabulary is intentionally slimmer than a generation pin. Keep its
@@ -340,7 +343,85 @@ def validate_fields_list(fields: list) -> list[str]:
         if ftype == "enum" and not f.get("enum_values") and not f.get("value_space"):
             errors.append(f"Field {key!r} is type 'enum' but declares no enum_values (or value_space).")
         errors.extend(_validate_display_metadata(key, f, ftype))
+        errors.extend(_validate_field_notes(key, f))
     return errors
+
+
+def _validate_json_value(value: object, path: str) -> str | None:
+    """Return an error when a YAML value cannot be preserved as JSON."""
+    if value is None or isinstance(value, (str, bool, int)):
+        return None
+    if isinstance(value, float):
+        return None if math.isfinite(value) else f"{path} is not a finite JSON number."
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            error = _validate_json_value(item, f"{path}[{index}]")
+            if error:
+                return error
+        return None
+    if isinstance(value, dict):
+        for item_key, item in value.items():
+            if not isinstance(item_key, str):
+                return f"{path} has a non-text object key {item_key!r}."
+            error = _validate_json_value(item, f"{path}.{item_key}")
+            if error:
+                return error
+        return None
+    return f"{path} is not JSON-compatible ({type(value).__name__})."
+
+
+def _validate_field_notes(key: str, field: dict) -> list[str]:
+    """Validate the exact structured note list on an authored field pin.
+
+    A missing ``notes`` key leaves legacy/model-owned notes untouched. An empty
+    list is deliberate, authoritative clearing. ``null`` is not a useful
+    field-note value and is refused locally rather than becoming an ambiguous
+    wire shape.
+    """
+    if "notes" not in field:
+        return []
+
+    notes = field["notes"]
+    if notes is None:
+        return [f"Field {key!r} declares notes: null; omit notes or use [] to clear them authoritatively."]
+    if not isinstance(notes, list):
+        return [f"Field {key!r} declares notes but it is not a list."]
+
+    errors: list[str] = []
+    allowed = {"note_text", "source", "metadata"}
+    for index, note in enumerate(notes):
+        path = f"Field {key!r} note #{index + 1}"
+        if not isinstance(note, dict):
+            errors.append(f"{path} is not a mapping.")
+            continue
+        unknown = sorted(str(note_key) for note_key in note.keys() - allowed)
+        if unknown:
+            errors.append(f"{path} has unknown key(s): {', '.join(unknown)}.")
+        if "note_text" not in note or not isinstance(note.get("note_text"), str):
+            errors.append(f"{path} must declare note_text as text.")
+        if "source" in note and not isinstance(note["source"], str):
+            errors.append(f"{path} declares source but it is not text.")
+        if "metadata" in note:
+            metadata = note["metadata"]
+            if not isinstance(metadata, dict):
+                errors.append(f"{path} declares metadata but it is not an object.")
+            else:
+                metadata_error = _validate_json_value(metadata, f"{path}.metadata")
+                if metadata_error:
+                    errors.append(metadata_error)
+    return errors
+
+
+def _normalise_field_notes(notes: list[dict]) -> list[dict]:
+    """Make optional FieldNote members explicit without changing metadata."""
+    return [
+        {
+            "note_text": note["note_text"],
+            "source": note.get("source", ""),
+            "metadata": note.get("metadata", {}),
+        }
+        for note in notes
+    ]
 
 
 def _validate_display_metadata(key: str, f: dict, ftype: str) -> list[str]:
@@ -655,7 +736,10 @@ def _upload_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) 
         for prop in _ENGINE_GATED_FIELD_KEYS:
             if prop in field:
                 value = field[prop]
-                spec[prop] = dict(value) if isinstance(value, dict) else value
+                if prop == "notes":
+                    spec[prop] = _normalise_field_notes(value)
+                else:
+                    spec[prop] = dict(value) if isinstance(value, dict) else value
         # In fields.yaml, omitting a question on a declared non-applicant fact
         # is intentional: there is no applicant question. Make that absence
         # explicit on the wire so a model-invented question is cleared rather
