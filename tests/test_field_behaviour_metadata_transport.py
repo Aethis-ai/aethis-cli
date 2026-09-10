@@ -210,3 +210,35 @@ fields:
         generate_cmd._upload_field_vocabulary(client, "proj_1", project)
 
     client.set_field_spec.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "properties, notes",
+    [
+        (None, "[]"),
+        (None, "- note_text: Confirm the supplied record."),
+        (SUPPORTED - {"notes"}, "[]"),
+        (SUPPORTED - {"notes"}, "- note_text: Confirm the supplied record."),
+    ],
+)
+def test_declared_notes_abort_before_all_related_writes_when_support_is_not_proven(tmp_path, properties, notes):
+    client = _client(properties)
+    project = _project(
+        tmp_path,
+        f"""\
+fields:
+  - key: example.confirmed
+    type: enum
+    value_space: example/values
+    notes:
+      {notes}
+""",
+    )
+
+    with pytest.raises(typer.Exit):
+        generate_cmd._upload_field_vocabulary(client, "proj_1", project)
+
+    client.set_field_spec.assert_not_called()
+    client.add_guidance.assert_not_called()
+    client.put_value_space.assert_not_called()
+    client.get_value_space.assert_not_called()

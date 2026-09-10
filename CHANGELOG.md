@@ -1,14 +1,15 @@
 # Changelog
 
-## 0.38.1 (2026-09-10)
+## 0.39.0 (2026-09-10)
 
 - **feat(generate): field-note pins are now exact and explicit.** A field's
   optional `notes:` list is validated and sent on its project field-spec pin.
   Omit the key to retain legacy/model-owned notes; use `[]` to clear notes
   authoritatively. Each note requires `note_text`, accepts optional `source`
   and JSON-object `metadata`, and rejects unknown or ambiguous shapes before
-  any request is made. Engines that do not advertise the property are refused
-  before the pin could be silently discarded.
+  any request is made. Engines that do not advertise the property, or whose
+  schema cannot be read, are refused before any related authoring write could
+  silently discard the pin.
 
 ## 0.38.0 (2026-09-02)
 
