@@ -245,7 +245,10 @@ MUTATIONS: List[Mutation] = [
         "        for prop in _ENGINE_GATED_FIELD_KEYS:\n"
         "            if prop in field:\n"
         "                value = field[prop]\n"
-        "                spec[prop] = dict(value) if isinstance(value, dict) else value\n",
+        "                if prop == \"notes\":\n"
+        "                    spec[prop] = _normalise_field_notes(value)\n"
+        "                else:\n"
+        "                    spec[prop] = dict(value) if isinstance(value, dict) else value\n",
         "",
         "authored wording and the storage-key pairing never reach the engine",
         detects=("tests/test_field_display_metadata_transport.py::test_upload_transmits_labels_and_canonical_field",),
