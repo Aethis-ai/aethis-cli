@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import time
 from pathlib import Path
 from typing import NamedTuple, Optional
@@ -249,6 +250,7 @@ _FIELD_KEY_ORDER = (
     "injection_phase",
     "recoverable_from",
     "x_ui_widget",
+    "notes",
     "hints",
 )
 
@@ -266,6 +268,7 @@ _ENGINE_GATED_FIELD_KEYS = (
     "injection_phase",
     "recoverable_from",
     "x_ui_widget",
+    "notes",
 )
 
 # Rulebook vocabulary is intentionally slimmer than a generation pin. Keep its
@@ -340,7 +343,85 @@ def validate_fields_list(fields: list) -> list[str]:
         if ftype == "enum" and not f.get("enum_values") and not f.get("value_space"):
             errors.append(f"Field {key!r} is type 'enum' but declares no enum_values (or value_space).")
         errors.extend(_validate_display_metadata(key, f, ftype))
+        errors.extend(_validate_field_notes(key, f))
     return errors
+
+
+def _validate_json_value(value: object, path: str) -> str | None:
+    """Return an error when a YAML value cannot be preserved as JSON."""
+    if value is None or isinstance(value, (str, bool, int)):
+        return None
+    if isinstance(value, float):
+        return None if math.isfinite(value) else f"{path} is not a finite JSON number."
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            error = _validate_json_value(item, f"{path}[{index}]")
+            if error:
+                return error
+        return None
+    if isinstance(value, dict):
+        for item_key, item in value.items():
+            if not isinstance(item_key, str):
+                return f"{path} has a non-text object key {item_key!r}."
+            error = _validate_json_value(item, f"{path}.{item_key}")
+            if error:
+                return error
+        return None
+    return f"{path} is not JSON-compatible ({type(value).__name__})."
+
+
+def _validate_field_notes(key: str, field: dict) -> list[str]:
+    """Validate the exact structured note list on an authored field pin.
+
+    A missing ``notes`` key leaves legacy/model-owned notes untouched. An empty
+    list is deliberate, authoritative clearing. ``null`` is not a useful
+    field-note value and is refused locally rather than becoming an ambiguous
+    wire shape.
+    """
+    if "notes" not in field:
+        return []
+
+    notes = field["notes"]
+    if notes is None:
+        return [f"Field {key!r} declares notes: null; omit notes or use [] to clear them authoritatively."]
+    if not isinstance(notes, list):
+        return [f"Field {key!r} declares notes but it is not a list."]
+
+    errors: list[str] = []
+    allowed = {"note_text", "source", "metadata"}
+    for index, note in enumerate(notes):
+        path = f"Field {key!r} note #{index + 1}"
+        if not isinstance(note, dict):
+            errors.append(f"{path} is not a mapping.")
+            continue
+        unknown = sorted(str(note_key) for note_key in note.keys() - allowed)
+        if unknown:
+            errors.append(f"{path} has unknown key(s): {', '.join(unknown)}.")
+        if "note_text" not in note or not isinstance(note.get("note_text"), str):
+            errors.append(f"{path} must declare note_text as text.")
+        if "source" in note and not isinstance(note["source"], str):
+            errors.append(f"{path} declares source but it is not text.")
+        if "metadata" in note:
+            metadata = note["metadata"]
+            if not isinstance(metadata, dict):
+                errors.append(f"{path} declares metadata but it is not an object.")
+            else:
+                metadata_error = _validate_json_value(metadata, f"{path}.metadata")
+                if metadata_error:
+                    errors.append(metadata_error)
+    return errors
+
+
+def _normalise_field_notes(notes: list[dict]) -> list[dict]:
+    """Make optional FieldNote members explicit without changing metadata."""
+    return [
+        {
+            "note_text": note["note_text"],
+            "source": note.get("source", ""),
+            "metadata": note.get("metadata", {}),
+        }
+        for note in notes
+    ]
 
 
 def _validate_display_metadata(key: str, f: dict, ftype: str) -> list[str]:
@@ -655,7 +736,10 @@ def _upload_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) 
         for prop in _ENGINE_GATED_FIELD_KEYS:
             if prop in field:
                 value = field[prop]
-                spec[prop] = dict(value) if isinstance(value, dict) else value
+                if prop == "notes":
+                    spec[prop] = _normalise_field_notes(value)
+                else:
+                    spec[prop] = dict(value) if isinstance(value, dict) else value
         # In fields.yaml, omitting a question on a declared non-applicant fact
         # is intentional: there is no applicant question. Make that absence
         # explicit on the wire so a model-invented question is cleared rather
@@ -664,6 +748,12 @@ def _upload_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) 
             spec["question"] = None
         expected_fields.append(spec)
         guidance_lines.extend(_field_guidance_lines(key, field))
+
+    # A declared note pin is exact, not best-effort. Check it before registry
+    # sync as well as before the spec POST: neither a value-space write nor a
+    # guidance write may happen when the engine cannot prove it keeps notes.
+    notes_declared = any("notes" in field for field in expected_fields)
+    check_authored_notes_support(client, expected_fields)
 
     # Registry sync BEFORE spec-set (aethis-core#424, design note DX-6): the
     # engine resolves a value_space reference at the spec-set boundary, so
@@ -675,7 +765,9 @@ def _upload_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) 
     if referenced:
         _sync_value_spaces(client, project_dir, referenced)
 
-    check_display_metadata_support(client, expected_fields)
+    # Keep the pre-existing warn-and-proceed behaviour for all older metadata
+    # keys. Notes were already checked above, before any related write.
+    check_display_metadata_support(client, expected_fields, exclude_notes=notes_declared)
 
     client.set_field_spec(pid, expected_fields)
     for line in guidance_lines:
@@ -683,7 +775,34 @@ def _upload_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) 
     info(f"Set field spec ({len(expected_fields)} field(s))")
 
 
-def check_display_metadata_support(client: AethisClient, fields: list[dict], *, rulebook: bool = False) -> None:
+def check_authored_notes_support(client: AethisClient, fields: list[dict]) -> None:
+    """Fail closed before any related write when an exact note pin is unverifiable."""
+    if not any(isinstance(field, dict) and "notes" in field for field in fields):
+        return
+    advertised = client.expected_field_spec_properties()
+    if advertised is None:
+        console.print(
+            f"[red]Could not read the engine's field-spec schema, so it cannot confirm it keeps notes "
+            f"({client.base_url}).[/red]"
+        )
+        console.print(
+            "[red]Stopping before related writes: an engine that does not model notes accepts the upload and "
+            "discards an authoritative note pin silently. Restore schema access or use an engine that advertises "
+            "ExpectedFieldSpec.notes.[/red]"
+        )
+        raise typer.Exit(code=1)
+    if "notes" not in advertised:
+        console.print(f"[red]This engine does not carry notes on a field spec ({client.base_url}).[/red]")
+        console.print(
+            "[red]Stopping before related writes: the upload would succeed and the authored notes would be "
+            "dropped. Upgrade the engine, or remove notes from fields.yaml.[/red]"
+        )
+        raise typer.Exit(code=1)
+
+
+def check_display_metadata_support(
+    client: AethisClient, fields: list[dict], *, rulebook: bool = False, exclude_notes: bool = False
+) -> None:
     """Refuse to push authored field metadata an engine will throw away.
 
     An engine that predates a field-spec property does not reject it — it
@@ -693,8 +812,9 @@ def check_display_metadata_support(client: AethisClient, fields: list[dict], *, 
     declare something: a project with none is untouched.
 
     An engine whose schema cannot be read at all is a different answer from one
-    that answered "no", and only the second is evidence. The first is reported
-    and the upload proceeds.
+    that answered "no". Existing metadata keeps its warn-and-proceed behaviour,
+    but declared ``notes`` fail closed: an exact note pin cannot be safely
+    written when the engine capability is unknown.
 
     ``rulebook`` selects which model the engine is asked about — a rulebook
     field entry and a project field pin are different models and an engine may
@@ -702,11 +822,24 @@ def check_display_metadata_support(client: AethisClient, fields: list[dict], *, 
     about the one it actually posts.
     """
     gated_keys = _RULEBOOK_GATED_FIELD_KEYS if rulebook else _ENGINE_GATED_FIELD_KEYS
+    if exclude_notes:
+        gated_keys = tuple(key for key in gated_keys if key != "notes")
     declared = sorted({k for f in fields if isinstance(f, dict) for k in gated_keys if k in f})
     if not declared:
         return
     advertised = client.rulebook_field_spec_properties() if rulebook else client.expected_field_spec_properties()
     if advertised is None:
+        if not rulebook and "notes" in declared:
+            console.print(
+                f"[red]Could not read the engine's field-spec schema, so it cannot confirm it keeps notes "
+                f"({client.base_url}).[/red]"
+            )
+            console.print(
+                "[red]Stopping before related writes: an engine that does not model notes accepts the upload and "
+                "discards an authoritative note pin silently. Restore schema access or use an engine that advertises "
+                "ExpectedFieldSpec.notes.[/red]"
+            )
+            raise typer.Exit(code=1)
         console.print(
             f"[yellow]Could not read the engine's field-spec schema, so it is unknown whether it "
             f"keeps {', '.join(declared)}. Proceeding — an engine that does not model them accepts "

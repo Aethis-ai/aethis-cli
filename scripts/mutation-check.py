@@ -245,7 +245,10 @@ MUTATIONS: List[Mutation] = [
         "        for prop in _ENGINE_GATED_FIELD_KEYS:\n"
         "            if prop in field:\n"
         "                value = field[prop]\n"
-        "                spec[prop] = dict(value) if isinstance(value, dict) else value\n",
+        "                if prop == \"notes\":\n"
+        "                    spec[prop] = _normalise_field_notes(value)\n"
+        "                else:\n"
+        "                    spec[prop] = dict(value) if isinstance(value, dict) else value\n",
         "",
         "authored wording and the storage-key pairing never reach the engine",
         detects=("tests/test_field_display_metadata_transport.py::test_upload_transmits_labels_and_canonical_field",),
@@ -311,7 +314,7 @@ MUTATIONS: List[Mutation] = [
     Mutation(
         "metadata-capability-guard-skipped",
         "aethis_cli/commands/generate_cmd.py",
-        "    check_display_metadata_support(client, expected_fields)\n",
+        "    check_display_metadata_support(client, expected_fields, exclude_notes=notes_declared)\n",
         "",
         "an engine that discards the metadata is written to anyway",
         detects=(
@@ -321,11 +324,27 @@ MUTATIONS: List[Mutation] = [
     Mutation(
         "unreadable-field-spec-schema-reads-as-unsupported",
         "aethis_cli/commands/generate_cmd.py",
-        "    if advertised is None:",
-        "    if advertised is None:\n        advertised = set()\n    if False:",
+        '        return\n'
+        '    missing = [k for k in declared if k not in advertised]\n',
+        '        advertised = set()\n'
+        '    missing = [k for k in declared if k not in advertised]\n',
         "an unreachable schema blocks an upload that would have worked",
         detects=(
             "tests/test_field_display_metadata_transport.py::test_upload_proceeds_but_says_so_when_the_engine_schema_is_unreadable",
+        ),
+    ),
+    Mutation(
+        "authored-notes-unreadable-schema-fails-open",
+        "aethis_cli/commands/generate_cmd.py",
+        '    if advertised is None:\n'
+        '        console.print(\n'
+        '            f"[red]Could not read the engine\'s field-spec schema, so it cannot confirm it keeps notes "\n',
+        '    if False:\n'
+        '        console.print(\n'
+        '            f"[red]Could not read the engine\'s field-spec schema, so it cannot confirm it keeps notes "\n',
+        "an exact authored note pin proceeds when its engine capability is unknown",
+        detects=(
+            "tests/test_field_behaviour_metadata_transport.py::test_declared_notes_abort_before_all_related_writes_when_support_is_not_proven[None-[]]",
         ),
     ),
     Mutation(

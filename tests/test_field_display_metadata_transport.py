@@ -208,6 +208,29 @@ def test_validate_rejects_an_empty_canonical_field():
     assert any("canonical_field" in e for e in errors)
 
 
+@pytest.mark.parametrize(
+    "notes, expected",
+    [
+        (None, "notes: null"),
+        ({"note_text": "not-a-list"}, "not a list"),
+        (["not-a-mapping"], "not a mapping"),
+        ([{"note_text": "x", "unknown": True}], "unknown key"),
+        ([{"source": "missing text"}], "note_text"),
+        ([{"note_text": "x", "source": 1}], "source but it is not text"),
+        ([{"note_text": "x", "metadata": []}], "metadata but it is not an object"),
+        ([{"note_text": "x", "metadata": {1: "not-json-key"}}], "non-text object key"),
+    ],
+)
+def test_validate_rejects_invalid_structured_notes(notes, expected):
+    errors = generate_cmd.validate_fields_list([{"key": "example.confirmed", "type": "bool", "notes": notes}])
+    assert any(expected in error for error in errors)
+
+
+def test_validate_accepts_omitted_or_empty_notes_but_not_null():
+    assert generate_cmd.validate_fields_list([{"key": "example.legacy", "type": "bool"}]) == []
+    assert generate_cmd.validate_fields_list([{"key": "example.clear", "type": "bool", "notes": []}]) == []
+
+
 # --- engine capability ------------------------------------------------------
 
 
