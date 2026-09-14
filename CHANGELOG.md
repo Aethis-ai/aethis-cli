@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.39.0 (2026-09-14)
+
+- **feat(mcp): secure selected-profile setup for Codex and existing hosts.**
+  `aethis mcp install` now supports `codex` (and includes it in `all`) through
+  Codex's native `mcp add/get/remove` commands. Every host registration stores
+  only `AETHIS_PROFILE` and an absolute `XDG_CONFIG_HOME`, never an Aethis API
+  key or endpoint. A clean install uses the unsigned `anonymous` profile;
+  saved profiles stay pinned even if the CLI active profile changes later.
+  Conflicting one-off key or endpoint overrides and ambiguous user-managed
+  registrations fail before host configuration is changed. Known legacy CLI
+  registrations migrate safely.
+
 ## 0.38.0 (2026-09-02)
 
 - **feat: explicitly recover an authoring project from an abandoned generation.**

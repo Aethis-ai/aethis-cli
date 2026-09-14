@@ -345,7 +345,7 @@ invocation.
 
 ## MCP one-liner
 
-Wire up the [Aethis MCP server](https://github.com/Aethis-ai/aethis-mcp) in your AI editor without hand-editing JSON. Picks up the API key cached by `aethis login`, drops a canonical `aethis` server entry into the right config file, and preserves any other MCP servers you already have.
+Wire up the [Aethis MCP server](https://github.com/Aethis-ai/aethis-mcp) in your AI editor without hand-editing JSON. The registration records only your selected Aethis profile and config directory; the MCP server resolves its key and endpoint securely when it starts. It preserves other MCP servers and never writes your API key into host configuration.
 
 > Onboarding an AI coding agent end-to-end? See [docs.aethis.ai/agents/onboarding](https://docs.aethis.ai/agents/onboarding) — install + verify + auth + workflow patterns in one page.
 
@@ -355,15 +355,16 @@ aethis mcp install --target cursor
 aethis mcp install --target claude-code      # writes ./.mcp.json (project-local)
 aethis mcp install --target claude-desktop
 aethis mcp install --target windsurf
+aethis mcp install --target codex
 
-# Or all four at once
+# Or all supported hosts at once
 aethis mcp install --target all
 
 # Reverse it (only removes the `aethis` entry, leaves others alone)
 aethis mcp uninstall --target cursor
 ```
 
-The command is idempotent — re-run it after `aethis login` rotates your key and the entry updates in place. Restart your editor to pick up the change.
+The command is idempotent — re-run it after changing the selected profile and the entry updates in place. A clean installation registers the unsigned `anonymous` profile, so public decision tools work before sign-in. To use invite-only authoring tools, sign in and select a saved profile first; one-off key or endpoint overrides that differ from that profile are refused rather than copied into a host config. Restart your editor to pick up the change.
 
 | Target | Config path |
 |--------|-------------|
@@ -371,6 +372,7 @@ The command is idempotent — re-run it after `aethis login` rotates your key an
 | `cursor` | `~/.cursor/mcp.json` |
 | `claude-desktop` | macOS: `~/Library/Application Support/Claude/claude_desktop_config.json` · Linux: `~/.config/Claude/claude_desktop_config.json` |
 | `windsurf` | `~/.codeium/windsurf/mcp_config.json` |
+| `codex` | Managed by `codex mcp add/get/remove` |
 
 ## Project structure
 
