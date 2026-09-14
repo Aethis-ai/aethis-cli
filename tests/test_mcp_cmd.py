@@ -278,6 +278,65 @@ def test_all_preflights_missing_codex_before_writing_json_hosts(sandbox):
     assert not _cursor_config(sandbox["home"]).exists()
 
 
+def test_all_reuses_prepared_codex_snapshot_without_a_second_get(sandbox):
+    """A late inspection error cannot follow JSON writes in an all-host install."""
+    from typer import BadParameter
+
+    with (
+        patch("aethis_cli.commands.mcp_cmd.shutil.which", return_value="/usr/bin/codex"),
+        patch("aethis_cli.commands.mcp_cmd._codex_get", side_effect=[None, BadParameter("late get failed")]) as get,
+        patch("aethis_cli.commands.mcp_cmd._codex", return_value=SimpleNamespace(returncode=0, stdout="", stderr="")),
+    ):
+        result = _run(["mcp", "install", "--target", "all"])
+    assert result.exit_code == 0, result.output
+    assert get.call_count == 1
+    assert _cursor_config(sandbox["home"]).exists()
+
+
+def test_keyless_named_profile_with_legacy_key_refuses_without_fallback(sandbox):
+    from aethis_cli.config import set_active_profile, set_profile
+
+    set_profile("staging", base_url="https://staging.example")
+    set_active_profile("staging")
+    with patch("aethis_cli.commands.mcp_cmd.resolve_cached_key", return_value="ak_legacy_suffix_only"):
+        result = _run(["mcp", "install", "--target", "cursor"])
+    assert result.exit_code != 0 and "legacy Aethis credential" in result.output
+    assert not _cursor_config(sandbox["home"]).exists()
+
+
+def test_all_non_object_codex_registration_refuses_before_json_writes(sandbox):
+    result = SimpleNamespace(returncode=0, stdout="[]", stderr="")
+    with (
+        patch("aethis_cli.commands.mcp_cmd.shutil.which", return_value="/usr/bin/codex"),
+        patch("aethis_cli.commands.mcp_cmd._codex", return_value=result),
+    ):
+        outcome = _run(["mcp", "install", "--target", "all"])
+    assert outcome.exit_code != 0 and "non-object" in outcome.output
+    assert not _cursor_config(sandbox["home"]).exists()
+
+
+def test_all_flat_codex_restrictions_refuse_before_json_writes(sandbox):
+    from aethis_cli.config import set_active_profile, set_profile
+
+    set_profile("first", api_key="ak_first")
+    set_profile("second", api_key="ak_second")
+    set_active_profile("second")
+    existing = {
+        "command": "npx",
+        "args": ["-y", "aethis-mcp@latest"],
+        "env": {"AETHIS_PROFILE": "first", "XDG_CONFIG_HOME": str(sandbox["xdg"].resolve())},
+        "disabled_tools": ["aethis_publish"],
+    }
+    with (
+        patch("aethis_cli.commands.mcp_cmd.shutil.which", return_value="/usr/bin/codex"),
+        patch("aethis_cli.commands.mcp_cmd._codex_get", return_value=existing) as get,
+    ):
+        result = _run(["mcp", "install", "--target", "all"])
+    assert result.exit_code != 0 and "cannot preserve" in result.output
+    assert get.call_count == 1
+    assert not _cursor_config(sandbox["home"]).exists()
+
+
 def test_all_uninstall_preflights_missing_codex_before_removing_json_hosts(sandbox):
     from aethis_cli.commands.mcp_cmd import _config_path_for
 
