@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.39.1 (2026-09-15)
+
+- **fix(generate): preserve structured authored field notes on generation
+  pins.** `fields.yaml` notes, including their opaque metadata, now reach the
+  existing engine note contract. The CLI checks advertised engine support
+  before upload and rejects known unsupported engines.
+
 ## 0.39.0 (2026-09-14)
 
 - **feat(mcp): secure selected-profile setup for Codex and existing hosts.**

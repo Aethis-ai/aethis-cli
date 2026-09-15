@@ -249,6 +249,7 @@ _FIELD_KEY_ORDER = (
     "injection_phase",
     "recoverable_from",
     "x_ui_widget",
+    "notes",
     "hints",
 )
 
@@ -266,6 +267,7 @@ _ENGINE_GATED_FIELD_KEYS = (
     "injection_phase",
     "recoverable_from",
     "x_ui_widget",
+    "notes",
 )
 
 # Rulebook vocabulary is intentionally slimmer than a generation pin. Keep its
