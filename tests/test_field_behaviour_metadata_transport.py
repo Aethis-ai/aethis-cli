@@ -25,6 +25,7 @@ SUPPORTED = {
     "injection_phase",
     "recoverable_from",
     "x_ui_widget",
+    "notes",
 }
 
 
@@ -123,6 +124,58 @@ fields:
     _, expected_fields = client.set_field_spec.call_args.args
     assert expected_fields == [{"key": "legacy.answer", "sort": "string"}]
     client.expected_field_spec_properties.assert_not_called()
+
+
+def test_structured_notes_metadata_is_transmitted_verbatim(tmp_path):
+    client = _client()
+    project = _project(
+        tmp_path,
+        """\
+fields:
+  - key: applicant.confirmed_fact
+    type: bool
+    notes:
+      - note_text: Preserve this authored presentation instruction.
+        source: authored-rulebook
+        metadata:
+          editorial_tag: introductory
+""",
+    )
+
+    generate_cmd._upload_field_vocabulary(client, "proj_1", project)
+
+    _, expected_fields = client.set_field_spec.call_args.args
+    assert expected_fields == [
+        {
+            "key": "applicant.confirmed_fact",
+            "sort": "bool",
+            "notes": [
+                {
+                    "note_text": "Preserve this authored presentation instruction.",
+                    "source": "authored-rulebook",
+                    "metadata": {"editorial_tag": "introductory"},
+                }
+            ],
+        }
+    ]
+
+
+def test_missing_notes_capability_refuses_before_field_push(tmp_path):
+    client = _client(SUPPORTED - {"notes"})
+    project = _project(
+        tmp_path,
+        """\
+fields:
+  - key: applicant.confirmed_fact
+    type: bool
+    notes: []
+""",
+    )
+
+    with pytest.raises(typer.Exit):
+        generate_cmd._upload_field_vocabulary(client, "proj_1", project)
+
+    client.set_field_spec.assert_not_called()
 
 
 def test_missing_engine_capability_refuses_before_field_push(tmp_path):
