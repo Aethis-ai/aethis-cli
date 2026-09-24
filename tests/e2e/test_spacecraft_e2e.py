@@ -9,7 +9,7 @@ Spacecraft Crew Certification Act 2049 as source material:
   3. Add the maintained example's guidance hints
   4. Add the maintained example's test scenarios
   5. Trigger generation and poll until done
-  6. Run test cases via API (assert ≥80% pass rate)
+  6. Run test cases via API (assert every scenario was run)
   7. Verify field schema (≥5 fields)
   8. Call /decide for every scenario and verify its outcome
 
@@ -43,34 +43,19 @@ Run with:
 
 from __future__ import annotations
 
-import hashlib
 import os
 import time
-from pathlib import Path
-from typing import Any
 
-import httpx
 import pytest
-import yaml
 
 from aethis_cli.client import AethisClient
+from tests.spacecraft_example import load_fixtures
 
 pytestmark = pytest.mark.manual
 
 # ---------------------------------------------------------------------------
 # Paths & constants
 # ---------------------------------------------------------------------------
-
-# The maintained example, pinned. Bump EXAMPLES_COMMIT deliberately (and the
-# digest with it, if the Act changed) — never track a moving branch.
-EXAMPLES_REPO = "Aethis-ai/aethis-examples"
-EXAMPLES_COMMIT = "a96cf14315072c687790bd25befab8df46217ae6"
-EXAMPLE_DIR = "spacecraft-crew-certification"
-ACT_PATH = f"{EXAMPLE_DIR}/sources/source.md"
-SCENARIOS_PATH = f"{EXAMPLE_DIR}/tests/scenarios.yaml"
-HINTS_PATH = f"{EXAMPLE_DIR}/guidance/hints.yaml"
-# The canonical Act (original Section 6(4)(c) wording).
-ACT_SHA256 = "sha256:71a97144cbce1103a93411a082e9b99e6110126e1180601cbe0a04d15dad9f36"
 
 # Poll deadline / iteration cap. Overridable so the weekly lane can bound a
 # wedged generation tightly; a run that exceeds it fails loud (never hangs).
@@ -79,64 +64,9 @@ POLL_INTERVAL = 5
 MAX_POLL_ITERATIONS = max(1, GENERATION_TIMEOUT // POLL_INTERVAL)
 
 
-# ---------------------------------------------------------------------------
-# Pinned fixtures — fetched, verified, and FAIL (never skip) on any problem
-# ---------------------------------------------------------------------------
-
-
-def _fetch_pinned(path: str) -> bytes:
-    url = f"https://raw.githubusercontent.com/{EXAMPLES_REPO}/{EXAMPLES_COMMIT}/{path}"
-    try:
-        response = httpx.get(url, timeout=30.0, follow_redirects=True)
-    except httpx.HTTPError as e:
-        pytest.fail(f"Could not fetch pinned example file {url}: {e}")
-    if response.status_code != 200:
-        pytest.fail(f"Could not fetch pinned example file {url}: HTTP {response.status_code}")
-    if not response.content:
-        pytest.fail(f"Pinned example file {url} is empty")
-    return response.content
-
-
-def _load_fixtures(dest: Path) -> dict[str, Any]:
-    act = _fetch_pinned(ACT_PATH)
-    digest = "sha256:" + hashlib.sha256(act).hexdigest()
-    if digest != ACT_SHA256:
-        pytest.fail(f"Act digest mismatch for {ACT_PATH}@{EXAMPLES_COMMIT}: expected {ACT_SHA256}, got {digest}")
-    act_path = dest / "source.md"
-    act_path.write_bytes(act)
-
-    scenarios = (yaml.safe_load(_fetch_pinned(SCENARIOS_PATH)) or {}).get("tests") or []
-    if not scenarios:
-        pytest.fail(f"{SCENARIOS_PATH}@{EXAMPLES_COMMIT} has no scenarios under 'tests'")
-    cases = [
-        {
-            "name": tc["name"],
-            "field_values": tc["inputs"],
-            "expected_outcome": tc["expect"]["outcome"],
-        }
-        for tc in scenarios
-    ]
-
-    hints = [h for h in (yaml.safe_load(_fetch_pinned(HINTS_PATH)) or {}).get("hints") or [] if h]
-    if not hints:
-        pytest.fail(f"{HINTS_PATH}@{EXAMPLES_COMMIT} has no entries under 'hints'")
-    if not all(isinstance(h, str) for h in hints):
-        pytest.fail(f"{HINTS_PATH}@{EXAMPLES_COMMIT} has a non-string hint; this test uploads plain-text hints only")
-
-    return {"act_path": act_path, "cases": cases, "hints": hints}
-
-
 @pytest.fixture(scope="module")
 def spacecraft_fixtures(tmp_path_factory):
-    return _load_fixtures(tmp_path_factory.mktemp("spacecraft"))
-
-
-def test_pinned_fixtures_fetch_and_verify(spacecraft_fixtures):
-    """Runs without credentials: the pinned Act, scenarios and hints resolve,
-    and the Act is the canonical text."""
-    assert spacecraft_fixtures["act_path"].stat().st_size > 0
-    assert spacecraft_fixtures["cases"]
-    assert spacecraft_fixtures["hints"]
+    return load_fixtures(tmp_path_factory.mktemp("spacecraft"))
 
 
 # ---------------------------------------------------------------------------
@@ -229,7 +159,7 @@ class TestSpacecraftGeneration:
         assert len(fields) >= 5, f"Expected ≥5 fields, got {len(fields)}: {[f['field_id'] for f in fields]}"
 
     def test_schema_field_types(self, spacecraft_ruleset):
-        """Verify field types include bool, int, and enum."""
+        """Verify the schema includes at least one bool field."""
         client = spacecraft_ruleset["client"]
         schema = client.get_schema(spacecraft_ruleset["ruleset_id"])
         types = {f["field_type"].lower() for f in schema.get("fields", [])}
@@ -259,32 +189,15 @@ class TestSpacecraftDecisions:
 
 
 # ---------------------------------------------------------------------------
-# Tests: test-run endpoint (pass rate)
+# Tests: test-run endpoint
 # ---------------------------------------------------------------------------
 
 
 class TestSpacecraftTestRun:
-    """Verify the /test-run endpoint returns acceptable pass rate."""
+    """Verify the /test-run endpoint runs every maintained scenario."""
 
     def test_run_returns_results(self, spacecraft_ruleset):
         client = spacecraft_ruleset["client"]
         result = client.run_tests(spacecraft_ruleset["project_id"])
         expected = len(spacecraft_ruleset["cases"])
         assert result["total"] == expected, f"Expected {expected} test cases, got {result['total']}"
-
-    def test_pass_rate_at_least_80_percent(self, spacecraft_ruleset):
-        """Binding assertion: ≥80% of golden cases must pass via /test-run."""
-        client = spacecraft_ruleset["client"]
-        result = client.run_tests(spacecraft_ruleset["project_id"])
-        total = result["total"]
-        passed = result["passed"]
-        pass_rate = passed / total if total > 0 else 0
-
-        details = []
-        for r in result.get("results", []):
-            status = "PASS" if r["passed"] else "FAIL"
-            details.append(f"  {status} [{r['name']}]: expected={r.get('expected')}, actual={r.get('actual')}")
-
-        assert pass_rate >= 0.8, f"Pass rate {pass_rate:.0%} ({passed}/{total}) below 80% threshold.\n" + "\n".join(
-            details
-        )

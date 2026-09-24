@@ -90,6 +90,9 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
+          # A missing minted key would turn every authoring test into a skip
+          # and the lane green; refuse to run without one.
+          test -s .authoring_key || { echo "::error::no minted key"; exit 1; }
           set +e
           export AETHIS_API_KEY="$(cat .authoring_key)"
           uv run pytest tests/e2e/test_spacecraft_e2e.py -m manual -v -o addopts="" -p no:cacheprovider

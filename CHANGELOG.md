@@ -17,6 +17,12 @@
   revoke step reused the mint step's Clerk session token, which expires in
   about a minute. That went unnoticed only because the test used to skip
   instantly. It now signs in afresh before sweeping the lane's keys.
+  The lane also refuses to run pytest without a minted key, so a missing key
+  can no longer turn the authoring tests into skips and the lane green.
+- **test: the pinned-example check runs on every PR.** A credential-free test
+  fetches the pinned example and verifies the Act's digest in normal CI, so a
+  broken pin is caught per-PR rather than weekly. The redundant 80%
+  pass-rate assertion is removed; the strict per-scenario check covers it.
 
 ## 0.39.1 (2026-09-15)
 
