@@ -13,6 +13,10 @@
   pinned commit, verifies the Act's digest, and fails (never skips) when a
   fetch fails or the digest does not match. Its own hard-coded guidance and
   test cases are removed; every maintained scenario is checked via `decide`.
+- **ci(authoring-e2e-weekly): the lane revokes its key after a real run.** The
+  revoke step reused the mint step's Clerk session token, which expires in
+  about a minute. That went unnoticed only because the test used to skip
+  instantly. It now signs in afresh before sweeping the lane's keys.
 
 ## 0.39.1 (2026-09-15)
 

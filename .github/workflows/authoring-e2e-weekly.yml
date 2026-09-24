@@ -83,9 +83,6 @@ jobs:
               fh.write(f"key_id={key.key_id}\n")
           with open(".authoring_key", "w") as fh:
               fh.write(key.full_key)
-          # Stash the JWT for the revoke step (short-lived, workspace-local).
-          with open(".authoring_jwt", "w") as fh:
-              fh.write(jwt)
           PY
 
       - name: Run spacecraft authoring e2e
@@ -98,19 +95,25 @@ jobs:
           uv run pytest tests/e2e/test_spacecraft_e2e.py -m manual -v -o addopts="" -p no:cacheprovider
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
 
+      # Sign in afresh here rather than reusing the mint step's JWT: a Clerk
+      # session JWT lives about a minute, and a real generation takes minutes,
+      # so a stashed token is expired by now (HTTP 401 on the key list).
       - name: Revoke the minted key
         if: always()
+        env:
+          CLERK_SECRET_KEY_DEV_TOOLS: ${{ secrets.CLERK_SECRET_KEY_DEV_TOOLS }}
+          CLERK_E2E_DX_USER_ID: ${{ vars.CLERK_E2E_DX_USER_ID }}
         run: |
           set -euo pipefail
-          if [ -f .authoring_jwt ] && [ -n "${{ steps.mint.outputs.key_id }}" ]; then
+          rm -f .authoring_key
+          if [ -n "${{ steps.mint.outputs.key_id }}" ]; then
             uv run python - <<'PY'
           from tests.integration import staging_auth
-          jwt = open(".authoring_jwt").read().strip()
+          jwt = staging_auth.acquire_session_jwt()
           # Sweep only THIS lane's prefix so a nightly run's key is never revoked.
           staging_auth.sweep_e2e_keys(jwt, prefix=staging_auth.AUTHORING_KEY_PREFIX)
           PY
           fi
-          rm -f .authoring_key .authoring_jwt
 
       - name: Fail the job if the lane failed
         if: always()
