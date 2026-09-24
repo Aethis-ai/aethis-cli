@@ -18,7 +18,7 @@ import yaml
 # The maintained example, pinned. Bump EXAMPLES_COMMIT deliberately (and the
 # digest with it, if the Act changed) — never track a moving branch.
 EXAMPLES_REPO = "Aethis-ai/aethis-examples"
-EXAMPLES_COMMIT = "a96cf14315072c687790bd25befab8df46217ae6"
+EXAMPLES_COMMIT = "84cad2956f3c092d64961a107cd224e47f144ae4"
 EXAMPLE_DIR = "spacecraft-crew-certification"
 ACT_PATH = f"{EXAMPLE_DIR}/sources/source.md"
 SCENARIOS_PATH = f"{EXAMPLE_DIR}/tests/scenarios.yaml"
