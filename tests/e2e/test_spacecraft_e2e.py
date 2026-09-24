@@ -6,12 +6,19 @@ Spacecraft Crew Certification Act 2049 as source material:
 
   1. Create project via API
   2. Upload the Act as source document
-  3. Add prescriptive guidance hints
-  4. Add golden test cases
+  3. Add the maintained example's guidance hints
+  4. Add the maintained example's test scenarios
   5. Trigger generation and poll until done
-  6. Run test cases via API (assert ≥80% pass rate)
+  6. Run test cases via API (assert every scenario was run)
   7. Verify field schema (≥5 fields)
-  8. Call /decide with known inputs and verify outcomes
+  8. Call /decide for every scenario and verify its outcome
+
+The Act, the scenarios and the guidance are NOT kept in this repo. They are
+fetched from the maintained example in Aethis-ai/aethis-examples
+(``spacecraft-crew-certification/``) at a pinned commit, and the Act's digest is
+verified. A failed fetch or a digest mismatch FAILS the lane — it never skips,
+because a lane that skips on a missing fixture reports green having tested
+nothing.
 
 This test drives the **LLM authoring pipeline** (generation), so it runs in its
 own weekly + manual-dispatch lane (``.github/workflows/authoring-e2e-weekly.yml``)
@@ -38,12 +45,11 @@ from __future__ import annotations
 
 import os
 import time
-from pathlib import Path
-from typing import Any
 
 import pytest
 
 from aethis_cli.client import AethisClient
+from tests.spacecraft_example import load_fixtures
 
 pytestmark = pytest.mark.manual
 
@@ -51,143 +57,16 @@ pytestmark = pytest.mark.manual
 # Paths & constants
 # ---------------------------------------------------------------------------
 
-SPACECRAFT_POLICY_PATH = (
-    Path(__file__).resolve().parents[2] / "examples" / "spacecraft-crew-rules" / "spacecraft-crew-certification-act.md"
-)
-
 # Poll deadline / iteration cap. Overridable so the weekly lane can bound a
 # wedged generation tightly; a run that exceeds it fails loud (never hangs).
 GENERATION_TIMEOUT = int(os.environ.get("SPACECRAFT_GENERATION_TIMEOUT", "300"))
 POLL_INTERVAL = 5
 MAX_POLL_ITERATIONS = max(1, GENERATION_TIMEOUT // POLL_INTERVAL)
 
-# ---------------------------------------------------------------------------
-# Guidance hints — prescriptive DSL structure
-# ---------------------------------------------------------------------------
 
-GUIDANCE_HINTS = [
-    (
-        "Use these EXACT field keys from Appendix A of the Act: "
-        "space.crew.species (Sort.ENUM: Human, Vogon, Magrathean, Betelgeusian, Dolphin), "
-        "space.crew.age (Sort.INT), "
-        "space.crew.flight_hours (Sort.INT), "
-        "space.crew.has_pilot_license (Sort.BOOL), "
-        "space.crew.has_gaa_exam (Sort.BOOL), "
-        "space.crew.has_approved_provider_cert (Sort.BOOL), "
-        "space.crew.has_radiation_cert (Sort.BOOL), "
-        "space.crew.has_towel (Sort.BOOL), "
-        "space.medical.cert_valid (Sort.BOOL), "
-        "space.mission.type (Sort.ENUM: orbital, suborbital, lunar), "
-        "space.vessel.propulsion_type (Sort.ENUM: ion, fusion, bistromatic, conventional)"
-    ),
-    "Generate FieldDefinition and Criterion objects. Use ONLY the group names listed below — do NOT invent additional groups.",
-    (
-        "Vogon species disqualified (group='species_check'): "
-        "Op(NE, [FieldRef(key='space.crew.species'), Const(sort=Sort.ENUM, value='Vogon')])"
-    ),
-    (
-        "Flight readiness (group='flight_readiness'): SINGLE Criterion using "
-        "Op(OR, [Op(GE, [FieldRef(key='space.crew.age'), Const(sort=Sort.INT, value=60)]), "
-        "Op(AND, [Op(GE, [FieldRef(key='space.crew.flight_hours'), Const(sort=Sort.INT, value=500)]), "
-        "Op(EQ, [FieldRef(key='space.crew.has_pilot_license'), Const(sort=Sort.BOOL, value=True)])])]). "
-        "Age >= 60 is an exemption alternative, NOT a separate group."
-    ),
-    (
-        "Medical certification (group='medical_certification'): two Criterion objects "
-        "in the SAME group (OR'd): route A = has_gaa_exam EQ True, "
-        "route B = has_approved_provider_cert EQ True"
-    ),
-    "Medical cert validity (group='medical_cert_validity'): space.medical.cert_valid EQ True",
-    (
-        "Radiation for orbital missions (group='radiation_cert'): SINGLE Criterion using "
-        "Op(IMPLIES, [Op(EQ, [FieldRef(key='space.mission.type'), Const(sort=Sort.ENUM, value='orbital')]), "
-        "Op(EQ, [FieldRef(key='space.crew.has_radiation_cert'), Const(sort=Sort.BOOL, value=True)])]). "
-        "Non-orbital missions do NOT need radiation cert."
-    ),
-    "Towel required (group='towel_compliance'): space.crew.has_towel EQ True",
-    (
-        "IMPORTANT: Do NOT create separate groups or criteria for Section 6 exception "
-        "levels (A/B/C). The three-level exception chain (age exempt, orbital override, "
-        "veteran override) is already simplified into the flight_readiness group as an "
-        "OR alternative. Creating separate 'exception_level_a/b/c' groups would make "
-        "them mandatory for ALL applicants, breaking eligibility. Only generate criteria "
-        "for the groups explicitly listed above: species_check, flight_readiness, "
-        "medical_certification, medical_cert_validity, radiation_cert, towel_compliance."
-    ),
-]
-
-# ---------------------------------------------------------------------------
-# Golden test cases — from the Spacecraft Crew Certification Act 2049
-# ---------------------------------------------------------------------------
-
-GOLDEN_CASES: list[tuple[str, dict[str, Any], str]] = [
-    (
-        "Vogon crew member — disqualifying species (Section 3)",
-        {"space.crew.species": "Vogon"},
-        "not_eligible",
-    ),
-    (
-        "No towel — mandatory equipment violation (Section 9)",
-        {
-            "space.crew.species": "Human",
-            "space.crew.flight_hours": 600,
-            "space.crew.has_pilot_license": True,
-            "space.crew.has_gaa_exam": True,
-            "space.medical.cert_valid": True,
-            "space.crew.age": 35,
-            "space.mission.type": "suborbital",
-            "space.crew.has_towel": False,
-        },
-        "not_eligible",
-    ),
-    (
-        "Orbital mission — radiation cert absent (Section 5)",
-        {
-            "space.crew.species": "Human",
-            "space.crew.flight_hours": 600,
-            "space.crew.has_pilot_license": True,
-            "space.crew.has_gaa_exam": True,
-            "space.medical.cert_valid": True,
-            "space.crew.age": 35,
-            "space.mission.type": "orbital",
-            "space.crew.has_radiation_cert": False,
-            "space.crew.has_towel": True,
-        },
-        "not_eligible",
-    ),
-    (
-        "Full compliance — Human, suborbital, all requirements met",
-        {
-            "space.crew.species": "Human",
-            "space.crew.flight_hours": 600,
-            "space.crew.has_pilot_license": True,
-            "space.crew.has_gaa_exam": True,
-            "space.crew.has_approved_provider_cert": True,
-            "space.crew.has_radiation_cert": True,
-            "space.medical.cert_valid": True,
-            "space.crew.age": 35,
-            "space.mission.type": "suborbital",
-            "space.vessel.propulsion_type": "conventional",
-            "space.crew.has_towel": True,
-        },
-        "eligible",
-    ),
-    (
-        "Age exemption — senior crew (age >= 60) exempt from flight readiness (Section 6)",
-        {
-            "space.crew.species": "Human",
-            "space.crew.age": 65,
-            "space.crew.has_gaa_exam": True,
-            "space.crew.has_approved_provider_cert": True,
-            "space.crew.has_radiation_cert": True,
-            "space.medical.cert_valid": True,
-            "space.mission.type": "suborbital",
-            "space.vessel.propulsion_type": "conventional",
-            "space.crew.has_towel": True,
-        },
-        "eligible",
-    ),
-]
+@pytest.fixture(scope="module")
+def spacecraft_fixtures(tmp_path_factory):
+    return load_fixtures(tmp_path_factory.mktemp("spacecraft"))
 
 
 # ---------------------------------------------------------------------------
@@ -207,12 +86,9 @@ def _make_client() -> tuple[AethisClient, str]:
 
 
 @pytest.fixture(scope="module")
-def spacecraft_ruleset():
+def spacecraft_ruleset(spacecraft_fixtures):
     """Run the full generate pipeline once, return project/ruleset state."""
     client, base_url = _make_client()
-
-    if not SPACECRAFT_POLICY_PATH.exists():
-        pytest.skip(f"Source doc not found: {SPACECRAFT_POLICY_PATH}")
 
     # 1. Create project
     project = client.create_project(
@@ -223,15 +99,14 @@ def spacecraft_ruleset():
     pid = project["project_id"]
 
     # 2. Upload source document
-    client.upload_sources(pid, [SPACECRAFT_POLICY_PATH])
+    client.upload_sources(pid, [spacecraft_fixtures["act_path"]])
 
-    # 3. Add guidance hints
-    for hint in GUIDANCE_HINTS:
+    # 3. Add the maintained example's guidance hints
+    for hint in spacecraft_fixtures["hints"]:
         client.add_guidance(pid, hint)
 
-    # 4. Add golden test cases
-    test_cases = [{"name": name, "field_values": fv, "expected_outcome": outcome} for name, fv, outcome in GOLDEN_CASES]
-    client.add_tests(pid, test_cases)
+    # 4. Add the maintained example's test scenarios
+    client.add_tests(pid, spacecraft_fixtures["cases"])
 
     # 5. Trigger generation
     client.generate(pid)
@@ -254,6 +129,7 @@ def spacecraft_ruleset():
                 "project_id": pid,
                 "ruleset_id": ruleset_id,
                 "client": client,
+                "cases": spacecraft_fixtures["cases"],
             }
 
         if job_status == "failed":
@@ -283,7 +159,7 @@ class TestSpacecraftGeneration:
         assert len(fields) >= 5, f"Expected ≥5 fields, got {len(fields)}: {[f['field_id'] for f in fields]}"
 
     def test_schema_field_types(self, spacecraft_ruleset):
-        """Verify field types include bool, int, and enum."""
+        """Verify the schema includes at least one bool field."""
         client = spacecraft_ruleset["client"]
         schema = client.get_schema(spacecraft_ruleset["ruleset_id"])
         types = {f["field_type"].lower() for f in schema.get("fields", [])}
@@ -296,115 +172,32 @@ class TestSpacecraftGeneration:
 
 
 class TestSpacecraftDecisions:
-    """Verify known outcomes via the /decide endpoint."""
+    """Verify every maintained scenario's outcome via the /decide endpoint."""
 
-    def test_vogon_not_eligible(self, spacecraft_ruleset):
+    def test_every_scenario_decides_as_expected(self, spacecraft_ruleset):
         client = spacecraft_ruleset["client"]
-        result = client.decide(spacecraft_ruleset["ruleset_id"], {"space.crew.species": "Vogon"})
-        assert result["decision"] == "not_eligible", f"Vogon should be not_eligible, got {result['decision']}"
-
-    def test_full_compliance_eligible(self, spacecraft_ruleset):
-        client = spacecraft_ruleset["client"]
-        result = client.decide(
-            spacecraft_ruleset["ruleset_id"],
-            {
-                "space.crew.species": "Human",
-                "space.crew.flight_hours": 600,
-                "space.crew.has_pilot_license": True,
-                "space.crew.has_gaa_exam": True,
-                "space.crew.has_approved_provider_cert": True,
-                "space.crew.has_radiation_cert": True,
-                "space.medical.cert_valid": True,
-                "space.crew.age": 35,
-                "space.mission.type": "suborbital",
-                "space.vessel.propulsion_type": "conventional",
-                "space.crew.has_towel": True,
-            },
+        mismatches = []
+        for case in spacecraft_ruleset["cases"]:
+            result = client.decide(spacecraft_ruleset["ruleset_id"], case["field_values"])
+            if result["decision"] != case["expected_outcome"]:
+                mismatches.append(
+                    f"  [{case['name']}]: expected={case['expected_outcome']}, actual={result['decision']}"
+                )
+        assert not mismatches, f"{len(mismatches)}/{len(spacecraft_ruleset['cases'])} scenarios decided wrongly:\n" + (
+            "\n".join(mismatches)
         )
-        assert result["decision"] == "eligible", f"Full compliance should be eligible, got {result['decision']}"
-
-    def test_no_towel_not_eligible(self, spacecraft_ruleset):
-        client = spacecraft_ruleset["client"]
-        result = client.decide(
-            spacecraft_ruleset["ruleset_id"],
-            {
-                "space.crew.species": "Human",
-                "space.crew.flight_hours": 600,
-                "space.crew.has_pilot_license": True,
-                "space.crew.has_gaa_exam": True,
-                "space.medical.cert_valid": True,
-                "space.crew.age": 35,
-                "space.mission.type": "suborbital",
-                "space.crew.has_towel": False,
-            },
-        )
-        assert result["decision"] == "not_eligible", f"No towel should be not_eligible, got {result['decision']}"
-
-    def test_orbital_no_radiation_not_eligible(self, spacecraft_ruleset):
-        client = spacecraft_ruleset["client"]
-        result = client.decide(
-            spacecraft_ruleset["ruleset_id"],
-            {
-                "space.crew.species": "Human",
-                "space.crew.flight_hours": 600,
-                "space.crew.has_pilot_license": True,
-                "space.crew.has_gaa_exam": True,
-                "space.medical.cert_valid": True,
-                "space.crew.age": 35,
-                "space.mission.type": "orbital",
-                "space.crew.has_radiation_cert": False,
-                "space.crew.has_towel": True,
-            },
-        )
-        assert result["decision"] == "not_eligible", (
-            f"Orbital + no radiation cert should be not_eligible, got {result['decision']}"
-        )
-
-    def test_age_exemption_eligible(self, spacecraft_ruleset):
-        client = spacecraft_ruleset["client"]
-        result = client.decide(
-            spacecraft_ruleset["ruleset_id"],
-            {
-                "space.crew.species": "Human",
-                "space.crew.age": 65,
-                "space.crew.has_gaa_exam": True,
-                "space.crew.has_approved_provider_cert": True,
-                "space.crew.has_radiation_cert": True,
-                "space.medical.cert_valid": True,
-                "space.mission.type": "suborbital",
-                "space.vessel.propulsion_type": "conventional",
-                "space.crew.has_towel": True,
-            },
-        )
-        assert result["decision"] == "eligible", f"Age exemption (65) should be eligible, got {result['decision']}"
 
 
 # ---------------------------------------------------------------------------
-# Tests: test-run endpoint (pass rate)
+# Tests: test-run endpoint
 # ---------------------------------------------------------------------------
 
 
 class TestSpacecraftTestRun:
-    """Verify the /test-run endpoint returns acceptable pass rate."""
+    """Verify the /test-run endpoint runs every maintained scenario."""
 
     def test_run_returns_results(self, spacecraft_ruleset):
         client = spacecraft_ruleset["client"]
         result = client.run_tests(spacecraft_ruleset["project_id"])
-        assert result["total"] >= 5, f"Expected ≥5 test cases, got {result['total']}"
-
-    def test_pass_rate_at_least_80_percent(self, spacecraft_ruleset):
-        """Binding assertion: ≥80% of golden cases must pass via /test-run."""
-        client = spacecraft_ruleset["client"]
-        result = client.run_tests(spacecraft_ruleset["project_id"])
-        total = result["total"]
-        passed = result["passed"]
-        pass_rate = passed / total if total > 0 else 0
-
-        details = []
-        for r in result.get("results", []):
-            status = "PASS" if r["passed"] else "FAIL"
-            details.append(f"  {status} [{r['name']}]: expected={r.get('expected')}, actual={r.get('actual')}")
-
-        assert pass_rate >= 0.8, f"Pass rate {pass_rate:.0%} ({passed}/{total}) below 80% threshold.\n" + "\n".join(
-            details
-        )
+        expected = len(spacecraft_ruleset["cases"])
+        assert result["total"] == expected, f"Expected {expected} test cases, got {result['total']}"

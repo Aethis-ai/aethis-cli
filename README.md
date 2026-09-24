@@ -106,17 +106,20 @@ aethis publish
 
 ## Try the example
 
-A complete, runnable example is included in `examples/spacecraft-crew-rules/`:
+A complete, runnable example is maintained in [Aethis-ai/aethis-examples](https://github.com/Aethis-ai/aethis-examples/tree/main/spacecraft-crew-certification): the Spacecraft Crew Certification Act 2049, with its guidance hints and test scenarios.
 
 ```bash
-cp -r examples/spacecraft-crew-rules my-first-rules && cd my-first-rules
+git clone https://github.com/Aethis-ai/aethis-examples.git
+cd aethis-examples/spacecraft-crew-certification
 aethis login
 aethis generate --poll
 aethis test
-aethis decide -i '{"space.crew.species": "Human", "space.crew.age": 35, "space.crew.flight_hours": 600, "space.crew.has_pilot_license": true, "space.crew.has_gaa_exam": true, "space.medical.cert_valid": true, "space.mission.type": "suborbital", "space.crew.has_towel": true}'
+aethis decide -i '{"space.crew.species": "Human", "space.crew.age": 35, "space.crew.flight_hours": 600, "space.crew.has_pilot_license": true, "space.crew.has_gaa_exam": true, "space.crew.has_approved_provider_cert": true, "space.crew.has_radiation_cert": true, "space.medical.cert_valid": true, "space.mission.type": "suborbital", "space.vessel.propulsion_type": "Bistromathics", "space.crew.has_towel": true}'
 ```
 
-See `examples/spacecraft-crew-rules/README.md` for details.
+`aethis generate` authors a ruleset in your own account from the files in that directory, and `aethis decide` then evaluates it. To query the published version without signing in, pass it by name: `aethis decide -b aethis/spacecraft-crew-certification -i '{"space.crew.species": "Vogon"}'`.
+
+See the example's [README](https://github.com/Aethis-ai/aethis-examples/blob/main/spacecraft-crew-certification/README.md) for what each scenario covers.
 
 ## Commands
 

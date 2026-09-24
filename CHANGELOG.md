@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.39.2 (2026-09-24)
+
+- **chore(examples): retire the bundled spacecraft example in favour of the
+  maintained one.** `examples/spacecraft-crew-rules/` is removed: its copy of
+  the Spacecraft Crew Certification Act had drifted from the canonical text.
+  The README now points at the maintained example in
+  [Aethis-ai/aethis-examples](https://github.com/Aethis-ai/aethis-examples/tree/main/spacecraft-crew-certification).
+- **test(e2e): the spacecraft authoring e2e really runs.** It previously pointed
+  at a file path that did not exist and skipped silently. It now fetches the
+  Act, the scenarios and the guidance hints from the maintained example at a
+  pinned commit, verifies the Act's digest, and fails (never skips) when a
+  fetch fails or the digest does not match. Its own hard-coded guidance and
+  test cases are removed; every maintained scenario is checked via `decide`.
+  Pinned to aethis-examples `84cad29` (v0.2.7), whose example `sources/`
+  directory holds only the canonical Act and its citation manifest.
+- **ci(authoring-e2e-weekly): the lane revokes its key after a real run.** The
+  revoke step reused the mint step's Clerk session token, which expires in
+  about a minute. That went unnoticed only because the test used to skip
+  instantly. It now signs in afresh before sweeping the lane's keys.
+  The lane also refuses to run pytest without a minted key, so a missing key
+  can no longer turn the authoring tests into skips and the lane green.
+- **test: the pinned-example check runs on every PR.** A credential-free test
+  fetches the pinned example and verifies the Act's digest in normal CI, so a
+  broken pin is caught per-PR rather than weekly. The redundant 80%
+  pass-rate assertion is removed; the strict per-scenario check covers it.
+
 ## 0.39.1 (2026-09-15)
 
 - **fix(generate): preserve structured authored field notes on generation
