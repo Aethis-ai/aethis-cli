@@ -6,12 +6,19 @@ Spacecraft Crew Certification Act 2049 as source material:
 
   1. Create project via API
   2. Upload the Act as source document
-  3. Add prescriptive guidance hints
-  4. Add golden test cases
+  3. Add the maintained example's guidance hints
+  4. Add the maintained example's test scenarios
   5. Trigger generation and poll until done
   6. Run test cases via API (assert ≥80% pass rate)
   7. Verify field schema (≥5 fields)
-  8. Call /decide with known inputs and verify outcomes
+  8. Call /decide for every scenario and verify its outcome
+
+The Act, the scenarios and the guidance are NOT kept in this repo. They are
+fetched from the maintained example in Aethis-ai/aethis-examples
+(``spacecraft-crew-certification/``) at a pinned commit, and the Act's digest is
+verified. A failed fetch or a digest mismatch FAILS the lane — it never skips,
+because a lane that skips on a missing fixture reports green having tested
+nothing.
 
 This test drives the **LLM authoring pipeline** (generation), so it runs in its
 own weekly + manual-dispatch lane (``.github/workflows/authoring-e2e-weekly.yml``)
@@ -36,12 +43,15 @@ Run with:
 
 from __future__ import annotations
 
+import hashlib
 import os
 import time
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
+import yaml
 
 from aethis_cli.client import AethisClient
 
@@ -51,9 +61,16 @@ pytestmark = pytest.mark.manual
 # Paths & constants
 # ---------------------------------------------------------------------------
 
-SPACECRAFT_POLICY_PATH = (
-    Path(__file__).resolve().parents[2] / "examples" / "spacecraft-crew-rules" / "spacecraft-crew-certification-act.md"
-)
+# The maintained example, pinned. Bump EXAMPLES_COMMIT deliberately (and the
+# digest with it, if the Act changed) — never track a moving branch.
+EXAMPLES_REPO = "Aethis-ai/aethis-examples"
+EXAMPLES_COMMIT = "a96cf14315072c687790bd25befab8df46217ae6"
+EXAMPLE_DIR = "spacecraft-crew-certification"
+ACT_PATH = f"{EXAMPLE_DIR}/sources/source.md"
+SCENARIOS_PATH = f"{EXAMPLE_DIR}/tests/scenarios.yaml"
+HINTS_PATH = f"{EXAMPLE_DIR}/guidance/hints.yaml"
+# The canonical Act (original Section 6(4)(c) wording).
+ACT_SHA256 = "sha256:71a97144cbce1103a93411a082e9b99e6110126e1180601cbe0a04d15dad9f36"
 
 # Poll deadline / iteration cap. Overridable so the weekly lane can bound a
 # wedged generation tightly; a run that exceeds it fails loud (never hangs).
@@ -61,133 +78,65 @@ GENERATION_TIMEOUT = int(os.environ.get("SPACECRAFT_GENERATION_TIMEOUT", "300"))
 POLL_INTERVAL = 5
 MAX_POLL_ITERATIONS = max(1, GENERATION_TIMEOUT // POLL_INTERVAL)
 
-# ---------------------------------------------------------------------------
-# Guidance hints — prescriptive DSL structure
-# ---------------------------------------------------------------------------
-
-GUIDANCE_HINTS = [
-    (
-        "Use these EXACT field keys from Appendix A of the Act: "
-        "space.crew.species (Sort.ENUM: Human, Vogon, Magrathean, Betelgeusian, Dolphin), "
-        "space.crew.age (Sort.INT), "
-        "space.crew.flight_hours (Sort.INT), "
-        "space.crew.has_pilot_license (Sort.BOOL), "
-        "space.crew.has_gaa_exam (Sort.BOOL), "
-        "space.crew.has_approved_provider_cert (Sort.BOOL), "
-        "space.crew.has_radiation_cert (Sort.BOOL), "
-        "space.crew.has_towel (Sort.BOOL), "
-        "space.medical.cert_valid (Sort.BOOL), "
-        "space.mission.type (Sort.ENUM: orbital, suborbital, lunar), "
-        "space.vessel.propulsion_type (Sort.ENUM: ion, fusion, bistromatic, conventional)"
-    ),
-    "Generate FieldDefinition and Criterion objects. Use ONLY the group names listed below — do NOT invent additional groups.",
-    (
-        "Vogon species disqualified (group='species_check'): "
-        "Op(NE, [FieldRef(key='space.crew.species'), Const(sort=Sort.ENUM, value='Vogon')])"
-    ),
-    (
-        "Flight readiness (group='flight_readiness'): SINGLE Criterion using "
-        "Op(OR, [Op(GE, [FieldRef(key='space.crew.age'), Const(sort=Sort.INT, value=60)]), "
-        "Op(AND, [Op(GE, [FieldRef(key='space.crew.flight_hours'), Const(sort=Sort.INT, value=500)]), "
-        "Op(EQ, [FieldRef(key='space.crew.has_pilot_license'), Const(sort=Sort.BOOL, value=True)])])]). "
-        "Age >= 60 is an exemption alternative, NOT a separate group."
-    ),
-    (
-        "Medical certification (group='medical_certification'): two Criterion objects "
-        "in the SAME group (OR'd): route A = has_gaa_exam EQ True, "
-        "route B = has_approved_provider_cert EQ True"
-    ),
-    "Medical cert validity (group='medical_cert_validity'): space.medical.cert_valid EQ True",
-    (
-        "Radiation for orbital missions (group='radiation_cert'): SINGLE Criterion using "
-        "Op(IMPLIES, [Op(EQ, [FieldRef(key='space.mission.type'), Const(sort=Sort.ENUM, value='orbital')]), "
-        "Op(EQ, [FieldRef(key='space.crew.has_radiation_cert'), Const(sort=Sort.BOOL, value=True)])]). "
-        "Non-orbital missions do NOT need radiation cert."
-    ),
-    "Towel required (group='towel_compliance'): space.crew.has_towel EQ True",
-    (
-        "IMPORTANT: Do NOT create separate groups or criteria for Section 6 exception "
-        "levels (A/B/C). The three-level exception chain (age exempt, orbital override, "
-        "veteran override) is already simplified into the flight_readiness group as an "
-        "OR alternative. Creating separate 'exception_level_a/b/c' groups would make "
-        "them mandatory for ALL applicants, breaking eligibility. Only generate criteria "
-        "for the groups explicitly listed above: species_check, flight_readiness, "
-        "medical_certification, medical_cert_validity, radiation_cert, towel_compliance."
-    ),
-]
 
 # ---------------------------------------------------------------------------
-# Golden test cases — from the Spacecraft Crew Certification Act 2049
+# Pinned fixtures — fetched, verified, and FAIL (never skip) on any problem
 # ---------------------------------------------------------------------------
 
-GOLDEN_CASES: list[tuple[str, dict[str, Any], str]] = [
-    (
-        "Vogon crew member — disqualifying species (Section 3)",
-        {"space.crew.species": "Vogon"},
-        "not_eligible",
-    ),
-    (
-        "No towel — mandatory equipment violation (Section 9)",
+
+def _fetch_pinned(path: str) -> bytes:
+    url = f"https://raw.githubusercontent.com/{EXAMPLES_REPO}/{EXAMPLES_COMMIT}/{path}"
+    try:
+        response = httpx.get(url, timeout=30.0, follow_redirects=True)
+    except httpx.HTTPError as e:
+        pytest.fail(f"Could not fetch pinned example file {url}: {e}")
+    if response.status_code != 200:
+        pytest.fail(f"Could not fetch pinned example file {url}: HTTP {response.status_code}")
+    if not response.content:
+        pytest.fail(f"Pinned example file {url} is empty")
+    return response.content
+
+
+def _load_fixtures(dest: Path) -> dict[str, Any]:
+    act = _fetch_pinned(ACT_PATH)
+    digest = "sha256:" + hashlib.sha256(act).hexdigest()
+    if digest != ACT_SHA256:
+        pytest.fail(f"Act digest mismatch for {ACT_PATH}@{EXAMPLES_COMMIT}: expected {ACT_SHA256}, got {digest}")
+    act_path = dest / "source.md"
+    act_path.write_bytes(act)
+
+    scenarios = (yaml.safe_load(_fetch_pinned(SCENARIOS_PATH)) or {}).get("tests") or []
+    if not scenarios:
+        pytest.fail(f"{SCENARIOS_PATH}@{EXAMPLES_COMMIT} has no scenarios under 'tests'")
+    cases = [
         {
-            "space.crew.species": "Human",
-            "space.crew.flight_hours": 600,
-            "space.crew.has_pilot_license": True,
-            "space.crew.has_gaa_exam": True,
-            "space.medical.cert_valid": True,
-            "space.crew.age": 35,
-            "space.mission.type": "suborbital",
-            "space.crew.has_towel": False,
-        },
-        "not_eligible",
-    ),
-    (
-        "Orbital mission — radiation cert absent (Section 5)",
-        {
-            "space.crew.species": "Human",
-            "space.crew.flight_hours": 600,
-            "space.crew.has_pilot_license": True,
-            "space.crew.has_gaa_exam": True,
-            "space.medical.cert_valid": True,
-            "space.crew.age": 35,
-            "space.mission.type": "orbital",
-            "space.crew.has_radiation_cert": False,
-            "space.crew.has_towel": True,
-        },
-        "not_eligible",
-    ),
-    (
-        "Full compliance — Human, suborbital, all requirements met",
-        {
-            "space.crew.species": "Human",
-            "space.crew.flight_hours": 600,
-            "space.crew.has_pilot_license": True,
-            "space.crew.has_gaa_exam": True,
-            "space.crew.has_approved_provider_cert": True,
-            "space.crew.has_radiation_cert": True,
-            "space.medical.cert_valid": True,
-            "space.crew.age": 35,
-            "space.mission.type": "suborbital",
-            "space.vessel.propulsion_type": "conventional",
-            "space.crew.has_towel": True,
-        },
-        "eligible",
-    ),
-    (
-        "Age exemption — senior crew (age >= 60) exempt from flight readiness (Section 6)",
-        {
-            "space.crew.species": "Human",
-            "space.crew.age": 65,
-            "space.crew.has_gaa_exam": True,
-            "space.crew.has_approved_provider_cert": True,
-            "space.crew.has_radiation_cert": True,
-            "space.medical.cert_valid": True,
-            "space.mission.type": "suborbital",
-            "space.vessel.propulsion_type": "conventional",
-            "space.crew.has_towel": True,
-        },
-        "eligible",
-    ),
-]
+            "name": tc["name"],
+            "field_values": tc["inputs"],
+            "expected_outcome": tc["expect"]["outcome"],
+        }
+        for tc in scenarios
+    ]
+
+    hints = [h for h in (yaml.safe_load(_fetch_pinned(HINTS_PATH)) or {}).get("hints") or [] if h]
+    if not hints:
+        pytest.fail(f"{HINTS_PATH}@{EXAMPLES_COMMIT} has no entries under 'hints'")
+    if not all(isinstance(h, str) for h in hints):
+        pytest.fail(f"{HINTS_PATH}@{EXAMPLES_COMMIT} has a non-string hint; this test uploads plain-text hints only")
+
+    return {"act_path": act_path, "cases": cases, "hints": hints}
+
+
+@pytest.fixture(scope="module")
+def spacecraft_fixtures(tmp_path_factory):
+    return _load_fixtures(tmp_path_factory.mktemp("spacecraft"))
+
+
+def test_pinned_fixtures_fetch_and_verify(spacecraft_fixtures):
+    """Runs without credentials: the pinned Act, scenarios and hints resolve,
+    and the Act is the canonical text."""
+    assert spacecraft_fixtures["act_path"].stat().st_size > 0
+    assert spacecraft_fixtures["cases"]
+    assert spacecraft_fixtures["hints"]
 
 
 # ---------------------------------------------------------------------------
@@ -207,12 +156,9 @@ def _make_client() -> tuple[AethisClient, str]:
 
 
 @pytest.fixture(scope="module")
-def spacecraft_ruleset():
+def spacecraft_ruleset(spacecraft_fixtures):
     """Run the full generate pipeline once, return project/ruleset state."""
     client, base_url = _make_client()
-
-    if not SPACECRAFT_POLICY_PATH.exists():
-        pytest.skip(f"Source doc not found: {SPACECRAFT_POLICY_PATH}")
 
     # 1. Create project
     project = client.create_project(
@@ -223,15 +169,14 @@ def spacecraft_ruleset():
     pid = project["project_id"]
 
     # 2. Upload source document
-    client.upload_sources(pid, [SPACECRAFT_POLICY_PATH])
+    client.upload_sources(pid, [spacecraft_fixtures["act_path"]])
 
-    # 3. Add guidance hints
-    for hint in GUIDANCE_HINTS:
+    # 3. Add the maintained example's guidance hints
+    for hint in spacecraft_fixtures["hints"]:
         client.add_guidance(pid, hint)
 
-    # 4. Add golden test cases
-    test_cases = [{"name": name, "field_values": fv, "expected_outcome": outcome} for name, fv, outcome in GOLDEN_CASES]
-    client.add_tests(pid, test_cases)
+    # 4. Add the maintained example's test scenarios
+    client.add_tests(pid, spacecraft_fixtures["cases"])
 
     # 5. Trigger generation
     client.generate(pid)
@@ -254,6 +199,7 @@ def spacecraft_ruleset():
                 "project_id": pid,
                 "ruleset_id": ruleset_id,
                 "client": client,
+                "cases": spacecraft_fixtures["cases"],
             }
 
         if job_status == "failed":
@@ -296,87 +242,20 @@ class TestSpacecraftGeneration:
 
 
 class TestSpacecraftDecisions:
-    """Verify known outcomes via the /decide endpoint."""
+    """Verify every maintained scenario's outcome via the /decide endpoint."""
 
-    def test_vogon_not_eligible(self, spacecraft_ruleset):
+    def test_every_scenario_decides_as_expected(self, spacecraft_ruleset):
         client = spacecraft_ruleset["client"]
-        result = client.decide(spacecraft_ruleset["ruleset_id"], {"space.crew.species": "Vogon"})
-        assert result["decision"] == "not_eligible", f"Vogon should be not_eligible, got {result['decision']}"
-
-    def test_full_compliance_eligible(self, spacecraft_ruleset):
-        client = spacecraft_ruleset["client"]
-        result = client.decide(
-            spacecraft_ruleset["ruleset_id"],
-            {
-                "space.crew.species": "Human",
-                "space.crew.flight_hours": 600,
-                "space.crew.has_pilot_license": True,
-                "space.crew.has_gaa_exam": True,
-                "space.crew.has_approved_provider_cert": True,
-                "space.crew.has_radiation_cert": True,
-                "space.medical.cert_valid": True,
-                "space.crew.age": 35,
-                "space.mission.type": "suborbital",
-                "space.vessel.propulsion_type": "conventional",
-                "space.crew.has_towel": True,
-            },
+        mismatches = []
+        for case in spacecraft_ruleset["cases"]:
+            result = client.decide(spacecraft_ruleset["ruleset_id"], case["field_values"])
+            if result["decision"] != case["expected_outcome"]:
+                mismatches.append(
+                    f"  [{case['name']}]: expected={case['expected_outcome']}, actual={result['decision']}"
+                )
+        assert not mismatches, f"{len(mismatches)}/{len(spacecraft_ruleset['cases'])} scenarios decided wrongly:\n" + (
+            "\n".join(mismatches)
         )
-        assert result["decision"] == "eligible", f"Full compliance should be eligible, got {result['decision']}"
-
-    def test_no_towel_not_eligible(self, spacecraft_ruleset):
-        client = spacecraft_ruleset["client"]
-        result = client.decide(
-            spacecraft_ruleset["ruleset_id"],
-            {
-                "space.crew.species": "Human",
-                "space.crew.flight_hours": 600,
-                "space.crew.has_pilot_license": True,
-                "space.crew.has_gaa_exam": True,
-                "space.medical.cert_valid": True,
-                "space.crew.age": 35,
-                "space.mission.type": "suborbital",
-                "space.crew.has_towel": False,
-            },
-        )
-        assert result["decision"] == "not_eligible", f"No towel should be not_eligible, got {result['decision']}"
-
-    def test_orbital_no_radiation_not_eligible(self, spacecraft_ruleset):
-        client = spacecraft_ruleset["client"]
-        result = client.decide(
-            spacecraft_ruleset["ruleset_id"],
-            {
-                "space.crew.species": "Human",
-                "space.crew.flight_hours": 600,
-                "space.crew.has_pilot_license": True,
-                "space.crew.has_gaa_exam": True,
-                "space.medical.cert_valid": True,
-                "space.crew.age": 35,
-                "space.mission.type": "orbital",
-                "space.crew.has_radiation_cert": False,
-                "space.crew.has_towel": True,
-            },
-        )
-        assert result["decision"] == "not_eligible", (
-            f"Orbital + no radiation cert should be not_eligible, got {result['decision']}"
-        )
-
-    def test_age_exemption_eligible(self, spacecraft_ruleset):
-        client = spacecraft_ruleset["client"]
-        result = client.decide(
-            spacecraft_ruleset["ruleset_id"],
-            {
-                "space.crew.species": "Human",
-                "space.crew.age": 65,
-                "space.crew.has_gaa_exam": True,
-                "space.crew.has_approved_provider_cert": True,
-                "space.crew.has_radiation_cert": True,
-                "space.medical.cert_valid": True,
-                "space.mission.type": "suborbital",
-                "space.vessel.propulsion_type": "conventional",
-                "space.crew.has_towel": True,
-            },
-        )
-        assert result["decision"] == "eligible", f"Age exemption (65) should be eligible, got {result['decision']}"
 
 
 # ---------------------------------------------------------------------------
@@ -390,7 +269,8 @@ class TestSpacecraftTestRun:
     def test_run_returns_results(self, spacecraft_ruleset):
         client = spacecraft_ruleset["client"]
         result = client.run_tests(spacecraft_ruleset["project_id"])
-        assert result["total"] >= 5, f"Expected ≥5 test cases, got {result['total']}"
+        expected = len(spacecraft_ruleset["cases"])
+        assert result["total"] == expected, f"Expected {expected} test cases, got {result['total']}"
 
     def test_pass_rate_at_least_80_percent(self, spacecraft_ruleset):
         """Binding assertion: ≥80% of golden cases must pass via /test-run."""

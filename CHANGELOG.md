@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.39.2 (2026-09-24)
+
+- **chore(examples): retire the bundled spacecraft example in favour of the
+  maintained one.** `examples/spacecraft-crew-rules/` is removed: its copy of
+  the Spacecraft Crew Certification Act had drifted from the canonical text.
+  The README now points at the maintained example in
+  [Aethis-ai/aethis-examples](https://github.com/Aethis-ai/aethis-examples/tree/main/spacecraft-crew-certification).
+- **test(e2e): the spacecraft authoring e2e really runs.** It previously pointed
+  at a file path that did not exist and skipped silently. It now fetches the
+  Act, the scenarios and the guidance hints from the maintained example at a
+  pinned commit, verifies the Act's digest, and fails (never skips) when a
+  fetch fails or the digest does not match. Its own hard-coded guidance and
+  test cases are removed; every maintained scenario is checked via `decide`.
+
 ## 0.39.1 (2026-09-15)
 
 - **fix(generate): preserve structured authored field notes on generation
