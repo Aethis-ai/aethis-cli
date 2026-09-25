@@ -18,9 +18,10 @@ from __future__ import annotations
 
 from typing import Any
 
-# Bidirectional embeddings, overrides, isolates and marks: they reorder how the
-# surrounding text is displayed.
-_BIDI = frozenset([0x061C, 0x200E, 0x200F, *range(0x202A, 0x202F), *range(0x2066, 0x206A)])
+# Bidirectional embeddings, overrides, isolates and marks (they reorder how the
+# surrounding text is displayed), plus the Unicode line and paragraph
+# separators U+2028/U+2029 (some terminals and viewers break the line on them).
+_BIDI = frozenset([0x061C, 0x200E, 0x200F, 0x2028, 0x2029, *range(0x202A, 0x202F), *range(0x2066, 0x206A)])
 
 
 def _escape(ch: str) -> str:
@@ -33,7 +34,9 @@ def safe_text(value: Any) -> str:
 
     Newlines, carriage returns and tabs become a space, so a field cannot start
     a line of its own. C0 controls, DEL, C1 controls (U+0080-U+009F) and
-    bidirectional controls become a visible ``\\xNN`` / ``\\uNNNN`` escape.
+    bidirectional controls, U+2028/U+2029 and lone surrogates (U+D800-U+DFFF,
+    which a JSON ``\\ud800`` decodes to and UTF-8 output cannot encode) become a
+    visible ``\\xNN`` / ``\\uNNNN`` escape.
     """
     if value is None:
         return ""
@@ -43,7 +46,7 @@ def safe_text(value: Any) -> str:
         code = ord(ch)
         if ch in "\n\r\t":
             out.append(" ")
-        elif code < 0x20 or code == 0x7F or 0x80 <= code <= 0x9F or code in _BIDI:
+        elif code < 0x20 or code == 0x7F or 0x80 <= code <= 0x9F or code in _BIDI or 0xD800 <= code <= 0xDFFF:
             out.append(_escape(ch))
         else:
             out.append(ch)

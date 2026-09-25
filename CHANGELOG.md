@@ -18,7 +18,8 @@
   - Responses without these fields print exactly what they printed before.
   - Question and warning text comes from uploaded sources and model output. It
     is never interpreted as terminal markup, and terminal control characters in
-    it (escape sequences, C1 controls, bidirectional overrides) are shown as
+    it (escape sequences, C1 controls, bidirectional overrides, Unicode line
+    separators, lone surrogates) are shown as
     visible escapes such as `\x1b`; embedded line breaks become spaces.
 
 ## 0.39.2 (2026-09-24)

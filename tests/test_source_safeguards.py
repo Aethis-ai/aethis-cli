@@ -477,3 +477,24 @@ def test_sanitiser_escapes_visibly_and_fails_closed():
     assert safe_text(42) == "42"
     assert safe_text({"k": "\x1b"}) == "{'k': '\\x1b'}"  # coerced, then sanitised
     assert safe_text("plain [bold] text — £ é 漢") == "plain [bold] text — £ é 漢"
+
+
+def test_lone_surrogates_are_escaped_not_crashed_on(monkeypatch):
+    """A JSON ``\\ud800`` decodes to a lone surrogate, which UTF-8 cannot encode.
+
+    Unescaped, printing it raises UnicodeEncodeError after the publish has
+    already succeeded — a traceback that invites a second publish.
+    """
+    from aethis_cli._terminal_safe import safe_text
+
+    decoded = json.loads('"a\\ud800b\\udfffc"')
+    assert safe_text(decoded) == "a\\ud800b\\udfffc"
+    questions = [{"id": decoded, "clauses": [{"citation_key": "k", "quote": decoded}], "kind": "gap"}]
+    out = _forced_terminal_output(monkeypatch, lambda: render_source_questions(questions))
+    out.encode("utf-8")  # raises on a lone surrogate
+
+
+def test_unicode_line_and_paragraph_separators_are_escaped():
+    from aethis_cli._terminal_safe import safe_text
+
+    assert safe_text("a b c") == "a\\u2028b\\u2029c"
