@@ -375,3 +375,105 @@ def test_generate_output_is_unchanged_without_safeguards(tmp_path, monkeypatch, 
         publish_response=_with_silent_safeguards(published, "not_run"),
     )
     assert silent == baseline
+
+
+# ---------------------------------------------------------------------------
+# Terminal control sequences — markup escaping is not enough
+# ---------------------------------------------------------------------------
+
+# Each of these reaches a real terminal as a command, not as text: clear the
+# screen, a hidden hyperlink (OSC 8), a window-title write (OSC 0), a C1 CSI,
+# and a right-to-left override that visually reorders what follows.
+HOSTILE = (
+    "\x1b[2J",
+    "\x1b]8;;http://evil.example\x1b\\click\x1b]8;;\x1b\\",
+    "\x1b]0;title\x07",
+    "\x9b2J",
+    "‮",
+    "⁦",
+    "‏",
+    "\x7f",
+)
+FAKE_LINE = "\nSource check: 0 warnings"
+
+
+def _hostile(tag: str) -> str:
+    return tag + "".join(HOSTILE) + FAKE_LINE
+
+
+def _forced_terminal_output(monkeypatch, fn) -> str:
+    """Render through a console that believes it is a real terminal."""
+    import io
+
+    from rich.console import Console
+
+    from aethis_cli import source_safeguards
+
+    buf = io.StringIO()
+    term = Console(file=buf, force_terminal=True, color_system="truecolor", width=400)
+    monkeypatch.setattr(source_safeguards, "console", term)
+    fn()
+    return buf.getvalue()
+
+
+def _strip_our_own_styling(out: str) -> str:
+    # Rich's own SGR colour codes (ESC [ ... m) are ours; strip exactly those
+    # so any ESC that remains came from the payload.
+    return re.sub(r"\x1b\[[0-9;]*m", "", out)
+
+
+def _assert_inert(out: str) -> None:
+    body = _strip_our_own_styling(out)
+    for seq in ("\x1b", "\x9b", "\x07", "\x7f", "‮", "⁦", "‏"):
+        assert seq not in body, f"raw {seq!r} reached the terminal:\n{body!r}"
+    # The injected newline must not start a line of its own.
+    assert not any(line.lstrip().startswith("Source check: 0 warnings") for line in body.splitlines())
+
+
+def test_question_fields_cannot_drive_the_terminal(monkeypatch):
+    questions = [
+        {
+            "id": _hostile("sq"),
+            "clauses": [{"citation_key": _hostile("key"), "quote": _hostile("quote")}],
+            "kind": _hostile("conflict"),
+            "readings": ["a", "b"],
+            "provisional_reading": _hostile("reading"),
+            "affected_criteria": [_hostile("crit")],
+            "inherited_from": _hostile("rs"),
+        }
+    ]
+    out = _forced_terminal_output(monkeypatch, lambda: render_source_questions(questions))
+    _assert_inert(out)
+    assert "quote" in out and "reading" in out  # the text itself still prints
+
+
+def test_warning_fields_cannot_drive_the_terminal(monkeypatch):
+    check = {
+        "status": "warnings",
+        "warnings": [
+            {
+                "kind": "mismatch",
+                "citation_key": _hostile("key"),
+                "source_id": _hostile("src"),
+                "stamped_digest": _hostile("sha256:aa"),
+                "cited_digest": _hostile("sha256:bb"),
+            },
+            {"kind": _hostile("future"), _hostile("field"): _hostile("value")},
+        ],
+    }
+    out = _forced_terminal_output(monkeypatch, lambda: render_source_check(check))
+    _assert_inert(out)
+    assert "sha256:aa" in out and "future" in out
+
+
+def test_sanitiser_escapes_visibly_and_fails_closed():
+    from aethis_cli._terminal_safe import safe_text
+
+    assert safe_text("a\x1b[2Jb") == "a\\x1b[2Jb"
+    assert safe_text("x‮y") == "x\\u202ey"
+    assert safe_text("x\x9by") == "x\\x9by"
+    assert safe_text("one\ntwo\r\tthree") == "one two  three"
+    assert safe_text(None) == ""
+    assert safe_text(42) == "42"
+    assert safe_text({"k": "\x1b"}) == "{'k': '\\x1b'}"  # coerced, then sanitised
+    assert safe_text("plain [bold] text — £ é 漢") == "plain [bold] text — £ é 漢"

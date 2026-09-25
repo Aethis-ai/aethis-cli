@@ -13,9 +13,11 @@ Both are optional on every response: an engine that predates them, or a
 response with nothing to report, prints nothing new here.
 
 Everything printed from these fields is text the engine derived from uploaded
-sources or model output. It is printed plainly and NEVER parsed as Rich
-markup — a quote containing ``[bold]`` or ``[/]`` would otherwise be eaten or
-restyle the terminal.
+sources or model output. Every such line goes through ``_plain``, the one
+print boundary here, which (1) sanitises terminal control characters with
+``safe_text`` — escape sequences, C1 controls, bidirectional overrides and
+embedded newlines — and (2) prints the result as a ``Text``, so Rich markup
+such as ``[bold]`` or ``[/]`` is shown rather than interpreted.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from typing import Any, Optional
 
 from rich.text import Text
 
+from aethis_cli._terminal_safe import safe_text
 from aethis_cli.output import console
 
 # Statuses that have something to say. ``ok`` and ``not_run`` are silent,
@@ -32,8 +35,8 @@ _REPORTED_CHECK_STATUSES = ("warnings", "error")
 
 
 def _plain(text: str, *, style: str = "") -> None:
-    """Print untrusted text verbatim: no markup, no auto-highlighting."""
-    console.print(Text(text, style=style), highlight=False)
+    """Print untrusted text: control characters escaped, no markup, no highlighting."""
+    console.print(Text(safe_text(text), style=style), highlight=False)
 
 
 def _str(value: Any) -> str:
