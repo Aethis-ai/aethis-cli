@@ -5,7 +5,10 @@
 - Add per-run `--model` to `generate` and `refine`: Sonnet 5 remains the default;
   `deepseek-flash` uses `DEEPSEEK_API_KEY` (or `deepseek_key_env` in aethis.yaml).
   The DeepSeek key is sent only on the generation request. Requires engine support.
-  Draft: live DeepSeek authoring validation remains outstanding.
+  Live DeepSeek provider, token counting and authoring were validated;
+  the installed command against the deployed API was not. Requires the
+  matching engine release.
+
 ## 0.40.2 (2026-09-27)
 
 - **ci: the post-publish unstick step queries every downstream repository at

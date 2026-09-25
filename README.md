@@ -125,8 +125,8 @@ Generation and refinement accept `--model claude-sonnet-5` (the default) or
 `--model deepseek-flash`. For DeepSeek, set `DEEPSEEK_API_KEY`; an alternative
 environment variable name can be configured with `deepseek_key_env` in
 `aethis.yaml`. The DeepSeek credential is sent only with generation.
-This option requires an engine supporting model selection; live DeepSeek
-validation is still pending for this draft release.
+This option requires an engine supporting model selection. Live-provider
+validation has passed; the matching engine and CLI releases are still pending.
 
 ## Commands
 
