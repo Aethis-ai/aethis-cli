@@ -42,6 +42,7 @@ class ProjectConfig:
     base_url: str = DEFAULT_BASE_URL
     project_id: Optional[str] = None
     config_path: Path = field(default_factory=lambda: Path.cwd())
+    deepseek_key_env: str = "DEEPSEEK_API_KEY"
 
 
 def resolve_base_url_with_source() -> tuple[str, str]:
@@ -208,6 +209,7 @@ def load_project_config(path: Optional[Path] = None) -> ProjectConfig:
         project=raw["project"],
         api_key_env=raw.get("api_key_env", "AETHIS_API_KEY"),
         anthropic_key_env=raw.get("anthropic_key_env", "ANTHROPIC_API_KEY"),
+        deepseek_key_env=raw.get("deepseek_key_env", "DEEPSEEK_API_KEY"),
         base_url=base_url,
         project_id=project_id,
         config_path=project_dir,
@@ -450,3 +452,8 @@ def set_active_profile(name: str) -> None:
     creds = load_credentials()
     creds["active_profile"] = name
     save_credentials(creds)
+
+
+def resolve_deepseek_key(config: ProjectConfig) -> Optional[str]:
+    """Read the generation-only DeepSeek credential from the configured env var."""
+    return os.environ.get(config.deepseek_key_env) or None
