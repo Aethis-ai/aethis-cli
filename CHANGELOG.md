@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.40.0 (2026-09-25)
+
+- **feat: print the source check and source questions.** `aethis publish`,
+  `aethis rulesets promote-to-live`, `aethis generate --poll` and
+  `aethis status` now print two warn-only fields when the engine returns them.
+  - `source_check` compares the bytes each citation resolves to at publish
+    with the bytes the ruleset was generated from. The CLI prints it when the
+    status is `warnings` or `error`: each `mismatch` with both digests, each
+    `unverifiable` citation, and `no_authoring_inputs_recorded`. An `ok` or
+    `not_run` check prints nothing.
+  - `source_questions` lists conflicting, ambiguous or missing source text that
+    authoring raised rather than resolving silently. The CLI prints a count and,
+    for each question, its kind, the quoted clauses, the provisional reading the
+    ruleset uses, the affected criteria and, for a refine, the ruleset it was
+    inherited from.
+  - Responses without these fields print exactly what they printed before.
+  - Question and warning text comes from uploaded sources and model output. It
+    is never interpreted as terminal markup, and terminal control characters in
+    it (escape sequences, C1 controls, bidirectional overrides, Unicode line
+    separators, lone surrogates) are shown as
+    visible escapes such as `\x1b`; embedded line breaks become spaces.
+
 ## 0.39.2 (2026-09-24)
 
 - **chore(examples): retire the bundled spacecraft example in favour of the

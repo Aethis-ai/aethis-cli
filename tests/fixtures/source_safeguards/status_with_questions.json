@@ -1,0 +1,24 @@
+{
+  "project_status": "ready",
+  "job": {
+    "job_id": "job_1",
+    "status": "success",
+    "progress_percent": 100,
+    "result_ruleset_id": "rs_new",
+    "source_question_count": 1,
+    "source_question_turns": 1
+  },
+  "latest_ruleset_id": "rs_new",
+  "test_results": null,
+  "source_questions": [
+    {
+      "id": "sq_3",
+      "clauses": [{"citation_key": "src_act#section-2", "quote": "\"crew\" includes passengers"}],
+      "kind": "gap",
+      "readings": ["passengers are crew", "passengers are not crew"],
+      "provisional_reading": "passengers count as crew only for Section 2",
+      "affected_criteria": ["crit_crew"],
+      "inherited_from": null
+    }
+  ]
+}

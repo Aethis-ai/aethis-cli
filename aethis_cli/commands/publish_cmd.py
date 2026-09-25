@@ -10,6 +10,7 @@ import typer
 from aethis_cli.config import load_project_config, make_authed_client, resolve_api_key
 from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel, success, warn
+from aethis_cli.source_safeguards import render_source_safeguards
 from aethis_cli.source_targets import (
     SourceTargetsError,
     load_source_targets,
@@ -293,3 +294,4 @@ def publish(
             f"{result['rulebook_id']} {result.get('ruleset_name')} "
             f"{result.get('ruleset_id')}[/dim]"
         )
+    render_source_safeguards(result)

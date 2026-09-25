@@ -24,6 +24,7 @@ from aethis_cli.config import (
 from aethis_cli.errors import AethisAPIError, ConfigError
 from aethis_cli.generation_status import format_poll_description
 from aethis_cli.output import console, error_panel, info, render_transport_error, success, warn
+from aethis_cli.source_safeguards import render_source_safeguards
 
 
 def _chunks(lst: list, n: int):
@@ -1377,6 +1378,10 @@ def _poll_until_done(
                 # stays as the fallback because engines that record nothing on
                 # the job still have to yield something usable.
                 ruleset_id = _resolved_ruleset_id(result)
+                # The status payload the source questions are read from: the
+                # engine attaches them only once the job names its ruleset, so
+                # keep the latest one the re-poll below fetches.
+                terminal = result
                 # The engine can report success a beat before either id is
                 # populated. Re-poll briefly so the state write — and the
                 # `fields pull` / field-diff steps that read it — don't miss it.
@@ -1385,7 +1390,8 @@ def _poll_until_done(
                         break
                     time.sleep(2)
                     try:
-                        ruleset_id = _resolved_ruleset_id(client.get_status(pid))
+                        terminal = client.get_status(pid)
+                        ruleset_id = _resolved_ruleset_id(terminal)
                     except httpx.HTTPError:
                         # Strictly worse than the reported case if it escaped:
                         # the job has already reported success, so raising here
@@ -1419,10 +1425,12 @@ def _poll_until_done(
                             "Done! Ruleset generated and left unpublished (--no-publish) — run "
                             "'aethis status' to get its id, then 'aethis publish' to activate it."
                         )
+                    render_source_safeguards(terminal)
                     return GenerationOutcome("success", ruleset_id, job.get("value_spaces_resolved"))
                 # Auto-publish so the ruleset is immediately usable
+                published = None
                 try:
-                    client.publish(pid)
+                    published = client.publish(pid)
                     if ruleset_id:
                         success(f"Done! Ruleset published: {ruleset_id}")
                     else:
@@ -1441,11 +1449,17 @@ def _poll_until_done(
                         success(f"Done! Ruleset: {ruleset_id} (run 'aethis publish' to activate)")
                     else:
                         success("Done! Ruleset generated (run 'aethis publish' to activate).")
+                # The publish response carries the source check and repeats the
+                # questions; print the questions once, from the publish when it
+                # answered and from the status otherwise.
+                has_questions = isinstance(published, dict) and "source_questions" in published
+                render_source_safeguards(published, questions_from=published if has_questions else terminal)
                 return GenerationOutcome("success", ruleset_id, job.get("value_spaces_resolved"))
 
             if job_status == "failed":
                 console.print()
                 console.print(f"[bold red]Generation failed:[/bold red] {job.get('error_message', 'unknown error')}")
+                render_source_safeguards(result)
                 # Whatever draft the engine attached to the failed job — today
                 # usually nothing, since result_ruleset_id is written only on
                 # its success paths. Read it rather than assume: if the engine

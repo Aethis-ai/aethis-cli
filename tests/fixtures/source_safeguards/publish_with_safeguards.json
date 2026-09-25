@@ -1,0 +1,45 @@
+{
+  "message": "Ruleset published successfully",
+  "ruleset_id": "rs_pub_1",
+  "status": "active",
+  "version": 3,
+  "deprecated_rulesets": ["rs_pub_0"],
+  "slug": null,
+  "source_check": {
+    "status": "warnings",
+    "warnings": [
+      {
+        "kind": "mismatch",
+        "citation_key": "src_act#section-6",
+        "source_id": "src_act",
+        "stamped_digest": "sha256:71a97144aa1c0e1f43d1ae1a1a1f7c5b1b2c3d4e5f60718293a4b5c6d7e8f901",
+        "cited_digest": "sha256:303eed8e4cc051601e46f72be2531a428ea29d254df8e9226d150e5a2e820113"
+      },
+      {"kind": "unverifiable", "citation_key": "src_legacy#s2", "source_id": "src_legacy"},
+      {"kind": "no_authoring_inputs_recorded"}
+    ]
+  },
+  "source_questions": [
+    {
+      "id": "sq_1",
+      "clauses": [
+        {"citation_key": "src_act#section-6", "quote": "a crew member must hold a valid certificate"},
+        {"citation_key": "src_act#section-9", "quote": "no certificate is required for training flights"}
+      ],
+      "kind": "conflict",
+      "readings": ["Section 9 excepts training flights", "Section 6 applies to all flights"],
+      "provisional_reading": "Section 9 excepts training flights from Section 6",
+      "affected_criteria": ["crit_certificate"],
+      "inherited_from": null
+    },
+    {
+      "id": "sq_2",
+      "clauses": [{"citation_key": "src_act#section-4", "quote": "a reasonable period"}],
+      "kind": "ambiguity",
+      "readings": ["30 days", "90 days"],
+      "provisional_reading": "30 days",
+      "affected_criteria": [],
+      "inherited_from": "rs_seed_7"
+    }
+  ]
+}
