@@ -1,4 +1,5 @@
 """Per-generation model and credential boundaries."""
+
 from __future__ import annotations
 
 import json
