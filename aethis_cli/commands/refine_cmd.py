@@ -7,10 +7,12 @@ from typing import Optional
 
 import typer
 
+from aethis_cli.client import GenerationModel
 from aethis_cli.commands.generate_cmd import _run_generate
 
 
 def refine(
+    model: Optional[GenerationModel] = typer.Option(None, "--model", help="Authoring model (default: claude-sonnet-5)"),
     hint: Optional[str] = typer.Option(None, "--hint", help="Guidance hint to add before refining"),
     project_id: Optional[str] = typer.Option(None, "--project-id", "-p"),
     seed_ruleset_id: Optional[str] = typer.Option(
@@ -33,4 +35,5 @@ def refine(
         mode="refine",
         seed_ruleset_id=seed_ruleset_id,
         extra_hint=hint,
+        model=model,
     )
