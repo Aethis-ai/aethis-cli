@@ -22,6 +22,7 @@ from aethis_cli.errors import AethisAPIError, ConfigError
 from aethis_cli.generation_status import format_heartbeat, format_progress_detail
 from aethis_cli.output import console, error_panel
 from aethis_cli.render import emit, is_json_requested
+from aethis_cli.source_safeguards import render_source_safeguards
 
 
 STATUS_HELP = """
@@ -212,6 +213,7 @@ def _print_generation_section(project_id: str) -> None:
     bid = result.get("latest_ruleset_id")
     if bid:
         console.print(f"  Ruleset:  {bid}")
+    render_source_safeguards(result)
 
 
 def _emit_json_status(project_id: Optional[str]) -> None:

@@ -23,6 +23,7 @@ from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel, success, warn
 from aethis_cli.prompts import confirm_or_abort
 from aethis_cli.render import emit, is_json_requested
+from aethis_cli.source_safeguards import render_source_safeguards
 
 rulesets_app = typer.Typer(
     name="rulesets",
@@ -361,6 +362,7 @@ def promote_ruleset(
     if prior:
         console.print(f"  prior live archived: [dim]{prior}[/dim]")
     console.print(f"  cut reason: [dim]{resp.get('cut_reason')}[/dim]")
+    render_source_safeguards(resp)
 
 
 def _build_ruleset_graph_nodes_table(nodes: list[dict], title: str) -> Table:
