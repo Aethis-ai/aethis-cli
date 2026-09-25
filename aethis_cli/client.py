@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -21,6 +22,13 @@ KeyRefreshCallback = Callable[..., str]
 # True/False (asked, got an answer) and None (asked, could not tell) — the
 # three states a capability probe genuinely has.
 _UNPROBED = object()
+
+
+class GenerationModel(str, Enum):
+    """Supported per-generation authoring models."""
+
+    sonnet = "claude-sonnet-5"
+    deepseek = "deepseek-flash"
 
 
 class AethisClient:
@@ -439,6 +447,9 @@ class AethisClient:
         project_id: str,
         mode: Optional[str] = None,
         seed_ruleset_id: Optional[str] = None,
+        *,
+        model: Optional[GenerationModel] = None,
+        deepseek_key: Optional[str] = None,
     ) -> dict:
         """Trigger generation. ``mode="refine"`` seeds from the section's active
         ruleset and makes the minimal edit to fix failing tests; omitting ``mode``
@@ -450,7 +461,16 @@ class AethisClient:
             body["mode"] = mode
         if seed_ruleset_id is not None:
             body["seed_ruleset_id"] = seed_ruleset_id
-        kwargs = {"json": body} if body else {}
+        if model is not None:
+            body["model"] = GenerationModel(model).value
+        if deepseek_key and model != GenerationModel.deepseek:
+            raise ValueError("A DeepSeek key requires model=deepseek-flash")
+        kwargs: dict[str, Any] = {"json": body} if body else {}
+        if model == GenerationModel.deepseek:
+            if self._client.headers.get("X-Anthropic-Key"):
+                raise ValueError("Use a client without an Anthropic key for DeepSeek generation")
+            if deepseek_key:
+                kwargs["headers"] = {"X-DeepSeek-Key": deepseek_key}
         return self._request("POST", f"/api/v1/public/projects/{project_id}/generate", **kwargs)
 
     def get_status(self, project_id: str) -> dict:

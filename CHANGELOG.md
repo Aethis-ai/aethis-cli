@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.41.0 (unreleased)
+
+- Add per-run `--model` to `generate` and `refine`: Sonnet 5 remains the default;
+  `deepseek-flash` uses `DEEPSEEK_API_KEY` (or `deepseek_key_env` in aethis.yaml).
+  The DeepSeek key is sent only on the generation request. Requires engine support.
+  Live-provider validation passed; requires the matching engine release.
+
 ## 0.40.0 (2026-09-25)
 
 - **feat: print the source check and source questions.** `aethis publish`,
