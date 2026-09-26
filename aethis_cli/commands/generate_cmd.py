@@ -5,13 +5,16 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, NamedTuple, Optional
 
 import httpx
+import rfc8785
 import typer
 import yaml
-import rfc8785
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 
 from aethis_cli.client import AethisClient, GenerationModel
@@ -39,13 +42,20 @@ class _UniqueKeyLoader(yaml.SafeLoader):
 
 
 def _unique_mapping(loader: yaml.SafeLoader, node: yaml.MappingNode, deep: bool = False) -> dict:
-    mapping: dict = {}
+    # Check only keys written in this mapping before applying YAML's standard
+    # merge-key expansion.  ``flatten_mapping`` deliberately places inherited
+    # keys before explicit ones so explicit values can override an anchor; a
+    # duplicate check after flattening would reject that valid legacy shape.
+    explicit: set[Any] = set()
     for key_node, value_node in node.value:
+        if key_node.tag == "tag:yaml.org,2002:merge":
+            continue
         key = loader.construct_object(key_node, deep=deep)
-        if key in mapping:
+        if key in explicit:
             raise yaml.YAMLError(f"duplicate key {key!r}")
-        mapping[key] = loader.construct_object(value_node, deep=deep)
-    return mapping
+        explicit.add(key)
+    loader.flatten_mapping(node)
+    return loader.construct_mapping(node, deep=deep)
 
 
 _UniqueKeyLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _unique_mapping)
@@ -110,12 +120,14 @@ def _normalise_test_cases(cases: Any, path: str, *, yaml_shape: bool) -> list[di
         case_path = f"{path}[{index}]"
         if not isinstance(case, dict):
             raise AcceptanceContractError(f"{case_path} must be an object")
-        allowed = (
-            {"name", "inputs", "expect"} if yaml_shape else {"name", "field_values", "expected_outcome", "expectations"}
-        )
-        unknown = set(case) - allowed
-        if unknown:
-            raise AcceptanceContractError(f"{case_path} contains unsupported key(s): {', '.join(sorted(unknown))}")
+        # Legacy scenarios have always allowed descriptive case metadata and
+        # projected only name/inputs/expect onto the API request. Preserve that
+        # compatibility. The explicit JSON v1 artefact is strict throughout.
+        if not yaml_shape:
+            allowed = {"name", "field_values", "expected_outcome", "expectations"}
+            unknown = set(case) - allowed
+            if unknown:
+                raise AcceptanceContractError(f"{case_path} contains unsupported key(s): {', '.join(sorted(unknown))}")
         name = case.get("name")
         if not isinstance(name, str) or not name.strip() or name in names:
             raise AcceptanceContractError(f"{case_path}.name must be a unique non-empty string")
@@ -169,11 +181,21 @@ def _normalise_bindings(value: Any) -> dict[str, dict[str, bool | None]]:
 
 
 def _load_acceptance_contract(path: Path) -> dict[str, Any]:
-    if path.stat().st_size > 1_000_000:
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        raise AcceptanceContractError(f"cannot read acceptance contract {path}: {exc}") from exc
+    if size > 1_000_000:
         raise AcceptanceContractError(f"{path} exceeds 1 MB limit")
     try:
-        raw = json.loads(path.read_text(), object_pairs_hook=_json_no_duplicates)
-    except (OSError, json.JSONDecodeError, AcceptanceContractError) as exc:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise AcceptanceContractError(f"acceptance contract {path} must be UTF-8: {exc}") from exc
+    except OSError as exc:
+        raise AcceptanceContractError(f"cannot read acceptance contract {path}: {exc}") from exc
+    try:
+        raw = json.loads(text, object_pairs_hook=_json_no_duplicates)
+    except (json.JSONDecodeError, AcceptanceContractError) as exc:
         raise AcceptanceContractError(f"invalid acceptance contract {path}: {exc}") from exc
     if not isinstance(raw, dict):
         raise AcceptanceContractError("acceptance contract must be a JSON object")
@@ -231,6 +253,125 @@ def _acceptance_contract_digest(contract: dict[str, Any]) -> str:
             f"acceptance contract contains a value outside the RFC 8785 canonical JSON domain: {exc}"
         ) from exc
     return "sha256:" + hashlib.sha256(canonical).hexdigest()
+
+
+@dataclass(frozen=True)
+class _PreparedTestUpload:
+    """Validated test upload frozen before any persistent project mutation.
+
+    ``contract`` is a recursively immutable snapshot of the normalised payload.
+    The upload path thaws that snapshot rather than reading or parsing the
+    source file again, so the values validated before project creation are the
+    values later sent to the engine.
+    """
+
+    origin: str
+    contract: Mapping[str, Any]
+    digest: Optional[str]
+    capability: Optional[bool]
+
+    def materialise(self) -> dict[str, Any]:
+        value = _thaw_json(self.contract)
+        if not isinstance(value, dict):  # construction invariant
+            raise RuntimeError("prepared test upload is not an object")
+        return value
+
+
+def _load_scenarios_contract(project_dir: Path) -> tuple[dict[str, Any], str] | None:
+    """Load the legacy YAML suite while preserving its non-semantic metadata."""
+    tests_path = project_dir / "tests" / "scenarios.yaml"
+    if not tests_path.exists():
+        return None
+    try:
+        size = tests_path.stat().st_size
+    except OSError as exc:
+        raise AcceptanceContractError(f"cannot read scenarios file {tests_path}: {exc}") from exc
+    if size > 1_000_000:
+        raise AcceptanceContractError(f"{tests_path} exceeds 1 MB limit")
+    try:
+        text = tests_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise AcceptanceContractError(f"scenarios file {tests_path} must be UTF-8: {exc}") from exc
+    except OSError as exc:
+        raise AcceptanceContractError(f"cannot read scenarios file {tests_path}: {exc}") from exc
+    try:
+        raw = yaml.load(text, Loader=_UniqueKeyLoader) or {}
+    except yaml.YAMLError as exc:
+        raise AcceptanceContractError(f"invalid YAML in {tests_path}: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise AcceptanceContractError(f"{tests_path} must contain a tests array")
+    if not raw.get("tests"):
+        return None
+    normalised = _normalise_test_cases(raw["tests"], "tests", yaml_shape=True)
+    contract: dict[str, Any] = {"test_cases": normalised}
+    if any("expectations" in case for case in normalised):
+        contract["contract_version"] = 1
+    return contract, tests_path.name
+
+
+def _freeze_json(value: Any) -> Any:
+    if isinstance(value, dict):
+        return MappingProxyType({key: _freeze_json(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return tuple(_freeze_json(item) for item in value)
+    return value
+
+
+def _thaw_json(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _thaw_json(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw_json(item) for item in value]
+    return value
+
+
+def _seal_contract(contract: dict[str, Any]) -> Mapping[str, Any]:
+    """Validate JSON transport and freeze one recursively immutable payload."""
+    try:
+        text = json.dumps(contract, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+        text.encode("utf-8")
+    except (TypeError, ValueError, UnicodeEncodeError) as exc:
+        raise AcceptanceContractError(f"test contract is not valid UTF-8 JSON: {exc}") from exc
+    frozen = _freeze_json(contract)
+    if not isinstance(frozen, Mapping):  # construction invariant
+        raise RuntimeError("test contract did not freeze to an object")
+    return frozen
+
+
+def _prepare_test_upload(
+    client: AethisClient,
+    project_dir: Path,
+    *,
+    acceptance_contract_path: Optional[Path] = None,
+) -> Optional[_PreparedTestUpload]:
+    """Validate, digest and capability-check the planned upload before writes."""
+    if acceptance_contract_path is not None:
+        contract = _load_acceptance_contract(acceptance_contract_path)
+        origin = acceptance_contract_path.name
+    else:
+        loaded = _load_scenarios_contract(project_dir)
+        if loaded is None:
+            return None
+        contract, origin = loaded
+
+    digest: Optional[str] = None
+    if contract.get("contract_version") == 1:
+        digest = _acceptance_contract_digest(contract)
+        capability = client.supports_test_acceptance_contract()
+        if capability is not True:
+            raise AcceptanceContractError(
+                "this engine does not advertise the complete acceptance-contract v1 envelope; "
+                "stopping before replacing tests or changing the project"
+            )
+    else:
+        capability = client.supports_test_replace()
+
+    return _PreparedTestUpload(
+        origin=origin,
+        contract=_seal_contract(contract),
+        digest=digest,
+        capability=capability,
+    )
 
 
 def _strict_json_equal(actual: Any, expected: Any) -> bool:
@@ -1060,6 +1201,14 @@ def _run_generate(
     outcome: Optional[GenerationOutcome] = None
 
     try:
+        # Parse, validate, canonicalise and capability-check the complete test
+        # plan before project creation, guidance, source, field or test writes.
+        # The frozen snapshot is the payload uploaded later in this run.
+        prepared_tests = _prepare_test_upload(
+            client,
+            project_dir,
+            acceptance_contract_path=acceptance_contract,
+        )
         pid = _resolve_or_create_project(client, cfg, project_id)
 
         # Refinement hint (aethis refine --hint): add before regenerating so it
@@ -1104,8 +1253,8 @@ def _run_generate(
         _upload_rulebook_guidance(client, pid, project_dir)
         _upload_field_vocabulary(client, pid, project_dir)
 
-        # Upload test cases
-        _upload_test_cases(client, pid, project_dir, acceptance_contract_path=acceptance_contract)
+        # Upload the exact test payload prepared before any project mutation.
+        _upload_prepared_test_cases(client, pid, prepared_tests)
 
         # Trigger generation
         if mode == "refine":
@@ -1185,7 +1334,26 @@ def _upload_test_cases(
     *,
     acceptance_contract_path: Optional[Path] = None,
 ) -> None:
-    """Upload `tests/scenarios.yaml` as the project's test cases.
+    """Prepare and upload tests for isolated callers and compatibility tests.
+
+    The generate/refine path prepares before all project mutation and calls
+    :func:`_upload_prepared_test_cases` directly. This wrapper retains the
+    existing helper surface for focused upload use.
+    """
+    prepared = _prepare_test_upload(
+        client,
+        project_dir,
+        acceptance_contract_path=acceptance_contract_path,
+    )
+    _upload_prepared_test_cases(client, pid, prepared)
+
+
+def _upload_prepared_test_cases(
+    client: AethisClient,
+    pid: str,
+    prepared: Optional[_PreparedTestUpload],
+) -> None:
+    """Upload one immutable plan already validated before project mutation.
 
     The file is the authoritative suite, so the upload replaces what is on the
     project rather than adding to it. That is not free: uploading the same file
@@ -1193,49 +1361,17 @@ def _upload_test_cases(
     they inflate the denominator of every pass rate, so a run reports a total
     that looks like a result and is partly copies of itself.
 
-    Replacing needs an engine that supports it. Ask the engine rather than
-    assuming, because an engine that does not support it does not say so: it
-    ignores the unknown member and appends, which would restore the duplication
-    with nothing to notice. Where the answer is no — or cannot be read — the
-    upload still happens, and says so.
+    Capability answers are part of ``prepared``. This function performs no
+    filesystem reads, parsing, canonicalisation or capability probes.
     """
-    tests_path = project_dir / "tests" / "scenarios.yaml"
-    contract: dict[str, Any]
-    if acceptance_contract_path is not None:
-        contract = _load_acceptance_contract(acceptance_contract_path)
-        origin = acceptance_contract_path.name
-    else:
-        if not tests_path.exists():
-            return
-        if tests_path.stat().st_size > 1_000_000:
-            console.print(f"[red]{tests_path} exceeds 1 MB limit[/red]")
-            raise typer.Exit(code=1)
-        try:
-            raw = yaml.load(tests_path.read_text(), Loader=_UniqueKeyLoader) or {}
-        except yaml.YAMLError as e:
-            console.print(f"[red]Invalid YAML in {tests_path}: {e}[/red]")
-            raise typer.Exit(code=1) from e
-        if not isinstance(raw, dict) or set(raw) - {"tests"}:
-            raise AcceptanceContractError(f"{tests_path} must contain only a tests array")
-        if not raw.get("tests"):
-            return
-        normalised = _normalise_test_cases(raw["tests"], "tests", yaml_shape=True)
-        contract = {"test_cases": normalised}
-        if any("expectations" in case for case in normalised):
-            contract["contract_version"] = 1
-        origin = tests_path.name
+    if prepared is None:
+        return
 
+    contract = prepared.materialise()
     normalised = contract["test_cases"]
     if contract.get("contract_version") == 1:
-        # Canonicalisation is part of the acceptance boundary.  Validate it
-        # before even the atomic replacement POST: JCS rejects non-finite
-        # floats and integers outside its interoperable domain.
-        digest = _acceptance_contract_digest(contract)
-        if client.supports_test_acceptance_contract() is not True:
-            raise AcceptanceContractError(
-                "this engine does not advertise the complete acceptance-contract v1 envelope; "
-                "stopping before replacing its tests"
-            )
+        if prepared.digest is None or prepared.capability is not True:  # construction invariant
+            raise RuntimeError("acceptance-contract upload was not fully prepared")
         kwargs: dict[str, Any] = {"replace": True, "contract_version": 1}
         if "expected_review_bindings" in contract:
             kwargs["expected_review_bindings"] = contract["expected_review_bindings"]
@@ -1249,7 +1385,7 @@ def _upload_test_cases(
                 readback.get("expected_review_bindings"),
                 contract.get("expected_review_bindings"),
             )
-            or readback.get("authoring_acceptance_contract_digest") != digest
+            or readback.get("authoring_acceptance_contract_digest") != prepared.digest
         ):
             raise AcceptanceContractError(
                 "engine did not return the exact acceptance-contract v1 readback after replacement; "
@@ -1258,11 +1394,12 @@ def _upload_test_cases(
         added = result.get("added", len(normalised))
         replaced = result.get("replaced", 0)
         info(
-            f"Verified acceptance contract: uploaded {added} test case(s) from {origin} — {replaced} replaced ({digest})"
+            f"Verified acceptance contract: uploaded {added} test case(s) from {prepared.origin} — "
+            f"{replaced} replaced ({prepared.digest})"
         )
         return
 
-    supported = client.supports_test_replace()
+    supported = prepared.capability
     if supported:
         result = client.add_tests(pid, normalised, replace=True) or {}
         added = result.get("added", len(normalised))
@@ -1270,7 +1407,7 @@ def _upload_test_cases(
         # The replaced count is the destructive half of an idempotent upload:
         # it is how many cases this run removed from the project. Printed
         # always, including the reassuring zero of a first upload.
-        info(f"Uploaded {added} test case(s) from {tests_path.name} — {replaced} replaced")
+        info(f"Uploaded {added} test case(s) from {prepared.origin} — {replaced} replaced")
         return
 
     client.add_tests(pid, normalised)

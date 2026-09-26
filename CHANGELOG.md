@@ -7,6 +7,9 @@
   project's tests, and refuses to generate unless the engine reads back the
   matching contract digest. `tests/scenarios.yaml` can now carry strict
   per-case expectations and is upgraded to the same contract automatically.
+  Contract parsing, canonicalisation and capability checks finish before any
+  project, guidance or source mutation; legacy YAML merges and descriptive
+  metadata remain compatible.
 
 ## 0.41.0 (unreleased)
 
