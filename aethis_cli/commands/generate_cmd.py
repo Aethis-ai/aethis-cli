@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import time
 from pathlib import Path
-from typing import NamedTuple, Optional
+from typing import Any, NamedTuple, Optional
 
 import httpx
 import typer
 import yaml
+import rfc8785
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 
 from aethis_cli.client import AethisClient, GenerationModel
@@ -26,6 +28,177 @@ from aethis_cli.errors import AethisAPIError, ConfigError
 from aethis_cli.generation_status import format_poll_description
 from aethis_cli.output import console, error_panel, info, render_transport_error, success, warn
 from aethis_cli.source_safeguards import render_source_safeguards
+
+
+class AcceptanceContractError(ValueError):
+    """A local acceptance-contract input cannot safely reach an engine."""
+
+
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """SafeLoader with duplicate mappings rejected before Python loses a key."""
+
+
+def _unique_mapping(loader: yaml.SafeLoader, node: yaml.MappingNode, deep: bool = False) -> dict:
+    mapping: dict = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            raise yaml.YAMLError(f"duplicate key {key!r}")
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+_UniqueKeyLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _unique_mapping)
+
+
+def _json_no_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in out:
+            raise AcceptanceContractError(f"acceptance contract contains duplicate key {key!r}")
+        out[key] = value
+    return out
+
+
+def _strict_string_list(value: Any, path: str) -> list[str]:
+    if not isinstance(value, list) or not all(isinstance(item, str) and item.strip() for item in value):
+        raise AcceptanceContractError(f"{path} must be an array of non-empty strings")
+    if len(set(value)) != len(value):
+        raise AcceptanceContractError(f"{path} must not contain duplicate values")
+    return value
+
+
+def _normalise_expectations(value: Any, path: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise AcceptanceContractError(f"{path} must be an object")
+    unknown = set(value) - {"pending_reviews", "useful_unknown_fields"}
+    if unknown:
+        raise AcceptanceContractError(f"{path} contains unsupported key(s): {', '.join(sorted(unknown))}")
+    if not value:
+        raise AcceptanceContractError(f"{path} must not be empty")
+    out: dict[str, Any] = {}
+    if "pending_reviews" in value:
+        pending = value["pending_reviews"]
+        if not isinstance(pending, dict) or set(pending) != {"resolution_fields", "unmapped_count"}:
+            raise AcceptanceContractError(f"{path}.pending_reviews must contain exactly resolution_fields and unmapped_count")
+        count = pending["unmapped_count"]
+        if type(count) is not int or count < 0:
+            raise AcceptanceContractError(f"{path}.pending_reviews.unmapped_count must be a non-negative integer (not a boolean)")
+        out["pending_reviews"] = {
+            "resolution_fields": _strict_string_list(pending["resolution_fields"], f"{path}.pending_reviews.resolution_fields"),
+            "unmapped_count": count,
+        }
+    if "useful_unknown_fields" in value:
+        out["useful_unknown_fields"] = _strict_string_list(value["useful_unknown_fields"], f"{path}.useful_unknown_fields")
+    return out
+
+
+def _normalise_test_cases(cases: Any, path: str, *, yaml_shape: bool) -> list[dict[str, Any]]:
+    if not isinstance(cases, list) or not cases:
+        raise AcceptanceContractError(f"{path} must be a non-empty array")
+    out: list[dict[str, Any]] = []
+    names: set[str] = set()
+    for index, case in enumerate(cases):
+        case_path = f"{path}[{index}]"
+        if not isinstance(case, dict):
+            raise AcceptanceContractError(f"{case_path} must be an object")
+        allowed = {"name", "inputs", "expect"} if yaml_shape else {"name", "field_values", "expected_outcome", "expectations"}
+        unknown = set(case) - allowed
+        if unknown:
+            raise AcceptanceContractError(f"{case_path} contains unsupported key(s): {', '.join(sorted(unknown))}")
+        name = case.get("name")
+        if not isinstance(name, str) or not name.strip() or name in names:
+            raise AcceptanceContractError(f"{case_path}.name must be a unique non-empty string")
+        names.add(name)
+        if yaml_shape:
+            values = case.get("inputs", {})
+            expect = case.get("expect", {})
+            if not isinstance(expect, dict) or set(expect) - {"outcome", "pending_reviews", "useful_unknown_fields"}:
+                raise AcceptanceContractError(
+                    f"{case_path}.expect may contain only outcome, pending_reviews, and useful_unknown_fields"
+                )
+            outcome = expect.get("outcome", "eligible")
+            expectations = {
+                key: expect[key]
+                for key in ("pending_reviews", "useful_unknown_fields")
+                if key in expect
+            } or None
+        else:
+            values = case.get("field_values")
+            outcome = case.get("expected_outcome")
+            expectations = case.get("expectations")
+        if not isinstance(values, dict):
+            raise AcceptanceContractError(f"{case_path}.field_values/inputs must be an object")
+        if outcome not in {"eligible", "not_eligible", "undetermined"}:
+            raise AcceptanceContractError(f"{case_path}.expected_outcome must be eligible, not_eligible, or undetermined")
+        normal = {"name": name, "field_values": values, "expected_outcome": outcome}
+        if expectations is not None:
+            normal["expectations"] = _normalise_expectations(expectations, f"{case_path}.expectations")
+        out.append(normal)
+    return out
+
+
+def _normalise_bindings(value: Any) -> dict[str, dict[str, bool | None]]:
+    if not isinstance(value, dict):
+        raise AcceptanceContractError("expected_review_bindings must be an object; null is not valid")
+    out: dict[str, dict[str, bool | None]] = {}
+    for field, tokens in value.items():
+        if not isinstance(field, str) or not field.strip() or not isinstance(tokens, dict) or not tokens:
+            raise AcceptanceContractError("each expected_review_bindings entry needs a non-empty field id and non-empty token object")
+        clean: dict[str, bool | None] = {}
+        for token, strict in tokens.items():
+            if not isinstance(token, str) or not token.strip() or (strict is not None and type(strict) is not bool):
+                raise AcceptanceContractError("review-binding tokens must be non-empty strings mapped to strict true, false, or null")
+            clean[token] = strict
+        out[field] = clean
+    return out
+
+
+def _load_acceptance_contract(path: Path) -> dict[str, Any]:
+    if path.stat().st_size > 1_000_000:
+        raise AcceptanceContractError(f"{path} exceeds 1 MB limit")
+    try:
+        raw = json.loads(path.read_text(), object_pairs_hook=_json_no_duplicates)
+    except (OSError, json.JSONDecodeError, AcceptanceContractError) as exc:
+        raise AcceptanceContractError(f"invalid acceptance contract {path}: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise AcceptanceContractError("acceptance contract must be a JSON object")
+    unknown = set(raw) - {"contract_version", "test_cases", "expected_review_bindings"}
+    if unknown or type(raw.get("contract_version")) is not int or raw["contract_version"] != 1 or "test_cases" not in raw:
+        raise AcceptanceContractError("acceptance contract must contain only contract_version=1, test_cases, and optional expected_review_bindings")
+    out = {"contract_version": 1, "test_cases": _normalise_test_cases(raw["test_cases"], "test_cases", yaml_shape=False)}
+    if "expected_review_bindings" in raw:
+        out["expected_review_bindings"] = _normalise_bindings(raw["expected_review_bindings"])
+    _validate_binding_references(out)
+    return out
+
+
+def _validate_binding_references(contract: dict[str, Any]) -> None:
+    catalogue = contract.get("expected_review_bindings")
+    if catalogue is None:
+        return
+    known = set(catalogue)
+    for case in contract["test_cases"]:
+        fields = (case.get("expectations") or {}).get("pending_reviews", {}).get("resolution_fields", [])
+        unknown = sorted(set(fields) - known)
+        if unknown:
+            raise AcceptanceContractError(f"{case['name']!r} references resolution field(s) not in expected_review_bindings: {', '.join(unknown)}")
+
+
+def _acceptance_contract_digest(contract: dict[str, Any]) -> str:
+    """Hash core#656's readback projection with RFC 8785, preserving code points."""
+    cases = []
+    for case in contract["test_cases"]:
+        expect: dict[str, Any] = {"outcome": case["expected_outcome"]}
+        if "expectations" in case:
+            expect.update(case["expectations"])
+        cases.append({"name": case["name"], "inputs": case["field_values"], "expect": expect})
+    payload = {
+        "version": contract.get("contract_version"),
+        "expected_review_bindings": contract.get("expected_review_bindings"),
+        "test_cases": cases,
+    }
+    return "sha256:" + hashlib.sha256(rfc8785.dumps(payload)).hexdigest()
 
 
 def _chunks(lst: list, n: int):
@@ -770,6 +943,11 @@ def generate(
         "--no-publish",
         help="Leave the generated ruleset unpublished (a draft) instead of activating it",
     ),
+    acceptance_contract: Optional[Path] = typer.Option(
+        None,
+        "--acceptance-contract",
+        help="Versioned JSON acceptance contract to atomically replace project tests",
+    ),
 ) -> None:
     """Upload sources + guidance, trigger ruleset generation, and poll until done."""
     _run_generate(
@@ -780,6 +958,7 @@ def generate(
         seed_ruleset_id=seed_ruleset_id,
         no_publish=no_publish,
         model=model,
+        acceptance_contract=acceptance_contract,
     )
 
 
@@ -793,6 +972,7 @@ def _run_generate(
     extra_hint: Optional[str] = None,
     no_publish: bool = False,
     model: Optional[GenerationModel] = None,
+    acceptance_contract: Optional[Path] = None,
 ) -> None:
     """Shared machinery for ``aethis generate`` and ``aethis refine``.
 
@@ -877,7 +1057,7 @@ def _run_generate(
         _upload_field_vocabulary(client, pid, project_dir)
 
         # Upload test cases
-        _upload_test_cases(client, pid, project_dir)
+        _upload_test_cases(client, pid, project_dir, acceptance_contract_path=acceptance_contract)
 
         # Trigger generation
         if mode == "refine":
@@ -918,6 +1098,10 @@ def _run_generate(
             _invalidate_stale_pointer(project_dir, outcome.status)
             raise typer.Exit(code=1)
 
+    except AcceptanceContractError as e:
+        console.print(f"[red]Acceptance contract rejected: {e}[/red]")
+        raise typer.Exit(code=1)
+
     except AethisAPIError as e:
         error_panel(e)
         # An API error anywhere in the run — including mid-poll, where the job
@@ -946,7 +1130,13 @@ def _run_generate(
         raise typer.Exit(code=1)
 
 
-def _upload_test_cases(client: AethisClient, pid: str, project_dir: Path) -> None:
+def _upload_test_cases(
+    client: AethisClient,
+    pid: str,
+    project_dir: Path,
+    *,
+    acceptance_contract_path: Optional[Path] = None,
+) -> None:
     """Upload `tests/scenarios.yaml` as the project's test cases.
 
     The file is the authoritative suite, so the upload replaces what is on the
@@ -962,27 +1152,57 @@ def _upload_test_cases(client: AethisClient, pid: str, project_dir: Path) -> Non
     upload still happens, and says so.
     """
     tests_path = project_dir / "tests" / "scenarios.yaml"
-    if not tests_path.exists():
+    contract: dict[str, Any]
+    if acceptance_contract_path is not None:
+        contract = _load_acceptance_contract(acceptance_contract_path)
+        origin = acceptance_contract_path.name
+    else:
+        if not tests_path.exists():
+            return
+        if tests_path.stat().st_size > 1_000_000:
+            console.print(f"[red]{tests_path} exceeds 1 MB limit[/red]")
+            raise typer.Exit(code=1)
+        try:
+            raw = yaml.load(tests_path.read_text(), Loader=_UniqueKeyLoader) or {}
+        except yaml.YAMLError as e:
+            console.print(f"[red]Invalid YAML in {tests_path}: {e}[/red]")
+            raise typer.Exit(code=1) from e
+        if not isinstance(raw, dict) or set(raw) - {"tests"}:
+            raise AcceptanceContractError(f"{tests_path} must contain only a tests array")
+        if not raw.get("tests"):
+            return
+        normalised = _normalise_test_cases(raw["tests"], "tests", yaml_shape=True)
+        contract = {"test_cases": normalised}
+        if any("expectations" in case for case in normalised):
+            contract["contract_version"] = 1
+        origin = tests_path.name
+
+    normalised = contract["test_cases"]
+    if contract.get("contract_version") == 1:
+        if client.supports_test_acceptance_contract() is not True:
+            raise AcceptanceContractError(
+                "this engine does not advertise the complete acceptance-contract v1 envelope; "
+                "stopping before replacing its tests"
+            )
+        kwargs: dict[str, Any] = {"replace": True, "contract_version": 1}
+        if "expected_review_bindings" in contract:
+            kwargs["expected_review_bindings"] = contract["expected_review_bindings"]
+        result = client.add_tests(pid, normalised, **kwargs) or {}
+        readback = client.get_project(pid) or {}
+        digest = _acceptance_contract_digest(contract)
+        if (
+            readback.get("authoring_acceptance_contract_version") != 1
+            or readback.get("expected_review_bindings") != contract.get("expected_review_bindings")
+            or readback.get("authoring_acceptance_contract_digest") != digest
+        ):
+            raise AcceptanceContractError(
+                "engine did not return the exact acceptance-contract v1 readback after replacement; "
+                "stopping before generation"
+            )
+        added = result.get("added", len(normalised))
+        replaced = result.get("replaced", 0)
+        info(f"Verified acceptance contract: uploaded {added} test case(s) from {origin} — {replaced} replaced ({digest})")
         return
-    if tests_path.stat().st_size > 1_000_000:
-        console.print(f"[red]{tests_path} exceeds 1 MB limit[/red]")
-        raise typer.Exit(code=1)
-    try:
-        raw = yaml.safe_load(tests_path.read_text()) or {}
-    except yaml.YAMLError as e:
-        console.print(f"[red]Invalid YAML in {tests_path}: {e}[/red]")
-        raise typer.Exit(code=1)
-    test_cases = raw.get("tests", [])
-    if not test_cases:
-        return
-    normalised = [
-        {
-            "name": tc["name"],
-            "field_values": tc.get("inputs", {}),
-            "expected_outcome": tc.get("expect", {}).get("outcome", "eligible"),
-        }
-        for tc in test_cases
-    ]
 
     supported = client.supports_test_replace()
     if supported:

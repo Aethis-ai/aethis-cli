@@ -1,0 +1,170 @@
+"""Contract-v1 test upload is strict and cannot be silently downgraded."""
+
+from __future__ import annotations
+
+import json
+
+import httpx
+import pytest
+import respx
+
+from aethis_cli.client import AethisClient
+from aethis_cli.commands import generate_cmd
+
+BASE = "http://engine.test"
+
+
+def _write_contract(tmp_path, content: dict) -> object:
+    path = tmp_path / "acceptance.json"
+    path.write_text(json.dumps(content))
+    return path
+
+
+def _contract(*, bindings: object = None, include_bindings: bool = False) -> dict:
+    value: dict = {
+        "contract_version": 1,
+        "test_cases": [
+            {
+                "name": "unknown answer",
+                "field_values": {"field": "value"},
+                "expected_outcome": "undetermined",
+                "expectations": {
+                    "pending_reviews": {"resolution_fields": ["field"], "unmapped_count": 0},
+                    "useful_unknown_fields": ["field"],
+                },
+            }
+        ],
+    }
+    if include_bindings:
+        value["expected_review_bindings"] = bindings
+    return value
+
+
+def _openapi(*, contract: bool) -> dict:
+    props = {"test_cases": {}, "replace": {}}
+    if contract:
+        props.update({"contract_version": {}, "expected_review_bindings": {}})
+    return {"components": {"schemas": {"AddTestCaseRequest": {"properties": props}}}}
+
+
+@respx.mock(base_url=BASE)
+def test_sidecar_sends_full_atomic_envelope_and_verifies_readback(respx_mock, tmp_path):
+    contract = _contract(bindings={"field": {"token": False}}, include_bindings=True)
+    path = _write_contract(tmp_path, contract)
+    body: dict = {}
+    respx_mock.get("/openapi.json").mock(return_value=httpx.Response(200, json=_openapi(contract=True)))
+
+    def post(request: httpx.Request) -> httpx.Response:
+        body.update(json.loads(request.content))
+        return httpx.Response(201, json={"added": 1, "replaced": 4})
+
+    respx_mock.post("/api/v1/public/projects/proj/tests").mock(side_effect=post)
+    expected = generate_cmd._load_acceptance_contract(path)
+    respx_mock.get("/api/v1/public/projects/proj").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "authoring_acceptance_contract_version": 1,
+                "expected_review_bindings": contract["expected_review_bindings"],
+                "authoring_acceptance_contract_digest": generate_cmd._acceptance_contract_digest(expected),
+            },
+        )
+    )
+
+    with AethisClient("key", BASE) as client:
+        generate_cmd._upload_test_cases(client, "proj", tmp_path, acceptance_contract_path=path)
+
+    assert body["replace"] is True
+    assert body["contract_version"] == 1
+    assert body["expected_review_bindings"] == {"field": {"token": False}}
+    assert body["test_cases"][0]["expectations"]["pending_reviews"]["unmapped_count"] == 0
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (lambda c: c.update({"contract_version": True}), "contract_version"),
+        (lambda c: c.update({"expected_review_bindings": None}), "null"),
+        (lambda c: c["test_cases"][0]["expectations"]["pending_reviews"].update({"unmapped_count": False}), "not a boolean"),
+        (lambda c: c["test_cases"][0].update({"extra": 1}), "unsupported"),
+    ],
+)
+def test_sidecar_rejects_strict_malformed_values(tmp_path, mutate, message):
+    contract = _contract()
+    mutate(contract)
+    path = _write_contract(tmp_path, contract)
+    with pytest.raises(generate_cmd.AcceptanceContractError, match=message):
+        generate_cmd._load_acceptance_contract(path)
+
+
+def test_empty_binding_catalogue_is_valid_and_distinct_from_null(tmp_path):
+    contract = _contract(bindings={}, include_bindings=True)
+    contract["test_cases"][0].pop("expectations")
+    path = _write_contract(tmp_path, contract)
+    loaded = generate_cmd._load_acceptance_contract(path)
+    assert loaded["expected_review_bindings"] == {}
+
+
+@respx.mock(base_url=BASE)
+def test_older_engine_stops_before_replacement(respx_mock, tmp_path):
+    path = _write_contract(tmp_path, _contract())
+    respx_mock.get("/openapi.json").mock(return_value=httpx.Response(200, json=_openapi(contract=False)))
+    with AethisClient("key", BASE) as client:
+        with pytest.raises(generate_cmd.AcceptanceContractError, match="before replacing"):
+            generate_cmd._upload_test_cases(client, "proj", tmp_path, acceptance_contract_path=path)
+
+
+@respx.mock(base_url=BASE)
+def test_wrong_readback_digest_stops_before_generation(respx_mock, tmp_path):
+    path = _write_contract(tmp_path, _contract())
+    respx_mock.get("/openapi.json").mock(return_value=httpx.Response(200, json=_openapi(contract=True)))
+    respx_mock.post("/api/v1/public/projects/proj/tests").mock(return_value=httpx.Response(201, json={"added": 1}))
+    respx_mock.get("/api/v1/public/projects/proj").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "authoring_acceptance_contract_version": 1,
+                "expected_review_bindings": None,
+                "authoring_acceptance_contract_digest": "sha256:old-engine-dropped-fields",
+            },
+        )
+    )
+    with AethisClient("key", BASE) as client:
+        with pytest.raises(generate_cmd.AcceptanceContractError, match="exact acceptance-contract"):
+            generate_cmd._upload_test_cases(client, "proj", tmp_path, acceptance_contract_path=path)
+
+
+def test_composed_and_decomposed_contract_values_have_distinct_digests():
+    composed = _contract(bindings={"caf\u00e9": {"tok\u00e9n": True}}, include_bindings=True)
+    decomposed = _contract(bindings={"cafe\u0301": {"toke\u0301n": True}}, include_bindings=True)
+    composed["test_cases"][0]["expectations"]["pending_reviews"]["resolution_fields"] = ["caf\u00e9"]
+    decomposed["test_cases"][0]["expectations"]["pending_reviews"]["resolution_fields"] = ["cafe\u0301"]
+    assert generate_cmd._acceptance_contract_digest(composed) != generate_cmd._acceptance_contract_digest(decomposed)
+
+
+def test_scenarios_yaml_uses_expect_advanced_keys_without_a_silent_drop(tmp_path):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "scenarios.yaml").write_text(
+        """tests:
+  - name: review required
+    inputs: {field: value}
+    expect:
+      outcome: undetermined
+      pending_reviews: {resolution_fields: [field], unmapped_count: 0}
+      useful_unknown_fields: [field]
+"""
+    )
+    raw = generate_cmd.yaml.load((tests / "scenarios.yaml").read_text(), Loader=generate_cmd._UniqueKeyLoader)
+    cases = generate_cmd._normalise_test_cases(raw["tests"], "tests", yaml_shape=True)
+    assert cases[0]["expectations"] == {
+        "pending_reviews": {"resolution_fields": ["field"], "unmapped_count": 0},
+        "useful_unknown_fields": ["field"],
+    }
+
+
+def test_scenarios_yaml_duplicate_key_is_rejected(tmp_path):
+    path = tmp_path / "scenarios.yaml"
+    path.write_text("tests: []\ntests: []\n")
+    with pytest.raises(generate_cmd.yaml.YAMLError, match="duplicate key"):
+        generate_cmd.yaml.load(path.read_text(), Loader=generate_cmd._UniqueKeyLoader)

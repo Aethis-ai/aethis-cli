@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.42.0 (unreleased)
+
+- Add `--acceptance-contract` to `aethis generate` and `aethis refine`. It
+  accepts a strict versioned JSON test contract, atomically replaces the
+  project's tests, and refuses to generate unless the engine reads back the
+  matching contract digest. `tests/scenarios.yaml` can now carry strict
+  per-case expectations and is upgraded to the same contract automatically.
+
 ## 0.41.0 (unreleased)
 
 - Add per-run `--model` to `generate` and `refine`: Sonnet 5 remains the default;
