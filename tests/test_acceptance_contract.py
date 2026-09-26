@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import httpx
 import pytest
 import respx
+import typer
 
 from aethis_cli.client import AethisClient
 from aethis_cli.commands import generate_cmd
@@ -47,6 +50,22 @@ def _openapi(*, contract: bool) -> dict:
     if contract:
         props.update({"contract_version": {}, "expected_review_bindings": {}})
     return {"components": {"schemas": {"AddTestCaseRequest": {"properties": props}}}}
+
+
+def _wire_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, client: MagicMock) -> None:
+    (tmp_path / "sources").mkdir(exist_ok=True)
+    (tmp_path / "sources" / "policy.md").write_text("policy", encoding="utf-8")
+    cfg = SimpleNamespace(config_path=tmp_path, base_url=BASE, project_id=None, project="policy")
+    monkeypatch.setattr(generate_cmd, "load_project_config", lambda: cfg)
+    monkeypatch.setattr(generate_cmd, "resolve_api_key", lambda _cfg: "key")
+    monkeypatch.setattr(generate_cmd, "resolve_anthropic_key", lambda _cfg: None)
+    monkeypatch.setattr(generate_cmd, "make_authed_client", lambda *_args, **_kwargs: client)
+
+
+def _assert_only_capability_probe(client: MagicMock) -> None:
+    """A rejected local plan may probe support, but must make no other call."""
+    allowed = {"supports_test_acceptance_contract", "supports_test_replace"}
+    assert [call for call in client.method_calls if call[0] not in allowed] == []
 
 
 @respx.mock(base_url=BASE)
@@ -227,3 +246,176 @@ def test_scenarios_yaml_duplicate_key_is_rejected(tmp_path):
     path.write_text("tests: []\ntests: []\n")
     with pytest.raises(generate_cmd.yaml.YAMLError, match="duplicate key"):
         generate_cmd.yaml.load(path.read_text(), Loader=generate_cmd._UniqueKeyLoader)
+
+
+def test_missing_contract_path_is_an_acceptance_error(tmp_path):
+    missing = tmp_path / "missing.json"
+    with pytest.raises(generate_cmd.AcceptanceContractError, match="cannot read acceptance contract"):
+        generate_cmd._load_acceptance_contract(missing)
+
+
+def test_contract_and_scenarios_require_utf8(tmp_path):
+    contract = tmp_path / "contract.json"
+    contract.write_bytes(b'{"contract_version":1,"test_cases":[{"name":"\xff"}]}')
+    with pytest.raises(generate_cmd.AcceptanceContractError, match="must be UTF-8"):
+        generate_cmd._load_acceptance_contract(contract)
+
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "scenarios.yaml").write_bytes(b"tests:\n  - name: \xff\n")
+    with pytest.raises(generate_cmd.AcceptanceContractError, match="must be UTF-8"):
+        generate_cmd._load_scenarios_contract(tmp_path)
+
+
+def test_explicit_null_expectations_is_valid_no_assertion(tmp_path):
+    contract = _contract()
+    contract["test_cases"][0]["expectations"] = None
+    loaded = generate_cmd._load_acceptance_contract(_write_contract(tmp_path, contract))
+    assert "expectations" not in loaded["test_cases"][0]
+
+
+def test_legacy_yaml_merges_and_nonsemantic_metadata_remain_compatible(tmp_path):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "scenarios.yaml").write_text(
+        """suite_description: retained author notes
+defaults: &defaults
+  age: 30
+  income: 100
+tests:
+  - name: merged legacy case
+    description: this never belonged to the API payload
+    labels: [regression]
+    inputs:
+      <<: *defaults
+      income: 5
+    expect: {outcome: eligible}
+""",
+        encoding="utf-8",
+    )
+    client = MagicMock()
+    client.supports_test_replace.return_value = True
+
+    prepared = generate_cmd._prepare_test_upload(client, tmp_path)
+
+    assert prepared is not None
+    assert prepared.materialise()["test_cases"] == [
+        {
+            "name": "merged legacy case",
+            "field_values": {"age": 30, "income": 5},
+            "expected_outcome": "eligible",
+        }
+    ]
+
+
+def test_unknown_expect_key_is_rejected_as_a_possible_assertion(tmp_path):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "scenarios.yaml").write_text(
+        """tests:
+  - name: typo
+    inputs: {}
+    expect: {outcome: eligible, useful_unknown_field: [field]}
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(generate_cmd.AcceptanceContractError, match="expect may contain only"):
+        generate_cmd._load_scenarios_contract(tmp_path)
+
+
+def test_prepared_contract_is_the_immutable_payload_later_uploaded(tmp_path):
+    path = _write_contract(tmp_path, _contract())
+    client = MagicMock()
+    client.supports_test_acceptance_contract.return_value = True
+    prepared = generate_cmd._prepare_test_upload(client, tmp_path, acceptance_contract_path=path)
+    assert prepared is not None
+    expected = prepared.materialise()
+    with pytest.raises(TypeError):
+        prepared.contract["contract_version"] = 2  # type: ignore[index]
+    client.add_tests.return_value = {"added": 1, "replaced": 0}
+    client.get_project.return_value = {
+        "authoring_acceptance_contract_version": 1,
+        "expected_review_bindings": None,
+        "authoring_acceptance_contract_digest": prepared.digest,
+    }
+
+    path.write_text('{"contract_version":2,"test_cases":[]}', encoding="utf-8")
+    generate_cmd._upload_prepared_test_cases(client, "proj", prepared)
+
+    assert client.add_tests.call_args.args[1] == expected["test_cases"]
+    client.supports_test_acceptance_contract.assert_called_once_with()
+
+
+@pytest.mark.parametrize("case", ["invalid", "missing", "non_utf8", "unsupported"])
+def test_run_rejects_bad_contract_before_any_mutation(tmp_path, monkeypatch, case):
+    client = MagicMock()
+    _wire_run(monkeypatch, tmp_path, client)
+    path = tmp_path / "acceptance.json"
+    if case == "invalid":
+        path.write_text('{"contract_version":2,"test_cases":[]}', encoding="utf-8")
+    elif case == "non_utf8":
+        path.write_bytes(b'{"contract_version":1,"test_cases":[{"name":"\xff"}]}')
+    elif case == "unsupported":
+        path = _write_contract(tmp_path, _contract())
+        client.supports_test_acceptance_contract.return_value = False
+
+    with pytest.raises(typer.Exit) as raised:
+        generate_cmd._run_generate(
+            project_id=None,
+            poll=False,
+            timeout=1,
+            mode="refine",
+            extra_hint="must never be appended",
+            acceptance_contract=path,
+        )
+
+    assert raised.value.exit_code == 1
+    _assert_only_capability_probe(client)
+    if case == "unsupported":
+        client.supports_test_acceptance_contract.assert_called_once_with()
+    else:
+        client.supports_test_acceptance_contract.assert_not_called()
+
+
+@pytest.mark.parametrize("case", ["invalid", "non_utf8", "unsupported"])
+def test_run_rejects_bad_scenarios_before_any_mutation(tmp_path, monkeypatch, case):
+    client = MagicMock()
+    _wire_run(monkeypatch, tmp_path, client)
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    if case == "invalid":
+        body = """tests:
+  - name: typo
+    inputs: {}
+    expect: {outcome: eligible, unknown_assertion: true}
+"""
+    elif case == "non_utf8":
+        body = None
+        (tests / "scenarios.yaml").write_bytes(b"tests:\n  - name: \xff\n")
+    else:
+        body = """tests:
+  - name: review
+    inputs: {}
+    expect:
+      outcome: undetermined
+      pending_reviews: {resolution_fields: [], unmapped_count: 0}
+"""
+        client.supports_test_acceptance_contract.return_value = False
+    if body is not None:
+        (tests / "scenarios.yaml").write_text(body, encoding="utf-8")
+
+    with pytest.raises(typer.Exit) as raised:
+        generate_cmd._run_generate(
+            project_id=None,
+            poll=False,
+            timeout=1,
+            mode="refine",
+            extra_hint="must never be appended",
+        )
+
+    assert raised.value.exit_code == 1
+    _assert_only_capability_probe(client)
+    if case == "unsupported":
+        client.supports_test_acceptance_contract.assert_called_once_with()
+    else:
+        client.supports_test_acceptance_contract.assert_not_called()
