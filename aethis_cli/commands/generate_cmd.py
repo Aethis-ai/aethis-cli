@@ -80,16 +80,24 @@ def _normalise_expectations(value: Any, path: str) -> dict[str, Any]:
     if "pending_reviews" in value:
         pending = value["pending_reviews"]
         if not isinstance(pending, dict) or set(pending) != {"resolution_fields", "unmapped_count"}:
-            raise AcceptanceContractError(f"{path}.pending_reviews must contain exactly resolution_fields and unmapped_count")
+            raise AcceptanceContractError(
+                f"{path}.pending_reviews must contain exactly resolution_fields and unmapped_count"
+            )
         count = pending["unmapped_count"]
         if type(count) is not int or count < 0:
-            raise AcceptanceContractError(f"{path}.pending_reviews.unmapped_count must be a non-negative integer (not a boolean)")
+            raise AcceptanceContractError(
+                f"{path}.pending_reviews.unmapped_count must be a non-negative integer (not a boolean)"
+            )
         out["pending_reviews"] = {
-            "resolution_fields": _strict_string_list(pending["resolution_fields"], f"{path}.pending_reviews.resolution_fields"),
+            "resolution_fields": _strict_string_list(
+                pending["resolution_fields"], f"{path}.pending_reviews.resolution_fields"
+            ),
             "unmapped_count": count,
         }
     if "useful_unknown_fields" in value:
-        out["useful_unknown_fields"] = _strict_string_list(value["useful_unknown_fields"], f"{path}.useful_unknown_fields")
+        out["useful_unknown_fields"] = _strict_string_list(
+            value["useful_unknown_fields"], f"{path}.useful_unknown_fields"
+        )
     return out
 
 
@@ -102,7 +110,9 @@ def _normalise_test_cases(cases: Any, path: str, *, yaml_shape: bool) -> list[di
         case_path = f"{path}[{index}]"
         if not isinstance(case, dict):
             raise AcceptanceContractError(f"{case_path} must be an object")
-        allowed = {"name", "inputs", "expect"} if yaml_shape else {"name", "field_values", "expected_outcome", "expectations"}
+        allowed = (
+            {"name", "inputs", "expect"} if yaml_shape else {"name", "field_values", "expected_outcome", "expectations"}
+        )
         unknown = set(case) - allowed
         if unknown:
             raise AcceptanceContractError(f"{case_path} contains unsupported key(s): {', '.join(sorted(unknown))}")
@@ -119,9 +129,7 @@ def _normalise_test_cases(cases: Any, path: str, *, yaml_shape: bool) -> list[di
                 )
             outcome = expect.get("outcome", "eligible")
             expectations = {
-                key: expect[key]
-                for key in ("pending_reviews", "useful_unknown_fields")
-                if key in expect
+                key: expect[key] for key in ("pending_reviews", "useful_unknown_fields") if key in expect
             } or None
         else:
             values = case.get("field_values")
@@ -130,7 +138,9 @@ def _normalise_test_cases(cases: Any, path: str, *, yaml_shape: bool) -> list[di
         if not isinstance(values, dict):
             raise AcceptanceContractError(f"{case_path}.field_values/inputs must be an object")
         if outcome not in {"eligible", "not_eligible", "undetermined"}:
-            raise AcceptanceContractError(f"{case_path}.expected_outcome must be eligible, not_eligible, or undetermined")
+            raise AcceptanceContractError(
+                f"{case_path}.expected_outcome must be eligible, not_eligible, or undetermined"
+            )
         normal = {"name": name, "field_values": values, "expected_outcome": outcome}
         if expectations is not None:
             normal["expectations"] = _normalise_expectations(expectations, f"{case_path}.expectations")
@@ -144,11 +154,15 @@ def _normalise_bindings(value: Any) -> dict[str, dict[str, bool | None]]:
     out: dict[str, dict[str, bool | None]] = {}
     for field, tokens in value.items():
         if not isinstance(field, str) or not field.strip() or not isinstance(tokens, dict) or not tokens:
-            raise AcceptanceContractError("each expected_review_bindings entry needs a non-empty field id and non-empty token object")
+            raise AcceptanceContractError(
+                "each expected_review_bindings entry needs a non-empty field id and non-empty token object"
+            )
         clean: dict[str, bool | None] = {}
         for token, strict in tokens.items():
             if not isinstance(token, str) or not token.strip() or (strict is not None and type(strict) is not bool):
-                raise AcceptanceContractError("review-binding tokens must be non-empty strings mapped to strict true, false, or null")
+                raise AcceptanceContractError(
+                    "review-binding tokens must be non-empty strings mapped to strict true, false, or null"
+                )
             clean[token] = strict
         out[field] = clean
     return out
@@ -164,9 +178,19 @@ def _load_acceptance_contract(path: Path) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise AcceptanceContractError("acceptance contract must be a JSON object")
     unknown = set(raw) - {"contract_version", "test_cases", "expected_review_bindings"}
-    if unknown or type(raw.get("contract_version")) is not int or raw["contract_version"] != 1 or "test_cases" not in raw:
-        raise AcceptanceContractError("acceptance contract must contain only contract_version=1, test_cases, and optional expected_review_bindings")
-    out = {"contract_version": 1, "test_cases": _normalise_test_cases(raw["test_cases"], "test_cases", yaml_shape=False)}
+    if (
+        unknown
+        or type(raw.get("contract_version")) is not int
+        or raw["contract_version"] != 1
+        or "test_cases" not in raw
+    ):
+        raise AcceptanceContractError(
+            "acceptance contract must contain only contract_version=1, test_cases, and optional expected_review_bindings"
+        )
+    out = {
+        "contract_version": 1,
+        "test_cases": _normalise_test_cases(raw["test_cases"], "test_cases", yaml_shape=False),
+    }
     if "expected_review_bindings" in raw:
         out["expected_review_bindings"] = _normalise_bindings(raw["expected_review_bindings"])
     _validate_binding_references(out)
@@ -182,7 +206,9 @@ def _validate_binding_references(contract: dict[str, Any]) -> None:
         fields = (case.get("expectations") or {}).get("pending_reviews", {}).get("resolution_fields", [])
         unknown = sorted(set(fields) - known)
         if unknown:
-            raise AcceptanceContractError(f"{case['name']!r} references resolution field(s) not in expected_review_bindings: {', '.join(unknown)}")
+            raise AcceptanceContractError(
+                f"{case['name']!r} references resolution field(s) not in expected_review_bindings: {', '.join(unknown)}"
+            )
 
 
 def _acceptance_contract_digest(contract: dict[str, Any]) -> str:
@@ -198,7 +224,29 @@ def _acceptance_contract_digest(contract: dict[str, Any]) -> str:
         "expected_review_bindings": contract.get("expected_review_bindings"),
         "test_cases": cases,
     }
-    return "sha256:" + hashlib.sha256(rfc8785.dumps(payload)).hexdigest()
+    try:
+        canonical = rfc8785.dumps(payload)
+    except rfc8785.CanonicalizationError as exc:
+        raise AcceptanceContractError(
+            f"acceptance contract contains a value outside the RFC 8785 canonical JSON domain: {exc}"
+        ) from exc
+    return "sha256:" + hashlib.sha256(canonical).hexdigest()
+
+
+def _strict_json_equal(actual: Any, expected: Any) -> bool:
+    """Compare JSON values without Python's bool/int equality coercion."""
+    if type(actual) is not type(expected):
+        return False
+    if isinstance(expected, dict):
+        return actual.keys() == expected.keys() and all(
+            _strict_json_equal(actual[key], value) for key, value in expected.items()
+        )
+    if isinstance(expected, list):
+        return len(actual) == len(expected) and all(
+            _strict_json_equal(actual_item, expected_item)
+            for actual_item, expected_item in zip(actual, expected, strict=True)
+        )
+    return actual == expected
 
 
 def _chunks(lst: list, n: int):
@@ -1179,6 +1227,10 @@ def _upload_test_cases(
 
     normalised = contract["test_cases"]
     if contract.get("contract_version") == 1:
+        # Canonicalisation is part of the acceptance boundary.  Validate it
+        # before even the atomic replacement POST: JCS rejects non-finite
+        # floats and integers outside its interoperable domain.
+        digest = _acceptance_contract_digest(contract)
         if client.supports_test_acceptance_contract() is not True:
             raise AcceptanceContractError(
                 "this engine does not advertise the complete acceptance-contract v1 envelope; "
@@ -1189,10 +1241,14 @@ def _upload_test_cases(
             kwargs["expected_review_bindings"] = contract["expected_review_bindings"]
         result = client.add_tests(pid, normalised, **kwargs) or {}
         readback = client.get_project(pid) or {}
-        digest = _acceptance_contract_digest(contract)
+        readback_version = readback.get("authoring_acceptance_contract_version")
         if (
-            readback.get("authoring_acceptance_contract_version") != 1
-            or readback.get("expected_review_bindings") != contract.get("expected_review_bindings")
+            type(readback_version) is not int
+            or readback_version != 1
+            or not _strict_json_equal(
+                readback.get("expected_review_bindings"),
+                contract.get("expected_review_bindings"),
+            )
             or readback.get("authoring_acceptance_contract_digest") != digest
         ):
             raise AcceptanceContractError(
@@ -1201,7 +1257,9 @@ def _upload_test_cases(
             )
         added = result.get("added", len(normalised))
         replaced = result.get("replaced", 0)
-        info(f"Verified acceptance contract: uploaded {added} test case(s) from {origin} — {replaced} replaced ({digest})")
+        info(
+            f"Verified acceptance contract: uploaded {added} test case(s) from {origin} — {replaced} replaced ({digest})"
+        )
         return
 
     supported = client.supports_test_replace()
