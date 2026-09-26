@@ -88,6 +88,7 @@ class AethisClient:
         # Cached answer to "does this engine accept `replace` on a test-case
         # upload?" — one probe per client, not one per call.
         self._test_replace_support: Any = _UNPROBED
+        self._test_acceptance_contract_support: Any = _UNPROBED
         # Cached property names the engine advertises, per schema model — one
         # probe per model per client, not one per call.
         self._field_spec_properties: dict[str, Optional[set[str]]] = {}
@@ -286,7 +287,15 @@ class AethisClient:
             json=body,
         )
 
-    def add_tests(self, project_id: str, test_cases: list[dict], replace: bool = False) -> dict:
+    def add_tests(
+        self,
+        project_id: str,
+        test_cases: list[dict],
+        replace: bool = False,
+        *,
+        contract_version: Optional[int] = None,
+        expected_review_bindings: Any = _UNPROBED,
+    ) -> dict:
         """Upload golden test cases to a project.
 
         ``replace=True`` makes the upload idempotent: the supplied list becomes
@@ -304,6 +313,10 @@ class AethisClient:
         body: dict = {"test_cases": test_cases}
         if replace:
             body["replace"] = True
+        if contract_version is not None:
+            body["contract_version"] = contract_version
+        if expected_review_bindings is not _UNPROBED:
+            body["expected_review_bindings"] = expected_review_bindings
         return self._request(
             "POST",
             f"/api/v1/public/projects/{project_id}/tests",
@@ -340,6 +353,26 @@ class AethisClient:
             # the engine's behaviour, so none of them may read as an answer.
             answer = None
         self._test_replace_support = answer
+        return answer
+
+    def supports_test_acceptance_contract(self) -> Optional[bool]:
+        """Whether this engine advertises every envelope member for contract v1.
+
+        Contract uploads replace the suite.  An older engine may ignore unknown
+        keys while honouring ``replace``, which would erase tests and silently
+        discard their assertions; therefore an unknown or incomplete schema is
+        a hard stop for this path.
+        """
+        if self._test_acceptance_contract_support is not _UNPROBED:
+            return self._test_acceptance_contract_support  # type: ignore[return-value]
+        try:
+            resp = self._client.get("/openapi.json", timeout=15.0)
+            schemas = resp.json()["components"]["schemas"] if resp.status_code < 400 else {}
+            properties = schemas["AddTestCaseRequest"]["properties"]
+            answer: Optional[bool] = {"replace", "contract_version", "expected_review_bindings"}.issubset(properties)
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            answer = None
+        self._test_acceptance_contract_support = answer
         return answer
 
     def _schema_properties(self, model: str) -> Optional[set[str]]:

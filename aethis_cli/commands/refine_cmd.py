@@ -4,6 +4,7 @@ tests (finding-driven incremental re-authoring, seeded from the active ruleset).
 from __future__ import annotations
 
 from typing import Optional
+from pathlib import Path
 
 import typer
 
@@ -22,6 +23,11 @@ def refine(
     ),
     poll: bool = typer.Option(True, "--poll/--no-poll", help="Poll until refinement completes"),
     timeout: int = typer.Option(600, "--timeout", "-t", help="Polling timeout in seconds"),
+    acceptance_contract: Optional[Path] = typer.Option(
+        None,
+        "--acceptance-contract",
+        help="Versioned JSON acceptance contract to atomically replace project tests",
+    ),
 ) -> None:
     """Refine the active ruleset: add an optional --hint, then make the minimal
     edit to fix failing test cases (seeded from the section's active ruleset)
@@ -36,4 +42,5 @@ def refine(
         seed_ruleset_id=seed_ruleset_id,
         extra_hint=hint,
         model=model,
+        acceptance_contract=acceptance_contract,
     )
