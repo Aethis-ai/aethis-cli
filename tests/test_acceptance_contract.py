@@ -121,6 +121,55 @@ def test_sidecar_rejects_strict_malformed_values(tmp_path, mutate, message):
         generate_cmd._load_acceptance_contract(path)
 
 
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (
+            lambda c: c.update({"test_cases": c["test_cases"] * 501}),
+            "at most 500 cases",
+        ),
+        (
+            lambda c: c["test_cases"][0]["expectations"]["pending_reviews"].update({"resolution_fields": ["x" * 301]}),
+            "at most 300 code points",
+        ),
+        (
+            lambda c: c["test_cases"][0]["expectations"].update(
+                {"useful_unknown_fields": [f"field-{index}" for index in range(501)]}
+            ),
+            "at most 500 values",
+        ),
+        (
+            lambda c: c["test_cases"][0]["expectations"]["pending_reviews"].update({"unmapped_count": 501}),
+            "integer from 0 to 500",
+        ),
+        (
+            lambda c: c.update({"expected_review_bindings": {"x" * 301: {"token": True}}}),
+            "field id of at most 300 code points",
+        ),
+        (
+            lambda c: c.update({"expected_review_bindings": {"field": {"x" * 301: True}}}),
+            "tokens must be non-empty strings of at most 300 code points",
+        ),
+    ],
+)
+def test_sidecar_rejects_engine_contract_limits_locally(tmp_path, mutate, message):
+    contract = _contract()
+    mutate(contract)
+    path = _write_contract(tmp_path, contract)
+
+    with pytest.raises(generate_cmd.AcceptanceContractError, match=message):
+        generate_cmd._load_acceptance_contract(path)
+
+
+@pytest.mark.parametrize("outcome", [[], {}])
+def test_wrong_shape_json_outcome_is_an_acceptance_error(tmp_path, outcome):
+    contract = _contract()
+    contract["test_cases"][0]["expected_outcome"] = outcome
+
+    with pytest.raises(generate_cmd.AcceptanceContractError, match="expected_outcome"):
+        generate_cmd._load_acceptance_contract(_write_contract(tmp_path, contract))
+
+
 def test_empty_binding_catalogue_is_valid_and_distinct_from_null(tmp_path):
     contract = _contract(bindings={}, include_bindings=True)
     contract["test_cases"][0].pop("expectations")
@@ -323,6 +372,42 @@ def test_unknown_expect_key_is_rejected_as_a_possible_assertion(tmp_path):
         generate_cmd._load_scenarios_contract(tmp_path)
 
 
+@pytest.mark.parametrize("outcome", [[], {}])
+def test_wrong_shape_yaml_outcome_is_an_acceptance_error(tmp_path, outcome):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "scenarios.yaml").write_text(
+        generate_cmd.yaml.safe_dump(
+            {
+                "tests": [
+                    {
+                        "name": "wrong shape",
+                        "inputs": {},
+                        "expect": {"outcome": outcome},
+                    }
+                ]
+            }
+        )
+    )
+
+    with pytest.raises(generate_cmd.AcceptanceContractError, match="expected_outcome"):
+        generate_cmd._load_scenarios_contract(tmp_path)
+
+
+@pytest.mark.parametrize("semantic_key", ["contract_version", "expected_review_bindings"])
+def test_yaml_semantic_top_level_keys_require_the_json_sidecar(tmp_path, semantic_key):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    document = {
+        "tests": [{"name": "legacy", "inputs": {}, "expect": {"outcome": "eligible"}}],
+        semantic_key: 1 if semantic_key == "contract_version" else {},
+    }
+    (tests / "scenarios.yaml").write_text(generate_cmd.yaml.safe_dump(document))
+
+    with pytest.raises(generate_cmd.AcceptanceContractError, match="--acceptance-contract"):
+        generate_cmd._load_scenarios_contract(tmp_path)
+
+
 def test_prepared_contract_is_the_immutable_payload_later_uploaded(tmp_path):
     path = _write_contract(tmp_path, _contract())
     client = MagicMock()
@@ -419,3 +504,79 @@ def test_run_rejects_bad_scenarios_before_any_mutation(tmp_path, monkeypatch, ca
         client.supports_test_acceptance_contract.assert_called_once_with()
     else:
         client.supports_test_acceptance_contract.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "contract_case_limit",
+        "contract_id_limit",
+        "contract_list_limit",
+        "contract_unmapped_limit",
+        "contract_binding_field_limit",
+        "contract_binding_token_limit",
+        "legacy_case_limit",
+        "wrong_outcome",
+        "misplaced_catalogue",
+    ],
+)
+def test_run_rejects_contract_boundaries_before_any_remote_call(tmp_path, monkeypatch, case):
+    client = MagicMock()
+    _wire_run(monkeypatch, tmp_path, client)
+    acceptance_path = None
+    if case.startswith("contract_"):
+        contract = _contract()
+        if case == "contract_case_limit":
+            contract["test_cases"] *= 501
+        elif case == "contract_id_limit":
+            contract["test_cases"][0]["expectations"]["useful_unknown_fields"] = ["x" * 301]
+        elif case == "contract_list_limit":
+            contract["test_cases"][0]["expectations"]["pending_reviews"]["resolution_fields"] = [
+                f"field-{index}" for index in range(501)
+            ]
+        elif case == "contract_unmapped_limit":
+            contract["test_cases"][0]["expectations"]["pending_reviews"]["unmapped_count"] = 501
+        elif case == "contract_binding_field_limit":
+            contract["expected_review_bindings"] = {"x" * 301: {"token": True}}
+        else:
+            contract["expected_review_bindings"] = {"field": {"x" * 301: True}}
+        acceptance_path = _write_contract(tmp_path, contract)
+    else:
+        tests = tmp_path / "tests"
+        tests.mkdir()
+        if case == "legacy_case_limit":
+            cases = [{"name": f"case-{index}", "inputs": {}, "expect": {"outcome": "eligible"}} for index in range(101)]
+            document = {"tests": cases}
+        elif case == "wrong_outcome":
+            document = {"tests": [{"name": "bad", "inputs": {}, "expect": {"outcome": []}}]}
+        else:
+            document = {
+                "tests": [
+                    {
+                        "name": "review",
+                        "inputs": {},
+                        "expect": {
+                            "outcome": "undetermined",
+                            "pending_reviews": {
+                                "resolution_fields": ["review.clearance"],
+                                "unmapped_count": 0,
+                            },
+                        },
+                    }
+                ],
+                "expected_review_bindings": {},
+            }
+        (tests / "scenarios.yaml").write_text(generate_cmd.yaml.safe_dump(document))
+
+    with pytest.raises(typer.Exit) as raised:
+        generate_cmd._run_generate(
+            project_id=None,
+            poll=False,
+            timeout=1,
+            mode="refine",
+            extra_hint="must never be appended",
+            acceptance_contract=acceptance_path,
+        )
+
+    assert raised.value.exit_code == 1
+    assert client.method_calls == []
