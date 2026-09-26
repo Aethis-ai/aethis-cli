@@ -37,6 +37,12 @@ class AcceptanceContractError(ValueError):
     """A local acceptance-contract input cannot safely reach an engine."""
 
 
+_MAX_ACCEPTANCE_CASES = 500
+_MAX_LEGACY_CASES = 100
+_MAX_ACCEPTANCE_ID_LENGTH = 300
+_MAX_ACCEPTANCE_LIST_LENGTH = 500
+
+
 class _UniqueKeyLoader(yaml.SafeLoader):
     """SafeLoader with duplicate mappings rejected before Python loses a key."""
 
@@ -73,6 +79,10 @@ def _json_no_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 def _strict_string_list(value: Any, path: str) -> list[str]:
     if not isinstance(value, list) or not all(isinstance(item, str) and item.strip() for item in value):
         raise AcceptanceContractError(f"{path} must be an array of non-empty strings")
+    if len(value) > _MAX_ACCEPTANCE_LIST_LENGTH:
+        raise AcceptanceContractError(f"{path} must contain at most {_MAX_ACCEPTANCE_LIST_LENGTH} values")
+    if any(len(item) > _MAX_ACCEPTANCE_ID_LENGTH for item in value):
+        raise AcceptanceContractError(f"{path} values must be at most {_MAX_ACCEPTANCE_ID_LENGTH} code points")
     if len(set(value)) != len(value):
         raise AcceptanceContractError(f"{path} must not contain duplicate values")
     return value
@@ -94,9 +104,10 @@ def _normalise_expectations(value: Any, path: str) -> dict[str, Any]:
                 f"{path}.pending_reviews must contain exactly resolution_fields and unmapped_count"
             )
         count = pending["unmapped_count"]
-        if type(count) is not int or count < 0:
+        if type(count) is not int or not 0 <= count <= _MAX_ACCEPTANCE_LIST_LENGTH:
             raise AcceptanceContractError(
-                f"{path}.pending_reviews.unmapped_count must be a non-negative integer (not a boolean)"
+                f"{path}.pending_reviews.unmapped_count must be an integer from 0 to "
+                f"{_MAX_ACCEPTANCE_LIST_LENGTH} (not a boolean)"
             )
         out["pending_reviews"] = {
             "resolution_fields": _strict_string_list(
@@ -114,6 +125,8 @@ def _normalise_expectations(value: Any, path: str) -> dict[str, Any]:
 def _normalise_test_cases(cases: Any, path: str, *, yaml_shape: bool) -> list[dict[str, Any]]:
     if not isinstance(cases, list) or not cases:
         raise AcceptanceContractError(f"{path} must be a non-empty array")
+    if len(cases) > _MAX_ACCEPTANCE_CASES:
+        raise AcceptanceContractError(f"{path} must contain at most {_MAX_ACCEPTANCE_CASES} cases")
     out: list[dict[str, Any]] = []
     names: set[str] = set()
     for index, case in enumerate(cases):
@@ -149,7 +162,11 @@ def _normalise_test_cases(cases: Any, path: str, *, yaml_shape: bool) -> list[di
             expectations = case.get("expectations")
         if not isinstance(values, dict):
             raise AcceptanceContractError(f"{case_path}.field_values/inputs must be an object")
-        if outcome not in {"eligible", "not_eligible", "undetermined"}:
+        if not isinstance(outcome, str) or outcome not in {
+            "eligible",
+            "not_eligible",
+            "undetermined",
+        }:
             raise AcceptanceContractError(
                 f"{case_path}.expected_outcome must be eligible, not_eligible, or undetermined"
             )
@@ -165,15 +182,28 @@ def _normalise_bindings(value: Any) -> dict[str, dict[str, bool | None]]:
         raise AcceptanceContractError("expected_review_bindings must be an object; null is not valid")
     out: dict[str, dict[str, bool | None]] = {}
     for field, tokens in value.items():
-        if not isinstance(field, str) or not field.strip() or not isinstance(tokens, dict) or not tokens:
+        if (
+            not isinstance(field, str)
+            or not field.strip()
+            or len(field) > _MAX_ACCEPTANCE_ID_LENGTH
+            or not isinstance(tokens, dict)
+            or not tokens
+        ):
             raise AcceptanceContractError(
-                "each expected_review_bindings entry needs a non-empty field id and non-empty token object"
+                "each expected_review_bindings entry needs a non-empty field id of at most "
+                f"{_MAX_ACCEPTANCE_ID_LENGTH} code points and a non-empty token object"
             )
         clean: dict[str, bool | None] = {}
         for token, strict in tokens.items():
-            if not isinstance(token, str) or not token.strip() or (strict is not None and type(strict) is not bool):
+            if (
+                not isinstance(token, str)
+                or not token.strip()
+                or len(token) > _MAX_ACCEPTANCE_ID_LENGTH
+                or (strict is not None and type(strict) is not bool)
+            ):
                 raise AcceptanceContractError(
-                    "review-binding tokens must be non-empty strings mapped to strict true, false, or null"
+                    "review-binding tokens must be non-empty strings of at most "
+                    f"{_MAX_ACCEPTANCE_ID_LENGTH} code points mapped to strict true, false, or null"
                 )
             clean[token] = strict
         out[field] = clean
@@ -300,12 +330,24 @@ def _load_scenarios_contract(project_dir: Path) -> tuple[dict[str, Any], str] | 
         raise AcceptanceContractError(f"invalid YAML in {tests_path}: {exc}") from exc
     if not isinstance(raw, dict):
         raise AcceptanceContractError(f"{tests_path} must contain a tests array")
+    misplaced = {"contract_version", "expected_review_bindings"} & set(raw)
+    if misplaced:
+        raise AcceptanceContractError(
+            f"{tests_path} cannot declare semantic top-level key(s) "
+            f"{', '.join(sorted(misplaced))}; use --acceptance-contract with the versioned JSON sidecar"
+        )
     if not raw.get("tests"):
         return None
     normalised = _normalise_test_cases(raw["tests"], "tests", yaml_shape=True)
     contract: dict[str, Any] = {"test_cases": normalised}
     if any("expectations" in case for case in normalised):
         contract["contract_version"] = 1
+    elif len(normalised) > _MAX_LEGACY_CASES:
+        raise AcceptanceContractError(
+            f"legacy scenarios uploads are limited to {_MAX_LEGACY_CASES} cases; "
+            "use --acceptance-contract for a versioned suite of up to "
+            f"{_MAX_ACCEPTANCE_CASES} cases"
+        )
     return contract, tests_path.name
 
 
