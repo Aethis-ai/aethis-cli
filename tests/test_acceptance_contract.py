@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import httpx
 import pytest
@@ -12,6 +13,7 @@ from aethis_cli.client import AethisClient
 from aethis_cli.commands import generate_cmd
 
 BASE = "http://engine.test"
+WIRE_REQUEST = Path(__file__).parent / "fixtures" / "acceptance_contract_v1_wire_request.json"
 
 
 def _write_contract(tmp_path, content: dict) -> object:
@@ -85,7 +87,10 @@ def test_sidecar_sends_full_atomic_envelope_and_verifies_readback(respx_mock, tm
     [
         (lambda c: c.update({"contract_version": True}), "contract_version"),
         (lambda c: c.update({"expected_review_bindings": None}), "null"),
-        (lambda c: c["test_cases"][0]["expectations"]["pending_reviews"].update({"unmapped_count": False}), "not a boolean"),
+        (
+            lambda c: c["test_cases"][0]["expectations"]["pending_reviews"].update({"unmapped_count": False}),
+            "not a boolean",
+        ),
         (lambda c: c["test_cases"][0].update({"extra": 1}), "unsupported"),
     ],
 )
@@ -132,6 +137,60 @@ def test_wrong_readback_digest_stops_before_generation(respx_mock, tmp_path):
     with AethisClient("key", BASE) as client:
         with pytest.raises(generate_cmd.AcceptanceContractError, match="exact acceptance-contract"):
             generate_cmd._upload_test_cases(client, "proj", tmp_path, acceptance_contract_path=path)
+
+
+@pytest.mark.parametrize("unsafe_value", [9007199254740992, float("nan")])
+@respx.mock(base_url=BASE)
+def test_noncanonical_value_stops_before_remote_mutation(respx_mock, tmp_path, unsafe_value):
+    contract = _contract()
+    contract["test_cases"][0]["field_values"]["unsafe"] = unsafe_value
+    path = _write_contract(tmp_path, contract)
+
+    with AethisClient("key", BASE) as client:
+        with pytest.raises(generate_cmd.AcceptanceContractError, match="canonical JSON domain"):
+            generate_cmd._upload_test_cases(client, "proj", tmp_path, acceptance_contract_path=path)
+
+    assert not respx_mock.calls
+
+
+@pytest.mark.parametrize(
+    "readback_override",
+    [
+        {"authoring_acceptance_contract_version": True},
+        {"expected_review_bindings": {"field": {"token": 0}}},
+    ],
+)
+@respx.mock(base_url=BASE)
+def test_readback_comparison_rejects_bool_int_type_coercion(respx_mock, tmp_path, readback_override):
+    contract = _contract(bindings={"field": {"token": False}}, include_bindings=True)
+    path = _write_contract(tmp_path, contract)
+    normalised = generate_cmd._load_acceptance_contract(path)
+    readback = {
+        "authoring_acceptance_contract_version": 1,
+        "expected_review_bindings": contract["expected_review_bindings"],
+        "authoring_acceptance_contract_digest": generate_cmd._acceptance_contract_digest(normalised),
+    }
+    readback.update(readback_override)
+    respx_mock.get("/openapi.json").mock(return_value=httpx.Response(200, json=_openapi(contract=True)))
+    respx_mock.post("/api/v1/public/projects/proj/tests").mock(return_value=httpx.Response(201, json={"added": 1}))
+    respx_mock.get("/api/v1/public/projects/proj").mock(return_value=httpx.Response(200, json=readback))
+
+    with AethisClient("key", BASE) as client:
+        with pytest.raises(generate_cmd.AcceptanceContractError, match="exact acceptance-contract"):
+            generate_cmd._upload_test_cases(client, "proj", tmp_path, acceptance_contract_path=path)
+
+
+def test_wire_contract_has_independent_fixed_digest():
+    request = json.loads(WIRE_REQUEST.read_text())
+    contract = {
+        "contract_version": request["contract_version"],
+        "test_cases": request["test_cases"],
+        "expected_review_bindings": request["expected_review_bindings"],
+    }
+
+    assert generate_cmd._acceptance_contract_digest(contract) == (
+        "sha256:eb0436a6575f0fa34a162f70672982a6ece61003fb627cb63c7dfcf7f02f8535"
+    )
 
 
 def test_composed_and_decomposed_contract_values_have_distinct_digests():

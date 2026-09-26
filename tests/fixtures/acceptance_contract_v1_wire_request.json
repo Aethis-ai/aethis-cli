@@ -1,0 +1,31 @@
+{
+  "replace": true,
+  "contract_version": 1,
+  "expected_review_bindings": {
+    "review.clearance": {
+      "approved": true,
+      "declined": false,
+      "awaiting_evidence": null
+    }
+  },
+  "test_cases": [
+    {
+      "name": "pending-review",
+      "field_values": {
+        "case.fact": "value"
+      },
+      "expected_outcome": "undetermined",
+      "expectations": {
+        "pending_reviews": {
+          "resolution_fields": [
+            "review.clearance"
+          ],
+          "unmapped_count": 0
+        },
+        "useful_unknown_fields": [
+          "case.evidence_date"
+        ]
+      }
+    }
+  ]
+}
