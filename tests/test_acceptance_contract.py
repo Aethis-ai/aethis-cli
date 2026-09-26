@@ -394,7 +394,18 @@ def test_wrong_shape_yaml_outcome_is_an_acceptance_error(tmp_path, outcome):
         generate_cmd._load_scenarios_contract(tmp_path)
 
 
-@pytest.mark.parametrize("semantic_key", ["contract_version", "expected_review_bindings"])
+@pytest.mark.parametrize(
+    "semantic_key",
+    [
+        "contract_version",
+        "expected_review_bindings",
+        "test_cases",
+        "field_values",
+        "expected_outcome",
+        "expectations",
+        "pending_reviews",
+    ],
+)
 def test_yaml_semantic_top_level_keys_require_the_json_sidecar(tmp_path, semantic_key):
     tests = tmp_path / "tests"
     tests.mkdir()
@@ -406,6 +417,38 @@ def test_yaml_semantic_top_level_keys_require_the_json_sidecar(tmp_path, semanti
 
     with pytest.raises(generate_cmd.AcceptanceContractError, match="--acceptance-contract"):
         generate_cmd._load_scenarios_contract(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "semantic_key",
+    ["test_cases", "field_values", "expected_outcome", "expectations", "pending_reviews"],
+)
+def test_yaml_case_semantic_keys_cannot_be_mistaken_for_descriptive_metadata(tmp_path, semantic_key):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    document = {
+        "tests": [
+            {
+                "name": "misplaced assertion",
+                "inputs": {},
+                "expect": {"outcome": "eligible"},
+                semantic_key: {},
+            }
+        ],
+        "suite_description": "arbitrary descriptive metadata remains valid",
+    }
+    (tests / "scenarios.yaml").write_text(generate_cmd.yaml.safe_dump(document))
+
+    with pytest.raises(generate_cmd.AcceptanceContractError, match="misplaced"):
+        generate_cmd._load_scenarios_contract(tmp_path)
+
+
+def test_lone_surrogate_object_key_is_a_clean_acceptance_error():
+    contract = _contract()
+    contract["test_cases"][0]["field_values"]["\udc00"] = 1
+
+    with pytest.raises(generate_cmd.AcceptanceContractError, match="canonical JSON domain"):
+        generate_cmd._acceptance_contract_digest(contract)
 
 
 def test_prepared_contract_is_the_immutable_payload_later_uploaded(tmp_path):
@@ -518,15 +561,20 @@ def test_run_rejects_bad_scenarios_before_any_mutation(tmp_path, monkeypatch, ca
         "legacy_case_limit",
         "wrong_outcome",
         "misplaced_catalogue",
+        "misplaced_case_semantic",
+        "misplaced_top_test_cases",
+        "surrogate_key",
     ],
 )
 def test_run_rejects_contract_boundaries_before_any_remote_call(tmp_path, monkeypatch, case):
     client = MagicMock()
     _wire_run(monkeypatch, tmp_path, client)
     acceptance_path = None
-    if case.startswith("contract_"):
+    if case.startswith("contract_") or case == "surrogate_key":
         contract = _contract()
-        if case == "contract_case_limit":
+        if case == "surrogate_key":
+            contract["test_cases"][0]["field_values"]["\udc00"] = 1
+        elif case == "contract_case_limit":
             contract["test_cases"] *= 501
         elif case == "contract_id_limit":
             contract["test_cases"][0]["expectations"]["useful_unknown_fields"] = ["x" * 301]
@@ -549,7 +597,7 @@ def test_run_rejects_contract_boundaries_before_any_remote_call(tmp_path, monkey
             document = {"tests": cases}
         elif case == "wrong_outcome":
             document = {"tests": [{"name": "bad", "inputs": {}, "expect": {"outcome": []}}]}
-        else:
+        elif case == "misplaced_catalogue":
             document = {
                 "tests": [
                     {
@@ -565,6 +613,31 @@ def test_run_rejects_contract_boundaries_before_any_remote_call(tmp_path, monkey
                     }
                 ],
                 "expected_review_bindings": {},
+            }
+        elif case == "misplaced_case_semantic":
+            document = {
+                "tests": [
+                    {
+                        "name": "silently wrong before the guard",
+                        "inputs": {},
+                        "expect": {"outcome": "eligible"},
+                        "expected_outcome": "not_eligible",
+                        "pending_reviews": {
+                            "resolution_fields": ["review.clearance"],
+                            "unmapped_count": 0,
+                        },
+                    }
+                ]
+            }
+        else:
+            document = {
+                "test_cases": [
+                    {
+                        "name": "silently absent before the guard",
+                        "field_values": {},
+                        "expected_outcome": "not_eligible",
+                    }
+                ]
             }
         (tests / "scenarios.yaml").write_text(generate_cmd.yaml.safe_dump(document))
 

@@ -41,6 +41,22 @@ _MAX_ACCEPTANCE_CASES = 500
 _MAX_LEGACY_CASES = 100
 _MAX_ACCEPTANCE_ID_LENGTH = 300
 _MAX_ACCEPTANCE_LIST_LENGTH = 500
+_KNOWN_CONTRACT_SEMANTIC_KEYS = {
+    "contract_version",
+    "expected_review_bindings",
+    "tests",
+    "test_cases",
+    "inputs",
+    "field_values",
+    "expect",
+    "outcome",
+    "expected_outcome",
+    "expectations",
+    "pending_reviews",
+    "resolution_fields",
+    "unmapped_count",
+    "useful_unknown_fields",
+}
 
 
 class _UniqueKeyLoader(yaml.SafeLoader):
@@ -135,8 +151,18 @@ def _normalise_test_cases(cases: Any, path: str, *, yaml_shape: bool) -> list[di
             raise AcceptanceContractError(f"{case_path} must be an object")
         # Legacy scenarios have always allowed descriptive case metadata and
         # projected only name/inputs/expect onto the API request. Preserve that
-        # compatibility. The explicit JSON v1 artefact is strict throughout.
-        if not yaml_shape:
+        # compatibility, but reject contract vocabulary in the wrong shape so
+        # an assertion cannot be mistaken for commentary and silently dropped.
+        # The explicit JSON v1 artefact is strict throughout.
+        if yaml_shape:
+            misplaced = (set(case) - {"name", "inputs", "expect"}) & _KNOWN_CONTRACT_SEMANTIC_KEYS
+            if misplaced:
+                raise AcceptanceContractError(
+                    f"{case_path} contains semantic key(s) misplaced for scenarios.yaml: "
+                    f"{', '.join(sorted(misplaced))}; put outcome and assertions under expect "
+                    "or use --acceptance-contract"
+                )
+        else:
             allowed = {"name", "field_values", "expected_outcome", "expectations"}
             unknown = set(case) - allowed
             if unknown:
@@ -278,7 +304,7 @@ def _acceptance_contract_digest(contract: dict[str, Any]) -> str:
     }
     try:
         canonical = rfc8785.dumps(payload)
-    except rfc8785.CanonicalizationError as exc:
+    except (rfc8785.CanonicalizationError, UnicodeEncodeError) as exc:
         raise AcceptanceContractError(
             f"acceptance contract contains a value outside the RFC 8785 canonical JSON domain: {exc}"
         ) from exc
@@ -330,7 +356,7 @@ def _load_scenarios_contract(project_dir: Path) -> tuple[dict[str, Any], str] | 
         raise AcceptanceContractError(f"invalid YAML in {tests_path}: {exc}") from exc
     if not isinstance(raw, dict):
         raise AcceptanceContractError(f"{tests_path} must contain a tests array")
-    misplaced = {"contract_version", "expected_review_bindings"} & set(raw)
+    misplaced = (set(raw) - {"tests"}) & _KNOWN_CONTRACT_SEMANTIC_KEYS
     if misplaced:
         raise AcceptanceContractError(
             f"{tests_path} cannot declare semantic top-level key(s) "
