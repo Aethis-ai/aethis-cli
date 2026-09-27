@@ -302,6 +302,13 @@ jobs:
               out = subprocess.check_output(["gh"] + list(args))
               return out.decode()
 
+          # No `--search`: the search index does not follow repo-transfer
+          # redirects, so a moved repo returns zero results with exit 0 and is
+          # silently skipped. A plain `gh pr list --repo` follows the redirect
+          # and exits non-zero on a missing repo; the marker regex below is
+          # the real filter.
+          LIMIT = 100
+
           prs = []
           unreachable = []
           for repo in REPOS:
@@ -310,9 +317,8 @@ jobs:
                       "pr", "list",
                       "--repo", repo,
                       "--state", "open",
-                      "--search", "aethis-needs",
                       "--json", "number,title,isDraft,url,body",
-                      "--limit", "100",
+                      "--limit", str(LIMIT),
                   )
               except subprocess.CalledProcessError as exc:
                   # Never fail the whole sweep on one unreachable repo, but say
@@ -321,11 +327,14 @@ jobs:
                   print(f"::warning::{repo}: could not be queried (rc={exc.returncode}); skipped")
                   unreachable.append(repo)
                   continue
-              for pr in json.loads(out):
+              listed = json.loads(out)
+              if len(listed) >= LIMIT:
+                  print(f"::warning::{repo}: returned {len(listed)} open PRs (the --limit cap); later PRs were not checked")
+              for pr in listed:
                   prs.append({**pr, "repo": repo})
 
           if not prs:
-              print("No open PRs reference aethis-needs: aethis-cli — nothing to unstick.")
+              print("No open PRs in the listed repos — nothing to unstick.")
               if unreachable:
                   print(f"NOTE: {len(unreachable)} repo(s) were unreachable: {', '.join(unreachable)}")
               sys.exit(0)
@@ -334,8 +343,8 @@ jobs:
           for pr in prs:
               repo = pr["repo"]
               num = pr["number"]
-              # The search term is a loose pre-filter; the marker regex over the
-              # body (fetched in the same call) is the real test.
+              # The marker regex over the body (fetched in the same call) is
+              # the only filter.
               body = pr.get("body") or ""
               m = marker.search(body)
               if not m:

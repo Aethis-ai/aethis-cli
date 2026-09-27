@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.40.1 (2026-09-27)
+
+- **ci: the post-publish unstick step now sees repositories that have been
+  renamed or transferred.** It listed each downstream repository's open pull
+  requests with a search filter, and the search index does not follow a
+  repository rename or transfer: a moved repository returned no results and a
+  success exit code, so it was skipped without a warning. The step now lists
+  open pull requests without the search filter and matches the
+  `aethis-needs` marker in each body, which it already did. A repository that
+  cannot be listed now produces a workflow warning, and so does one that hits
+  the listing limit of 100 open pull requests. No change to the CLI itself.
+
 ## 0.40.0 (2026-09-25)
 
 - **feat: print the source check and source questions.** `aethis publish`,
