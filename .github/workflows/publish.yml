@@ -293,7 +293,7 @@ jobs:
               "Aethis-ai/docs",
               "Paul-Simpson/ok_swift",
               "Paul-Simpson/aethis.ai",
-              "Paul-Simpson/aethis.law",
+              "Aethis-ai/aethis.law",
           ]
 
           def vtuple(v): return tuple(int(p) for p in v.split("."))
