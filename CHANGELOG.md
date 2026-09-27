@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.40.2 (2026-09-27)
+
+- **ci: the post-publish unstick step queries every downstream repository at
+  its current path.** Two entries still named a pre-transfer path. They worked
+  through redirects, but a new repository created at the old path would have
+  been queried instead and returned no pull requests. No change to the CLI
+  itself.
+
 ## 0.40.1 (2026-09-27)
 
 - **ci: the post-publish unstick step now sees repositories that have been
