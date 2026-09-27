@@ -291,8 +291,8 @@ jobs:
               "Aethis-ai/aethis-sdk-python",
               "Aethis-ai/tda-server",
               "Aethis-ai/docs",
-              "Paul-Simpson/ok_swift",
-              "Paul-Simpson/aethis.ai",
+              "Aethis-ai/ok_swift",
+              "Aethis-ai/aethis.ai",
               "Aethis-ai/aethis.law",
           ]
 
