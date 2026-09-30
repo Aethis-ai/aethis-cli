@@ -199,9 +199,12 @@ MUTATIONS: List[Mutation] = [
     Mutation(
         "capability-gate-bypassed",
         "aethis_cli/commands/generate_cmd.py",
-        "    supported = client.supports_test_replace()",
-        "    supported = True",
+        "        capability = client.supports_test_replace()",
+        "        capability = True",
         "the flag is sent to an engine that would silently ignore it",
+        detects=(
+            "tests/test_generate_replace_tests.py::test_the_flag_is_not_sent_to_an_engine_that_does_not_advertise_it",
+        ),
     ),
     Mutation(
         "append-warning-silenced",
@@ -213,9 +216,12 @@ MUTATIONS: List[Mutation] = [
     Mutation(
         "replaced-count-hidden",
         "aethis_cli/commands/generate_cmd.py",
-        'info(f"Uploaded {added} test case(s) from {tests_path.name} — {replaced} replaced")',
-        'info(f"Uploaded {added} test case(s) from {tests_path.name}")',
+        'info(f"Uploaded {added} test case(s) from {prepared.origin} — {replaced} replaced")',
+        'info(f"Uploaded {added} test case(s) from {prepared.origin}")',
         "a destructive overwrite stops being visible",
+        detects=(
+            "tests/test_generate_replace_tests.py::test_the_replaced_count_is_reported_so_an_overwrite_is_visible",
+        ),
     ),
     Mutation(
         "unknown-schema-reads-as-supported",
