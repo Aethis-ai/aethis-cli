@@ -24,7 +24,6 @@ import re
 import httpx
 import pytest
 import respx
-import typer
 
 from aethis_cli.client import AethisClient
 from aethis_cli.commands import generate_cmd
@@ -309,11 +308,10 @@ def test_no_scenarios_file_is_not_an_error(tmp_path):
     client.add_tests.assert_not_called()
 
 
-def test_invalid_yaml_still_exits_one(tmp_path):
+def test_invalid_yaml_is_a_contract_error(tmp_path):
     from unittest.mock import MagicMock
 
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests" / "scenarios.yaml").write_text("tests: [\n  - unclosed")
-    with pytest.raises(typer.Exit) as exc:
+    with pytest.raises(generate_cmd.AcceptanceContractError, match="invalid YAML"):
         generate_cmd._upload_test_cases(MagicMock(), "proj_abc", tmp_path)
-    assert exc.value.exit_code == 1
