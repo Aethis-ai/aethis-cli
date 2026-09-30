@@ -12,13 +12,14 @@ import typer
 import yaml
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 
-from aethis_cli.client import AethisClient
+from aethis_cli.client import AethisClient, GenerationModel
 from aethis_cli.config import (
     load_project_config,
     make_authed_client,
     read_state,
     resolve_anthropic_key,
     resolve_api_key,
+    resolve_deepseek_key,
     write_state,
 )
 from aethis_cli.errors import AethisAPIError, ConfigError
@@ -750,6 +751,7 @@ def _upload_rulebook_guidance(client: AethisClient, pid: str, project_dir: Path)
 
 
 def generate(
+    model: Optional[GenerationModel] = typer.Option(None, "--model", help="Authoring model (default: claude-sonnet-5)"),
     project_id: Optional[str] = typer.Option(None, "--project-id", "-p"),
     poll: bool = typer.Option(True, "--poll/--no-poll", help="Poll until generation completes"),
     timeout: int = typer.Option(600, "--timeout", "-t", help="Polling timeout in seconds"),
@@ -777,6 +779,7 @@ def generate(
         mode=mode,
         seed_ruleset_id=seed_ruleset_id,
         no_publish=no_publish,
+        model=model,
     )
 
 
@@ -789,6 +792,7 @@ def _run_generate(
     seed_ruleset_id: Optional[str] = None,
     extra_hint: Optional[str] = None,
     no_publish: bool = False,
+    model: Optional[GenerationModel] = None,
 ) -> None:
     """Shared machinery for ``aethis generate`` and ``aethis refine``.
 
@@ -796,10 +800,17 @@ def _run_generate(
     is the plumbing for one flag on one command, not a change of default for
     everything that shares the machinery.
     """
+    if model is not None:
+        try:
+            model = GenerationModel(model)
+        except ValueError:
+            console.print("[red]Unsupported authoring model. Use claude-sonnet-5 or deepseek-flash.[/red]")
+            raise typer.Exit(code=2) from None
     try:
         cfg = load_project_config()
         api_key = resolve_api_key(cfg)
-        anthropic_key = resolve_anthropic_key(cfg)
+        anthropic_key = None if model == GenerationModel.deepseek else resolve_anthropic_key(cfg)
+        deepseek_key = resolve_deepseek_key(cfg) if model == GenerationModel.deepseek else None
     except ConfigError as e:
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(code=1)
@@ -871,7 +882,12 @@ def _run_generate(
         # Trigger generation
         if mode == "refine":
             info("Refining: seeding from the active ruleset and making the minimal edit to fix failing tests")
-        job = client.generate(pid, mode=mode, seed_ruleset_id=seed_ruleset_id)
+        generation_options = {}
+        if model is not None:
+            generation_options["model"] = model
+        if deepseek_key:
+            generation_options["deepseek_key"] = deepseek_key
+        job = client.generate(pid, mode=mode, seed_ruleset_id=seed_ruleset_id, **generation_options)
         write_state(project_dir, {"project_id": pid, "job_id": job["job_id"]})
         info(f"Generation queued (job={job['job_id']})")
         # Surface the remaining generate budget from the POST's X-RateLimit-*
