@@ -9,7 +9,7 @@ import pytest
 import respx
 from typer.testing import CliRunner
 
-from aethis_cli.client import AethisClient, GenerationModel
+from aethis_cli.client import AethisClient, GenerationModel, normalize_thinking
 from aethis_cli.commands import generate_cmd, refine_cmd
 from aethis_cli.config import load_project_config, resolve_deepseek_key
 from aethis_cli.main import app
@@ -54,6 +54,27 @@ def test_client_rejects_provider_key_mix() -> None:
             client.generate("p", deepseek_key="secret")
 
 
+@respx.mock
+def test_thinking_serialization_preserves_omission_and_explicit_null() -> None:
+    route = respx.post(f"{BASE}/api/v1/public/projects/p/generate").respond(202, json={})
+    with AethisClient("ak", BASE) as client:
+        client.generate("p")
+        assert route.calls.last.request.content == b""
+        client.generate("p", thinking=None)
+        assert json.loads(route.calls.last.request.content) == {"thinking": None}
+        client.generate("p", thinking="enabled:48000")
+    assert json.loads(route.calls.last.request.content) == {"thinking": "enabled:48000"}
+
+
+def test_thinking_normalization_bounds_significant_digits() -> None:
+    assert normalize_thinking("  enabled:00001024 ") == "enabled:1024"
+    assert normalize_thinking("enabled:000000000009999999999") == "enabled:9999999999"
+    with pytest.raises(ValueError, match="invalid_thinking"):
+        normalize_thinking("enabled:10000000000")
+    with pytest.raises(ValueError, match="invalid_thinking"):
+        normalize_thinking("enabled:10_24")
+
+
 @pytest.mark.parametrize("command", ["generate", "refine"])
 def test_flags_forward_model(command: str, monkeypatch: pytest.MonkeyPatch) -> None:
     run = MagicMock()
@@ -65,6 +86,34 @@ def test_flags_forward_model(command: str, monkeypatch: pytest.MonkeyPatch) -> N
     invalid = CliRunner().invoke(app, [command, "--model", "unknown"])
     assert invalid.exit_code == 2
     assert run.call_count == 1
+
+
+@pytest.mark.parametrize("command", ["generate", "refine"])
+def test_flags_forward_thinking(command: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    run = MagicMock()
+    module = generate_cmd if command == "generate" else refine_cmd
+    monkeypatch.setattr(module, "_run_generate", run)
+    result = CliRunner().invoke(app, [command, "--thinking", "enabled:48000", "--no-poll"])
+    assert result.exit_code == 0, result.output
+    assert run.call_args.kwargs["thinking"] == "enabled:48000"
+
+
+def test_thinking_warning_is_rendered(capsys: pytest.CaptureFixture[str]) -> None:
+    generate_cmd._render_thinking_warnings({"authoring_config": {"warnings": [{"code": "thinking_budget_ignored", "message": "budget does not bound reasoning"}]}})
+    assert "thinking_budget_ignored" in capsys.readouterr().out
+
+
+def test_thinking_capability_rejection_precedes_project_mutation(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.test_generate_no_publish import _engine, _project, _wire
+
+    _project(tmp_path)
+    client = _engine({})
+    client.generation_mode_request_properties.return_value = set()
+    _wire(monkeypatch, tmp_path, client)
+    with pytest.raises(Exception):
+        generate_cmd._run_generate(project_id="p", poll=False, timeout=30, thinking="disabled")
+    client.get_project.assert_not_called()
+    client.create_project.assert_not_called()
 
 
 def test_configurable_deepseek_env(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
