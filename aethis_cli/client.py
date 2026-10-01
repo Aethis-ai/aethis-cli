@@ -41,7 +41,7 @@ def normalize_thinking(thinking: str | None | object = _UNSET) -> str | None | o
         return value
     if not value.startswith("enabled:"):
         raise ValueError("invalid_thinking: use disabled, adaptive, or enabled:ASCII-decimal>=1024")
-    digits = value[len("enabled:"):]
+    digits = value[len("enabled:") :]
     if not digits or not digits.isascii() or not digits.isdecimal():
         raise ValueError("invalid_thinking: use disabled, adaptive, or enabled:ASCII-decimal>=1024")
     canonical = digits.lstrip("0") or "0"
@@ -444,13 +444,15 @@ class AethisClient:
         """
         return self._schema_properties("RulebookFieldSpec")
 
-    def generation_mode_request_properties(self) -> Optional[set[str]]:
+    def generation_mode_request_properties(self, *, refresh: bool = False) -> Optional[set[str]]:
         """Properties advertised for generation admission controls.
 
         Unlike a harmless display property, an unknown thinking control could be
         silently ignored by an older engine, so callers use this as a strict
         compatibility gate before any authoring mutation.
         """
+        if refresh:
+            self._field_spec_properties.pop("GenerationModeRequest", None)
         return self._schema_properties("GenerationModeRequest")
 
     def set_field_spec(self, project_id: str, expected_fields: list[dict]) -> dict:
@@ -536,9 +538,11 @@ class AethisClient:
         # string is validated by the engine before it admits the job.
         thinking = normalize_thinking(thinking)
         if thinking is not _UNSET:
-            properties = self.generation_mode_request_properties()
+            properties = self.generation_mode_request_properties(refresh=True)
             if properties is None or "thinking" not in properties:
-                raise ValueError("This engine does not advertise per-generation thinking controls; no generation was started")
+                raise ValueError(
+                    "This engine does not advertise per-generation thinking controls; no generation was started"
+                )
             body["thinking"] = thinking
         if deepseek_key and model != GenerationModel.deepseek:
             raise ValueError("A DeepSeek key requires model=deepseek-flash")
