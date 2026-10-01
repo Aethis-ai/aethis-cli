@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.42.1 (2026-10-01)
+
+- Add `--thinking` to `aethis generate` and `aethis refine`. Explicit values
+  are normalised and forwarded to the engine; omission continues to inherit its
+  configured default. Engine-provided thinking warnings, including DeepSeek's
+  `thinking_budget_ignored`, are rendered rather than claiming a requested
+  budget controls DeepSeek reasoning.
+
 ## 0.42.0 (unreleased)
 
 - Add `--acceptance-contract` to `aethis generate` and `aethis refine`. It

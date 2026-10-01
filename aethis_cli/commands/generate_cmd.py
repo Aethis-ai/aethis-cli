@@ -15,9 +15,11 @@ import httpx
 import rfc8785
 import typer
 import yaml
+from rich.markup import escape
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 
-from aethis_cli.client import AethisClient, GenerationModel
+from aethis_cli._terminal_safe import safe_text
+from aethis_cli.client import AethisClient, GenerationModel, normalize_thinking
 from aethis_cli.config import (
     load_project_config,
     make_authed_client,
@@ -1182,6 +1184,9 @@ def _upload_rulebook_guidance(client: AethisClient, pid: str, project_dir: Path)
 
 def generate(
     model: Optional[GenerationModel] = typer.Option(None, "--model", help="Authoring model (default: claude-sonnet-5)"),
+    thinking: Optional[str] = typer.Option(
+        None, "--thinking", help="Per-generation thinking: disabled, adaptive, or enabled:N"
+    ),
     project_id: Optional[str] = typer.Option(None, "--project-id", "-p"),
     poll: bool = typer.Option(True, "--poll/--no-poll", help="Poll until generation completes"),
     timeout: int = typer.Option(600, "--timeout", "-t", help="Polling timeout in seconds"),
@@ -1216,6 +1221,7 @@ def generate(
         no_publish=no_publish,
         model=model,
         acceptance_contract=acceptance_contract,
+        thinking=thinking,
     )
 
 
@@ -1230,6 +1236,7 @@ def _run_generate(
     no_publish: bool = False,
     model: Optional[GenerationModel] = None,
     acceptance_contract: Optional[Path] = None,
+    thinking: Optional[str] = None,
 ) -> None:
     """Shared machinery for ``aethis generate`` and ``aethis refine``.
 
@@ -1237,6 +1244,13 @@ def _run_generate(
     is the plumbing for one flag on one command, not a change of default for
     everything that shares the machinery.
     """
+    # This must happen before config/auth/project work: malformed explicit
+    # controls must not leave any local or remote authoring side effect.
+    try:
+        thinking = normalize_thinking(thinking)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(code=2) from None
     if model is not None:
         try:
             model = GenerationModel(model)
@@ -1254,6 +1268,15 @@ def _run_generate(
 
     client = make_authed_client(api_key, cfg.base_url, anthropic_key=anthropic_key)
     project_dir = cfg.config_path
+
+    if thinking is not None:
+        properties = client.generation_mode_request_properties()
+        if properties is None or "thinking" not in properties:
+            console.print(
+                "[red]The target generation control schema is unavailable or does not advertise thinking. "
+                "Stopping before any project, source, guidance, field, or test mutation.[/red]"
+            )
+            raise typer.Exit(code=1)
 
     # Fail-fast on empty sources: generation without any source documents wastes
     # 60-120s on the server and produces a cryptic LLM failure.
@@ -1332,9 +1355,16 @@ def _run_generate(
             generation_options["model"] = model
         if deepseek_key:
             generation_options["deepseek_key"] = deepseek_key
-        job = client.generate(pid, mode=mode, seed_ruleset_id=seed_ruleset_id, **generation_options)
+        if thinking is not None:
+            generation_options["thinking"] = thinking
+        try:
+            job = client.generate(pid, mode=mode, seed_ruleset_id=seed_ruleset_id, **generation_options)
+        except ValueError as exc:
+            console.print(f"[red]{escape(safe_text(str(exc)))}[/red]")
+            raise typer.Exit(code=1) from None
         write_state(project_dir, {"project_id": pid, "job_id": job["job_id"]})
         info(f"Generation queued (job={job['job_id']})")
+        shown_thinking_warnings = _render_thinking_warnings(job)
         # Surface the remaining generate budget from the POST's X-RateLimit-*
         # headers (epic #552) — captured now, before polling /status overwrites
         # it with the `read` class. `aethis usage` shows the full picture.
@@ -1350,7 +1380,9 @@ def _run_generate(
             return
 
         # Poll with progress spinner
-        outcome = _poll_until_done(client, pid, project_dir, timeout, no_publish=no_publish)
+        outcome = _poll_until_done(
+            client, pid, project_dir, timeout, no_publish=no_publish, shown_thinking_warnings=shown_thinking_warnings
+        )
 
         # Surface how the produced field vocabulary compares to what was pinned,
         # rather than letting any drift pass silently. The comparison is always
@@ -1688,6 +1720,30 @@ class GenerationOutcome(NamedTuple):
     value_spaces_resolved: Optional[dict] = None
 
 
+def _render_thinking_warnings(payload: dict, seen: Optional[set[tuple[str, str]]] = None) -> set[tuple[str, str]]:
+    """Render stable engine warnings without inventing local thinking semantics."""
+    config = payload.get("authoring_config")
+    if not isinstance(config, dict):
+        config = (payload.get("job") or {}).get("authoring_config")
+    if not isinstance(config, dict):
+        return seen or set()
+    seen = seen if seen is not None else set()
+    warnings = config.get("warnings")
+    if not isinstance(warnings, (list, tuple)):
+        return seen
+    for warning in warnings:
+        if not isinstance(warning, dict):
+            continue
+        code = warning.get("code")
+        message = warning.get("message")
+        if isinstance(code, str) and isinstance(message, str):
+            key = (code, message)
+            if key not in seen:
+                warn(escape(safe_text(f"{code}: {message}")))
+                seen.add(key)
+    return seen
+
+
 def _error_reason(e: Exception) -> str:
     """A readable reason for either error family this module now catches.
 
@@ -1801,6 +1857,7 @@ def _poll_until_done(
     timeout: int = 600,
     *,
     no_publish: bool = False,
+    shown_thinking_warnings: Optional[set[tuple[str, str]]] = None,
 ) -> GenerationOutcome:
     """Poll a generation to completion and report how it ended.
 
@@ -1863,6 +1920,7 @@ def _poll_until_done(
                 warn("Lost the connection to the API during the poll; recovered and carried on.")
             blips = 0
             job = result.get("job") or {}
+            shown_thinking_warnings = _render_thinking_warnings(result, shown_thinking_warnings)
             pct = job.get("progress_percent", 0)
             if isinstance(pct, bool) or not isinstance(pct, (int, float)):
                 pct = 0
