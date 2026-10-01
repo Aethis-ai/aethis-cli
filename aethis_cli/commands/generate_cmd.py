@@ -842,27 +842,44 @@ def _validate_display_metadata(key: str, f: dict, ftype: str) -> list[str]:
 _NOTE_ENTRY_KEYS = frozenset({"note_text", "source", "metadata"})
 
 
-def _json_problem(value: object, path: str) -> Optional[str]:
-    """Describe the first place ``value`` is not JSON-representable, else None."""
+_MAX_METADATA_DEPTH = 100
+
+
+def _json_problem(value: object, path: str, _active: Optional[set[int]] = None, _depth: int = 0) -> Optional[str]:
+    """Describe the first place ``value`` is not JSON-representable, else None.
+
+    A self-referencing structure (possible via YAML anchors) and nesting beyond
+    :data:`_MAX_METADATA_DEPTH` are reported rather than recursed into. Shared
+    but acyclic aliases are fine: only containers on the current path count.
+    """
     if value is None or isinstance(value, (bool, int, str)):
         return None
     if isinstance(value, float):
         return None if math.isfinite(value) else f"{path} is a non-finite number"
-    if isinstance(value, list):
-        for i, item in enumerate(value):
-            problem = _json_problem(item, f"{path}[{i}]")
-            if problem:
-                return problem
+    if not isinstance(value, (list, dict)):
+        return f"{path} holds a {type(value).__name__}, which is not JSON"
+    active = _active if _active is not None else set()
+    if id(value) in active:
+        return f"{path} refers back to a structure that contains it (cyclic)"
+    if _depth >= _MAX_METADATA_DEPTH:
+        return f"{path} is nested deeper than {_MAX_METADATA_DEPTH} levels"
+    active.add(id(value))
+    try:
+        if isinstance(value, list):
+            for i, item in enumerate(value):
+                problem = _json_problem(item, f"{path}[{i}]", active, _depth + 1)
+                if problem:
+                    return problem
+        else:
+            for k, item in value.items():
+                if not isinstance(k, str):
+                    return f"{path} has non-text key {k!r}"
+                problem = _json_problem(item, f"{path}.{k}", active, _depth + 1)
+                if problem:
+                    return problem
         return None
-    if isinstance(value, dict):
-        for k, item in value.items():
-            if not isinstance(k, str):
-                return f"{path} has non-text key {k!r}"
-            problem = _json_problem(item, f"{path}.{k}")
-            if problem:
-                return problem
-        return None
-    return f"{path} holds a {type(value).__name__}, which is not JSON"
+    finally:
+        active.discard(id(value))
 
 
 def _validate_field_notes(key: str, f: dict) -> list[str]:
@@ -888,9 +905,7 @@ def _validate_field_notes(key: str, f: dict) -> list[str]:
             continue
         unknown = sorted(str(k) for k in entry if k not in _NOTE_ENTRY_KEYS)
         if unknown:
-            errors.append(
-                f"{where} has unknown key(s): {', '.join(unknown)} (allowed: note_text, source, metadata)."
-            )
+            errors.append(f"{where} has unknown key(s): {', '.join(unknown)} (allowed: note_text, source, metadata).")
         if not isinstance(entry.get("note_text"), str):
             errors.append(f"{where} needs note_text as text.")
         if "source" in entry and not isinstance(entry["source"], str):
@@ -1119,6 +1134,16 @@ def _upload_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) 
     ``/fields/spec`` and routes each field's label/question/hints through
     guidance.
     """
+    _validate_project_fields(project_dir)
+    _push_field_vocabulary(client, pid, project_dir)
+
+
+def _validate_project_fields(project_dir: Path) -> None:
+    """Exit with the validation errors of every contributing ``fields.yaml``.
+
+    Local only — run it before any engine call, because guidance added earlier
+    in a run accumulates on the project and a failed retry would duplicate it.
+    """
     # Fail fast on a malformed vocabulary before we mutate server state. Validate
     # each contributing file's RAW list so duplicate keys *within a file* surface
     # — the merged map would silently collapse them. A key shared between the
@@ -1137,6 +1162,8 @@ def _upload_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) 
                 console.print(f"  [red]✗[/red] {e}")
             raise typer.Exit(code=1)
 
+
+def _push_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) -> None:
     field_map = _merged_field_map(project_dir)
     if not field_map:
         return
@@ -1338,6 +1365,9 @@ def _run_generate(
     outcome: Optional[GenerationOutcome] = None
 
     try:
+        # Local field validation first: nothing below may reach the engine
+        # (guidance accumulates on the project) for a vocabulary that is invalid.
+        _validate_project_fields(project_dir)
         # Parse, validate, canonicalise and capability-check the complete test
         # plan before project creation, guidance, source, field or test writes.
         # The frozen snapshot is the payload uploaded later in this run.

@@ -142,3 +142,47 @@ def test_omitted_notes_sends_no_notes_key(tmp_path):
 
     _, expected_fields = client.set_field_spec.call_args.args
     assert "notes" not in expected_fields[0]
+
+
+def test_run_generate_refuses_invalid_notes_before_any_engine_call(tmp_path, monkeypatch):
+    """Guidance accumulates on the project, so nothing may be sent before validation."""
+    from tests.test_generate_no_publish import SUCCESS, _engine, _project as _gen_project, _wire
+
+    _gen_project(tmp_path)
+    (tmp_path / "fields" / "fields.yaml").write_text(
+        "fields:\n  - key: applicant.fact\n    type: bool\n    notes:\n      - note_text: 5\n"
+    )
+    (tmp_path / "guidance").mkdir()
+    (tmp_path / "guidance" / "hints.yaml").write_text("hints:\n  - Prefer plain wording.\n")
+    client = _engine(SUCCESS)
+    _wire(monkeypatch, tmp_path, client)
+
+    with pytest.raises(typer.Exit):
+        generate_cmd._run_generate(project_id="proj_abc", poll=False, timeout=30, mode="refine", extra_hint="a hint")
+
+    assert client.method_calls == []
+
+
+def test_cyclic_metadata_is_refused_cleanly():
+    import yaml
+
+    metadata = yaml.safe_load("a: &x\n  b: *x\n")
+    errors = _errors([{"note_text": "x", "metadata": metadata}])
+    assert any("notes[0]" in e and "cycl" in e for e in errors)
+
+
+def test_excessively_deep_metadata_is_refused_cleanly():
+    deep: dict = {}
+    cursor = deep
+    for _ in range(2000):
+        cursor["k"] = {}
+        cursor = cursor["k"]
+    errors = _errors([{"note_text": "x", "metadata": deep}])
+    assert any("notes[0]" in e and "deep" in e for e in errors)
+
+
+def test_shared_acyclic_aliases_are_valid():
+    import yaml
+
+    metadata = yaml.safe_load("a: &x {k: v}\nb: *x\nc: [*x, *x]\n")
+    assert _errors([{"note_text": "x", "metadata": metadata}]) == []
