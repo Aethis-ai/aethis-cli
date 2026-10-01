@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -774,6 +775,7 @@ def validate_fields_list(fields: list) -> list[str]:
         if ftype == "enum" and not f.get("enum_values") and not f.get("value_space"):
             errors.append(f"Field {key!r} is type 'enum' but declares no enum_values (or value_space).")
         errors.extend(_validate_display_metadata(key, f, ftype))
+        errors.extend(_validate_field_notes(key, f))
     return errors
 
 
@@ -834,6 +836,73 @@ def _validate_display_metadata(key: str, f: dict, ftype: str) -> list[str]:
                 f"opaque there — but it publishes a pairing no consumer can resolve, so it is refused here. "
                 f"Omit the key, or use null, to say there is no pairing."
             )
+    return errors
+
+
+_NOTE_ENTRY_KEYS = frozenset({"note_text", "source", "metadata"})
+
+
+def _json_problem(value: object, path: str) -> Optional[str]:
+    """Describe the first place ``value`` is not JSON-representable, else None."""
+    if value is None or isinstance(value, (bool, int, str)):
+        return None
+    if isinstance(value, float):
+        return None if math.isfinite(value) else f"{path} is a non-finite number"
+    if isinstance(value, list):
+        for i, item in enumerate(value):
+            problem = _json_problem(item, f"{path}[{i}]")
+            if problem:
+                return problem
+        return None
+    if isinstance(value, dict):
+        for k, item in value.items():
+            if not isinstance(k, str):
+                return f"{path} has non-text key {k!r}"
+            problem = _json_problem(item, f"{path}.{k}")
+            if problem:
+                return problem
+        return None
+    return f"{path} holds a {type(value).__name__}, which is not JSON"
+
+
+def _validate_field_notes(key: str, f: dict) -> list[str]:
+    """Validate authored ``notes`` on one field entry.
+
+    ``notes`` is an ordered list of ``{note_text, source?, metadata?}`` objects.
+    Entries travel to the engine exactly as authored — omitted ``source`` and
+    ``metadata`` stay omitted — so this only checks shape. An omitted key sends
+    nothing; ``[]`` is sent as an authoritative clear.
+    """
+    if "notes" not in f:
+        return []
+    notes = f["notes"]
+    if notes is None:
+        return [f"Field {key!r} declares notes: null. Use an empty list ([]) to clear notes, or omit the key."]
+    if not isinstance(notes, list):
+        return [f"Field {key!r} declares notes but it is not a list of note objects."]
+    errors: list[str] = []
+    for i, entry in enumerate(notes):
+        where = f"Field {key!r} notes[{i}]"
+        if not isinstance(entry, dict):
+            errors.append(f"{where} is not a mapping with a note_text.")
+            continue
+        unknown = sorted(str(k) for k in entry if k not in _NOTE_ENTRY_KEYS)
+        if unknown:
+            errors.append(
+                f"{where} has unknown key(s): {', '.join(unknown)} (allowed: note_text, source, metadata)."
+            )
+        if not isinstance(entry.get("note_text"), str):
+            errors.append(f"{where} needs note_text as text.")
+        if "source" in entry and not isinstance(entry["source"], str):
+            errors.append(f"{where} has a source that is not text.")
+        if "metadata" in entry:
+            metadata = entry["metadata"]
+            if not isinstance(metadata, dict):
+                errors.append(f"{where} has metadata that is not a mapping.")
+            else:
+                problem = _json_problem(metadata, "metadata")
+                if problem:
+                    errors.append(f"{where} has metadata that is not JSON-representable: {problem}.")
     return errors
 
 

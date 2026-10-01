@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.43.0 (2026-10-01)
+
+- Validate authored field `notes` locally before any engine call. `notes`, when
+  present, must be a list of objects with a text `note_text` and optional text
+  `source` and object `metadata` (JSON-representable, recursively); unknown entry
+  keys, `notes: null`, non-list values, and non-object entries are refused with a
+  message naming the field and entry index. Entries are still sent exactly as
+  authored: omitted `source`/`metadata` stay omitted, omitted `notes` sends
+  nothing, and `notes: []` is sent as an explicit clear. Previously accepted
+  malformed `notes` now fail fast.
+
 ## 0.42.0 (unreleased)
 
 - Add `--acceptance-contract` to `aethis generate` and `aethis refine`. It
