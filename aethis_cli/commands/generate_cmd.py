@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -774,6 +775,7 @@ def validate_fields_list(fields: list) -> list[str]:
         if ftype == "enum" and not f.get("enum_values") and not f.get("value_space"):
             errors.append(f"Field {key!r} is type 'enum' but declares no enum_values (or value_space).")
         errors.extend(_validate_display_metadata(key, f, ftype))
+        errors.extend(_validate_field_notes(key, f))
     return errors
 
 
@@ -834,6 +836,88 @@ def _validate_display_metadata(key: str, f: dict, ftype: str) -> list[str]:
                 f"opaque there — but it publishes a pairing no consumer can resolve, so it is refused here. "
                 f"Omit the key, or use null, to say there is no pairing."
             )
+    return errors
+
+
+_NOTE_ENTRY_KEYS = frozenset({"note_text", "source", "metadata"})
+
+
+_MAX_METADATA_DEPTH = 100
+
+
+def _json_problem(value: object, path: str, _active: Optional[set[int]] = None, _depth: int = 0) -> Optional[str]:
+    """Describe the first place ``value`` is not JSON-representable, else None.
+
+    A self-referencing structure (possible via YAML anchors) and nesting beyond
+    :data:`_MAX_METADATA_DEPTH` are reported rather than recursed into. Shared
+    but acyclic aliases are fine: only containers on the current path count.
+    """
+    if value is None or isinstance(value, (bool, int, str)):
+        return None
+    if isinstance(value, float):
+        return None if math.isfinite(value) else f"{path} is a non-finite number"
+    if not isinstance(value, (list, dict)):
+        return f"{path} holds a {type(value).__name__}, which is not JSON"
+    active = _active if _active is not None else set()
+    if id(value) in active:
+        return f"{path} refers back to a structure that contains it (cyclic)"
+    if _depth >= _MAX_METADATA_DEPTH:
+        return f"{path} is nested deeper than {_MAX_METADATA_DEPTH} levels"
+    active.add(id(value))
+    try:
+        if isinstance(value, list):
+            for i, item in enumerate(value):
+                problem = _json_problem(item, f"{path}[{i}]", active, _depth + 1)
+                if problem:
+                    return problem
+        else:
+            for k, item in value.items():
+                if not isinstance(k, str):
+                    return f"{path} has non-text key {k!r}"
+                problem = _json_problem(item, f"{path}.{k}", active, _depth + 1)
+                if problem:
+                    return problem
+        return None
+    finally:
+        active.discard(id(value))
+
+
+def _validate_field_notes(key: str, f: dict) -> list[str]:
+    """Validate authored ``notes`` on one field entry.
+
+    ``notes`` is an ordered list of ``{note_text, source?, metadata?}`` objects.
+    Entries travel to the engine exactly as authored — omitted ``source`` and
+    ``metadata`` stay omitted — so this only checks shape. An omitted key sends
+    nothing; ``[]`` is sent as an authoritative clear.
+    """
+    if "notes" not in f:
+        return []
+    notes = f["notes"]
+    if notes is None:
+        return [f"Field {key!r} declares notes: null. Use an empty list ([]) to clear notes, or omit the key."]
+    if not isinstance(notes, list):
+        return [f"Field {key!r} declares notes but it is not a list of note objects."]
+    errors: list[str] = []
+    for i, entry in enumerate(notes):
+        where = f"Field {key!r} notes[{i}]"
+        if not isinstance(entry, dict):
+            errors.append(f"{where} is not a mapping with a note_text.")
+            continue
+        unknown = sorted(str(k) for k in entry if k not in _NOTE_ENTRY_KEYS)
+        if unknown:
+            errors.append(f"{where} has unknown key(s): {', '.join(unknown)} (allowed: note_text, source, metadata).")
+        if not isinstance(entry.get("note_text"), str):
+            errors.append(f"{where} needs note_text as text.")
+        if "source" in entry and not isinstance(entry["source"], str):
+            errors.append(f"{where} has a source that is not text.")
+        if "metadata" in entry:
+            metadata = entry["metadata"]
+            if not isinstance(metadata, dict):
+                errors.append(f"{where} has metadata that is not a mapping.")
+            else:
+                problem = _json_problem(metadata, "metadata")
+                if problem:
+                    errors.append(f"{where} has metadata that is not JSON-representable: {problem}.")
     return errors
 
 
@@ -1050,6 +1134,16 @@ def _upload_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) 
     ``/fields/spec`` and routes each field's label/question/hints through
     guidance.
     """
+    _validate_project_fields(project_dir)
+    _push_field_vocabulary(client, pid, project_dir)
+
+
+def _validate_project_fields(project_dir: Path) -> None:
+    """Exit with the validation errors of every contributing ``fields.yaml``.
+
+    Local only — run it before any engine call, because guidance added earlier
+    in a run accumulates on the project and a failed retry would duplicate it.
+    """
     # Fail fast on a malformed vocabulary before we mutate server state. Validate
     # each contributing file's RAW list so duplicate keys *within a file* surface
     # — the merged map would silently collapse them. A key shared between the
@@ -1068,6 +1162,8 @@ def _upload_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) 
                 console.print(f"  [red]✗[/red] {e}")
             raise typer.Exit(code=1)
 
+
+def _push_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) -> None:
     field_map = _merged_field_map(project_dir)
     if not field_map:
         return
@@ -1269,6 +1365,9 @@ def _run_generate(
     outcome: Optional[GenerationOutcome] = None
 
     try:
+        # Local field validation first: nothing below may reach the engine
+        # (guidance accumulates on the project) for a vocabulary that is invalid.
+        _validate_project_fields(project_dir)
         # Parse, validate, canonicalise and capability-check the complete test
         # plan before project creation, guidance, source, field or test writes.
         # The frozen snapshot is the payload uploaded later in this run.
