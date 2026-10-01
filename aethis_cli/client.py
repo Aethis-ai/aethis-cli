@@ -536,6 +536,9 @@ class AethisClient:
         # string is validated by the engine before it admits the job.
         thinking = normalize_thinking(thinking)
         if thinking is not _UNSET:
+            properties = self.generation_mode_request_properties()
+            if properties is None or "thinking" not in properties:
+                raise ValueError("This engine does not advertise per-generation thinking controls; no generation was started")
             body["thinking"] = thinking
         if deepseek_key and model != GenerationModel.deepseek:
             raise ValueError("A DeepSeek key requires model=deepseek-flash")

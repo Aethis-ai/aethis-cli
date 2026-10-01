@@ -15,6 +15,7 @@ import httpx
 import rfc8785
 import typer
 import yaml
+from rich.markup import escape
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 
 from aethis_cli.client import AethisClient, GenerationModel, normalize_thinking
@@ -1726,7 +1727,7 @@ def _render_thinking_warnings(payload: dict, seen: Optional[set[tuple[str, str]]
         if isinstance(code, str) and isinstance(message, str):
             key = (code, message)
             if key not in seen:
-                warn(f"{code}: {message}")
+                warn(escape(f"{code}: {message}"))
                 seen.add(key)
     return seen
 
