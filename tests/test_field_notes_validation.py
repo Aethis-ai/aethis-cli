@@ -181,6 +181,21 @@ def test_excessively_deep_metadata_is_refused_cleanly():
     assert any("notes[0]" in e and "deep" in e for e in errors)
 
 
+def _nested(containers: int) -> dict:
+    root: dict = {}
+    cursor = root
+    for _ in range(containers - 1):
+        cursor["k"] = {}
+        cursor = cursor["k"]
+    return root
+
+
+def test_depth_cap_boundary():
+    assert _errors([{"note_text": "x", "metadata": _nested(100)}]) == []
+    errors = _errors([{"note_text": "x", "metadata": _nested(101)}])
+    assert any("notes[0]" in e and "deep" in e for e in errors)
+
+
 def test_shared_acyclic_aliases_are_valid():
     import yaml
 

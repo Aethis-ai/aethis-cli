@@ -10,7 +10,7 @@
   authored: omitted `source`/`metadata` stay omitted, omitted `notes` sends
   nothing, and `notes: []` is sent as an explicit clear. Previously accepted
   malformed `notes` now fail fast. Field validation (all field errors, not only
-  `notes`) now runs before the project is touched, so a refused run no longer
+  `notes`) now runs before the project is touched, so a run refused by field validation no longer
   leaves refinement hints or guidance behind on the project. Cyclic or very deep
   metadata is refused with a clear message.
 
