@@ -256,3 +256,13 @@ def test_late_control_rejection_is_rendered_without_traceback(tmp_path, monkeypa
     output = capsys.readouterr().out
     assert "no generation was started" in output
     assert "Traceback" not in output
+
+
+@respx.mock
+def test_unreadable_generation_control_schema_refuses_without_post():
+    respx.get(f"{BASE}/openapi.json").respond(500, json={})
+    post = respx.post(f"{BASE}/api/v1/public/projects/p/generate").respond(202, json={})
+    with AethisClient("ak", BASE) as client:
+        with pytest.raises(ValueError, match="schema could not be read"):
+            client.generate("p", thinking="disabled")
+    assert not post.called

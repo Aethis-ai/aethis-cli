@@ -1375,7 +1375,7 @@ def _run_generate(
         properties = client.generation_mode_request_properties()
         if properties is None or "thinking" not in properties:
             console.print(
-                "[red]This engine does not advertise per-generation thinking controls. "
+                "[red]The target generation control schema is unavailable or does not advertise thinking. "
                 "Stopping before any project, source, guidance, field, or test mutation.[/red]"
             )
             raise typer.Exit(code=1)
