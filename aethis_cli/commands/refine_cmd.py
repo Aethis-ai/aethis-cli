@@ -14,7 +14,9 @@ from aethis_cli.commands.generate_cmd import _run_generate
 
 def refine(
     model: Optional[GenerationModel] = typer.Option(None, "--model", help="Authoring model (default: claude-sonnet-5)"),
-    thinking: Optional[str] = typer.Option(None, "--thinking", help="Per-generation thinking: disabled, adaptive, or enabled:N"),
+    thinking: Optional[str] = typer.Option(
+        None, "--thinking", help="Per-generation thinking: disabled, adaptive, or enabled:N"
+    ),
     hint: Optional[str] = typer.Option(None, "--hint", help="Guidance hint to add before refining"),
     project_id: Optional[str] = typer.Option(None, "--project-id", "-p"),
     seed_ruleset_id: Optional[str] = typer.Option(

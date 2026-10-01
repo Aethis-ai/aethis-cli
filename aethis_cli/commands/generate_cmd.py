@@ -18,6 +18,7 @@ import yaml
 from rich.markup import escape
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 
+from aethis_cli._terminal_safe import safe_text
 from aethis_cli.client import AethisClient, GenerationModel, normalize_thinking
 from aethis_cli.config import (
     load_project_config,
@@ -1183,7 +1184,9 @@ def _upload_rulebook_guidance(client: AethisClient, pid: str, project_dir: Path)
 
 def generate(
     model: Optional[GenerationModel] = typer.Option(None, "--model", help="Authoring model (default: claude-sonnet-5)"),
-    thinking: Optional[str] = typer.Option(None, "--thinking", help="Per-generation thinking: disabled, adaptive, or enabled:N"),
+    thinking: Optional[str] = typer.Option(
+        None, "--thinking", help="Per-generation thinking: disabled, adaptive, or enabled:N"
+    ),
     project_id: Optional[str] = typer.Option(None, "--project-id", "-p"),
     poll: bool = typer.Option(True, "--poll/--no-poll", help="Poll until generation completes"),
     timeout: int = typer.Option(600, "--timeout", "-t", help="Polling timeout in seconds"),
@@ -1373,7 +1376,9 @@ def _run_generate(
             return
 
         # Poll with progress spinner
-        outcome = _poll_until_done(client, pid, project_dir, timeout, no_publish=no_publish, shown_thinking_warnings=shown_thinking_warnings)
+        outcome = _poll_until_done(
+            client, pid, project_dir, timeout, no_publish=no_publish, shown_thinking_warnings=shown_thinking_warnings
+        )
 
         # Surface how the produced field vocabulary compares to what was pinned,
         # rather than letting any drift pass silently. The comparison is always
@@ -1719,7 +1724,10 @@ def _render_thinking_warnings(payload: dict, seen: Optional[set[tuple[str, str]]
     if not isinstance(config, dict):
         return seen or set()
     seen = seen if seen is not None else set()
-    for warning in config.get("warnings") or []:
+    warnings = config.get("warnings")
+    if not isinstance(warnings, (list, tuple)):
+        return seen
+    for warning in warnings:
         if not isinstance(warning, dict):
             continue
         code = warning.get("code")
@@ -1727,7 +1735,7 @@ def _render_thinking_warnings(payload: dict, seen: Optional[set[tuple[str, str]]
         if isinstance(code, str) and isinstance(message, str):
             key = (code, message)
             if key not in seen:
-                warn(escape(f"{code}: {message}"))
+                warn(escape(safe_text(f"{code}: {message}")))
                 seen.add(key)
     return seen
 

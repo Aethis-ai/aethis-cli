@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
 import respx
 from typer.testing import CliRunner
@@ -56,7 +57,9 @@ def test_client_rejects_provider_key_mix() -> None:
 
 @respx.mock
 def test_thinking_serialization_preserves_omission_and_explicit_null() -> None:
-    respx.get(f"{BASE}/openapi.json").respond(200, json={"components": {"schemas": {"GenerationModeRequest": {"properties": {"thinking": {}}}}}})
+    respx.get(f"{BASE}/openapi.json").respond(
+        200, json={"components": {"schemas": {"GenerationModeRequest": {"properties": {"thinking": {}}}}}}
+    )
     route = respx.post(f"{BASE}/api/v1/public/projects/p/generate").respond(202, json={})
     with AethisClient("ak", BASE) as client:
         client.generate("p")
@@ -100,7 +103,13 @@ def test_flags_forward_thinking(command: str, monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_thinking_warning_is_rendered(capsys: pytest.CaptureFixture[str]) -> None:
-    generate_cmd._render_thinking_warnings({"authoring_config": {"warnings": [{"code": "thinking_budget_ignored", "message": "budget does not bound reasoning"}]}})
+    generate_cmd._render_thinking_warnings(
+        {
+            "authoring_config": {
+                "warnings": [{"code": "thinking_budget_ignored", "message": "budget does not bound reasoning"}]
+            }
+        }
+    )
     assert "thinking_budget_ignored" in capsys.readouterr().out
 
 
@@ -181,7 +190,9 @@ def test_project_config_preserves_positional_arguments(tmp_path) -> None:
 @respx.mock
 @pytest.mark.parametrize("thinking", [None, "disabled"])
 def test_direct_client_refuses_explicit_thinking_on_old_engine(thinking):
-    respx.get(f"{BASE}/openapi.json").respond(200, json={"components": {"schemas": {"GenerationModeRequest": {"properties": {"mode": {}}}}}})
+    respx.get(f"{BASE}/openapi.json").respond(
+        200, json={"components": {"schemas": {"GenerationModeRequest": {"properties": {"mode": {}}}}}}
+    )
     post = respx.post(f"{BASE}/api/v1/public/projects/p/generate").respond(202, json={})
     with AethisClient("ak", BASE) as client:
         with pytest.raises(ValueError, match="no generation was started"):
@@ -194,3 +205,36 @@ def test_warning_text_cannot_break_rich_markup_and_is_shown_once(capsys):
     seen = generate_cmd._render_thinking_warnings(payload)
     generate_cmd._render_thinking_warnings(payload, seen)
     assert capsys.readouterr().out.count("x [/y]") == 1
+
+
+@pytest.mark.parametrize("message", ["escape\x1b[2J", "surrogate\ud800", "bidi\u202e", "newline\nspoof"])
+def test_warning_uses_terminal_sanitizer(message, capsys):
+    from aethis_cli._terminal_safe import safe_text
+
+    generate_cmd._render_thinking_warnings(
+        {"authoring_config": {"warnings": [{"code": "warning", "message": message}]}}
+    )
+    output = capsys.readouterr().out
+    assert safe_text(message) in output
+    assert message not in output
+
+
+@respx.mock
+def test_direct_generation_refreshes_cached_control_schema_before_post():
+    schema = respx.get(f"{BASE}/openapi.json").mock(
+        side_effect=[
+            httpx.Response(
+                200, json={"components": {"schemas": {"GenerationModeRequest": {"properties": {"thinking": {}}}}}}
+            ),
+            httpx.Response(
+                200, json={"components": {"schemas": {"GenerationModeRequest": {"properties": {"mode": {}}}}}}
+            ),
+        ]
+    )
+    post = respx.post(f"{BASE}/api/v1/public/projects/p/generate").respond(202, json={})
+    with AethisClient("ak", BASE) as client:
+        assert "thinking" in client.generation_mode_request_properties()
+        with pytest.raises(ValueError, match="no generation was started"):
+            client.generate("p", thinking="disabled")
+    assert schema.call_count == 2
+    assert not post.called
