@@ -1462,7 +1462,11 @@ def _run_generate(
             generation_options["deepseek_key"] = deepseek_key
         if thinking is not None:
             generation_options["thinking"] = thinking
-        job = client.generate(pid, mode=mode, seed_ruleset_id=seed_ruleset_id, **generation_options)
+        try:
+            job = client.generate(pid, mode=mode, seed_ruleset_id=seed_ruleset_id, **generation_options)
+        except ValueError as exc:
+            console.print(f"[red]{escape(safe_text(str(exc)))}[/red]")
+            raise typer.Exit(code=1) from None
         write_state(project_dir, {"project_id": pid, "job_id": job["job_id"]})
         info(f"Generation queued (job={job['job_id']})")
         shown_thinking_warnings = _render_thinking_warnings(job)

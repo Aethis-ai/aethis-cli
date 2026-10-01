@@ -240,3 +240,19 @@ def test_direct_generation_refreshes_cached_control_schema_before_post():
             client.generate("p", thinking="disabled")
     assert schema.call_count == 2
     assert not post.called
+
+
+def test_late_control_rejection_is_rendered_without_traceback(tmp_path, monkeypatch, capsys):
+    from tests.test_generate_no_publish import _engine, _project, _wire
+
+    _project(tmp_path)
+    client = _engine({})
+    client.generation_mode_request_properties.return_value = {"thinking"}
+    client.generate.side_effect = ValueError("Control schema could not be read; no generation was started")
+    _wire(monkeypatch, tmp_path, client)
+    with pytest.raises(__import__("typer").Exit) as rejected:
+        generate_cmd._run_generate(project_id="p", poll=False, timeout=30, thinking="disabled")
+    assert rejected.value.exit_code == 1
+    output = capsys.readouterr().out
+    assert "no generation was started" in output
+    assert "Traceback" not in output

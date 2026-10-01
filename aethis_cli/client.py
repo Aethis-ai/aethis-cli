@@ -539,7 +539,9 @@ class AethisClient:
         thinking = normalize_thinking(thinking)
         if thinking is not _UNSET:
             properties = self.generation_mode_request_properties(refresh=True)
-            if properties is None or "thinking" not in properties:
+            if properties is None:
+                raise ValueError("The generation control schema could not be read; no generation was started")
+            if "thinking" not in properties:
                 raise ValueError(
                     "This engine does not advertise per-generation thinking controls; no generation was started"
                 )
