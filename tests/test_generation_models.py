@@ -56,6 +56,7 @@ def test_client_rejects_provider_key_mix() -> None:
 
 @respx.mock
 def test_thinking_serialization_preserves_omission_and_explicit_null() -> None:
+    respx.get(f"{BASE}/openapi.json").respond(200, json={"components": {"schemas": {"GenerationModeRequest": {"properties": {"thinking": {}}}}}})
     route = respx.post(f"{BASE}/api/v1/public/projects/p/generate").respond(202, json={})
     with AethisClient("ak", BASE) as client:
         client.generate("p")
@@ -110,8 +111,9 @@ def test_thinking_capability_rejection_precedes_project_mutation(tmp_path, monke
     client = _engine({})
     client.generation_mode_request_properties.return_value = set()
     _wire(monkeypatch, tmp_path, client)
-    with pytest.raises(Exception):
+    with pytest.raises(__import__("typer").Exit) as rejected:
         generate_cmd._run_generate(project_id="p", poll=False, timeout=30, thinking="disabled")
+    assert rejected.value.exit_code == 1
     client.get_project.assert_not_called()
     client.create_project.assert_not_called()
 
@@ -176,3 +178,21 @@ def test_project_config_preserves_positional_arguments(tmp_path) -> None:
     assert config.project_id == "project-id"
     assert config.config_path == tmp_path
     assert config.deepseek_key_env == "DEEPSEEK_API_KEY"
+
+
+@respx.mock
+@pytest.mark.parametrize("thinking", [None, "disabled"])
+def test_direct_client_refuses_explicit_thinking_on_old_engine(thinking):
+    respx.get(f"{BASE}/openapi.json").respond(200, json={"components": {"schemas": {"GenerationModeRequest": {"properties": {"mode": {}}}}}})
+    post = respx.post(f"{BASE}/api/v1/public/projects/p/generate").respond(202, json={})
+    with AethisClient("ak", BASE) as client:
+        with pytest.raises(ValueError, match="no generation was started"):
+            client.generate("p", thinking=thinking)
+    assert not post.called
+
+
+def test_warning_text_cannot_break_rich_markup_and_is_shown_once(capsys):
+    payload = {"authoring_config": {"warnings": [{"code": "future", "message": "x [/y]"}]}}
+    seen = generate_cmd._render_thinking_warnings(payload)
+    generate_cmd._render_thinking_warnings(payload, seen)
+    assert capsys.readouterr().out.count("x [/y]") == 1
