@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
@@ -64,6 +65,141 @@ def resolve_base_url_with_source() -> tuple[str, str]:
     if profile.get("base_url"):
         return profile["base_url"], "profile"
     return DEFAULT_BASE_URL, "default"
+
+
+_HOST_RE = re.compile(r"[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*")
+
+
+def _is_local_host(host: str) -> bool:
+    import ipaddress
+
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def parse_credential_base_url(raw: str) -> str:
+    """Return the canonical form of a server URL, or raise :class:`ConfigError`.
+
+    Strict by design — it never rewrites an invalid URL into a different one:
+    the authority is rebuilt from the parsed parts and must equal the original
+    (only an explicit default port may be dropped). Requires an http(s) scheme
+    and a host; refuses control characters, non-ASCII, userinfo, query,
+    fragment and a malformed or out-of-range port; allows plain http only for
+    loopback hosts (``localhost``, ``127.0.0.0/8``, ``::1``). Canonical form:
+    lowercase scheme and host, IPv6 bracketed, default port dropped, path kept
+    as written with the trailing slash stripped.
+
+    Error text never includes the raw URL (it may carry credentials or tokens).
+    Some checks overlap and are kept for clearer messages, not as independent
+    coverage: urlsplit already lowercases scheme and host; the round-trip also
+    catches userinfo, an empty port and a leading-zero port; the final httpx
+    parse is defence in depth behind the ASCII check.
+    """
+    import httpx
+    from urllib.parse import urlsplit
+
+    def bad(why: str) -> ConfigError:
+        return ConfigError(f"Invalid server URL: {why}.")
+
+    if not isinstance(raw, str):
+        raise bad("must be a string")
+    if not raw.isprintable() or not raw.isascii() or " " in raw:
+        raise bad("contains whitespace, control or non-ASCII characters")
+    try:
+        parts = urlsplit(raw)
+        scheme = parts.scheme.lower()
+        host = parts.hostname
+        port = parts.port
+    except ValueError:
+        raise bad("not a well-formed URL") from None
+    if scheme not in ("http", "https"):
+        raise bad("must start with http:// or https://")
+    if "@" in parts.netloc:
+        raise bad("must not contain credentials")
+    if "%" in parts.netloc:
+        raise bad("host must not be percent-encoded")
+    if "?" in raw or "#" in raw:
+        raise bad("must not contain a query or fragment")
+    if not host:
+        raise bad("missing host")
+    host = host.lower()
+    shown_host = f"[{host}]" if ":" in host else host
+    if not _HOST_RE.fullmatch(host) and ":" not in host:
+        raise bad("host contains invalid characters")
+    authority = shown_host if port is None else f"{shown_host}:{port}"
+    if parts.netloc.lower() != authority:
+        raise bad("host or port is malformed")
+    if port is not None and not 1 <= port <= 65535:
+        raise bad("port out of range")
+    if scheme == "http" and not _is_local_host(host):
+        raise ConfigError(
+            f"Refusing to use HTTP for remote host '{host}'. Use HTTPS or target localhost for local development."
+        )
+    if port is not None and (scheme, port) in {("https", 443), ("http", 80)}:
+        authority = shown_host
+    canonical = f"{scheme}://{authority}{parts.path.rstrip('/')}"
+    try:
+        httpx.URL(canonical)
+    except (httpx.InvalidURL, ValueError):
+        raise bad("rejected by the HTTP client") from None
+    return canonical
+
+
+def profile_effective_base_url(profile_name: str) -> str:
+    """The canonical server a profile names (default if unset); raises if its URL is invalid."""
+    return parse_credential_base_url(get_profile(profile_name).get("base_url") or DEFAULT_BASE_URL)
+
+
+def resolve_credential_base_url(profile_name: Optional[str] = None) -> tuple[str, str]:
+    """Return (canonical_base_url, source) for commands that send or mint credentials.
+
+    Order: ``AETHIS_BASE_URL`` (also set by ``--base-url``) > the profile's
+    ``base_url`` > the default. Unlike :func:`resolve_base_url_with_source`
+    this NEVER consults a project ``aethis.yaml``: a file found by walking up
+    from the working directory must not choose where sign-in tokens or newly
+    minted keys are sent. Every source goes through
+    :func:`parse_credential_base_url`. ``source`` is 'env', 'profile' or 'default'.
+    """
+    env = os.environ.get("AETHIS_BASE_URL")
+    if env:
+        return parse_credential_base_url(env), "env"
+    profile = get_profile(profile_name or active_profile_name())
+    if profile.get("base_url"):
+        return parse_credential_base_url(profile["base_url"]), "profile"
+    return parse_credential_base_url(DEFAULT_BASE_URL), "default"
+
+
+_SAVE_REMEDY = {
+    "generate": "Use --no-save, set the profile's server (`aethis profile add {p} --base-url {u}`), "
+    "or unset AETHIS_BASE_URL.",
+    "login": "Set the profile's server (`aethis profile add {p} --base-url {u}`), "
+    "unset AETHIS_BASE_URL, or pick a matching profile with --profile.",
+}
+
+
+def check_save_target(base_url: str, source: str, profile_name: str, command: str = "generate") -> None:
+    """Refuse to save a key minted on a server the target profile does not name.
+
+    Only an environment-supplied server can disagree with the profile (the
+    other sources are the profile's own server). Canonical forms are compared; an invalid URL on either side raises.
+    """
+    if profile_name == ANONYMOUS_PROFILE:
+        raise ConfigError(
+            f"Cannot save a key to the reserved '{ANONYMOUS_PROFILE}' profile. Pick a different profile with --profile."
+        )
+    if source != "env":
+        return
+    effective = profile_effective_base_url(profile_name)
+    if parse_credential_base_url(base_url) != effective:
+        remedy = _SAVE_REMEDY[command].format(p=profile_name, u=base_url)
+        raise ConfigError(
+            f"AETHIS_BASE_URL ({base_url}) differs from profile '{profile_name}' ({effective}); "
+            f"the new key would be saved against the wrong server. {remedy}"
+        )
 
 
 def make_authed_client(

@@ -6,13 +6,15 @@ import os
 from typing import Optional
 
 import typer
+from rich.markup import escape
 
 from aethis_cli.config import (
     ANONYMOUS_PROFILE,
-    DEFAULT_BASE_URL,
     DEFAULT_PROFILE,
     active_profile_name,
+    check_save_target,
     credentials_path,
+    resolve_credential_base_url,
     set_profile,
 )
 from aethis_cli.errors import ConfigError
@@ -124,7 +126,7 @@ def run_browser_login(base_url: str, timeout: int = 120, *, profile: Optional[st
             timeout=15.0,
         )
     except httpx.HTTPError as e:
-        console.print(f"[yellow]Could not reach API at {base_url}: {e}[/yellow]")
+        console.print(f"[yellow]Could not reach API at {escape(base_url)}: {escape(str(e))}[/yellow]")
         return None
 
     if resp.status_code != 201:
@@ -195,7 +197,19 @@ def login(
         )
         raise typer.Exit(code=1)
 
-    base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
+    target_profile = profile or active_profile_name()
+    try:
+        base_url, source = resolve_credential_base_url(target_profile)
+    except ConfigError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        raise typer.Exit(code=1) from None
+    label = {"env": "from AETHIS_BASE_URL", "profile": "from profile", "default": "default"}[source]
+    info(f"Target server: {escape(base_url)} ({label}; profile: {escape(target_profile)})")
+    try:
+        check_save_target(base_url, source, target_profile, "login")
+    except ConfigError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        raise typer.Exit(code=1) from None
     if api_key:
         if not _validate_key(api_key, base_url):
             console.print("[red]That key was rejected by the API (HTTP 401). Check it and try again.[/red]")
