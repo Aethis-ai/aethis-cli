@@ -14,7 +14,8 @@
   when `AETHIS_BASE_URL` names a different server than the target profile
   (use `--no-save`, set the profile's `base_url`, or unset the variable). This
   means `AETHIS_BASE_URL=<url> aethis login` now requires the profile to name
-  the same server.
+  the same server. Migrate with `aethis profile add <name> --base-url <url>`
+  once, then `aethis --profile <name> login`.
 - `aethis status` identity/generation fall back to the profile's server when
   there is no project file.
 

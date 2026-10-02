@@ -17,6 +17,11 @@ export AETHIS_BASE_URL=http://localhost:8080
 export AETHIS_API_KEY=test
 uv run aethis status
 
+# To sign in / mint keys against another server, use a profile (login and
+# `account` never save a key minted on an AETHIS_BASE_URL the profile doesn't name):
+uv run aethis profile add local --base-url http://localhost:8080   # once
+uv run aethis --profile local login
+
 # Against prod (default), use a real key:
 uv run aethis login              # browser OAuth → stores ak_live_... at ~/.config/aethis/credentials
 ```
