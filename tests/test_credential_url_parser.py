@@ -43,6 +43,7 @@ def test_accepted(raw: str, canonical: str) -> None:
         "",
         "https://",
         "https://host:abc",
+        "https://host:",
         "https://host:99999",
         "https://host:0",
         "https://user:pass@host",
@@ -118,3 +119,10 @@ def test_malformed_stored_profile_url_refuses_save_guard(auth, perms, monkeypatc
     result = runner.invoke(app, ["--profile", "bad", "account", "generate"])
     assert result.exit_code == 1
     auth.assert_not_called()
+
+
+def test_save_guard_compares_canonical_forms_with_unnormalised_profile() -> None:
+    config.set_profile("p", base_url="HTTPS://EXAMPLE.test:443/")
+    config.check_save_target("https://example.test", "env", "p")
+    with pytest.raises(ConfigError):
+        config.check_save_target("https://other.test", "env", "p")

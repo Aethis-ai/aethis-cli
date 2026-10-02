@@ -10,8 +10,12 @@
   `aethis.yaml` is deliberately never consulted for them, so a project file
   cannot redirect the sign-in token or newly minted keys for these commands
   (the automatic sign-in other commands trigger is tracked separately, #146).
-  The resolved URL is validated (no plaintext HTTP to remote hosts) and
-  normalised (case, default port, trailing slash).
+  The server URL is parsed strictly and never rewritten: it must be http(s)
+  with a host and a valid port, with no credentials, query or fragment, and
+  plain http only for loopback hosts (`localhost`, `127.0.0.0/8`, `::1`);
+  invalid URLs are refused with an error. Valid URLs are canonicalised (lowercase
+  scheme and host, default port dropped, trailing slash stripped, path kept).
+  `aethis status` follows the same parsing when there is no project file.
 - `generate`, `revoke` and `login` print the target server and where it came
   from before changing anything. `generate` and `login` refuse to save a key
   when `AETHIS_BASE_URL` names a different server than the target profile
