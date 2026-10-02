@@ -20,7 +20,7 @@ from aethis_cli.config import (
     make_authed_client,
     resolve_anthropic_key,
     resolve_api_key,
-    resolve_base_url_with_source,
+    resolve_credential_base_url,
 )
 from aethis_cli.errors import AethisAPIError, ConfigError
 from aethis_cli.output import console, error_panel, warn
@@ -73,7 +73,7 @@ def review(
                 "project directory where `aethis generate` has been run."
             )
             raise typer.Exit(code=1)
-        base_url, _ = resolve_base_url_with_source()
+        base_url, _ = resolve_credential_base_url()
         cfg = ProjectConfig(project="", base_url=base_url)
 
     pid = project_id or cfg.project_id

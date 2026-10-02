@@ -279,6 +279,7 @@ def test_login_transport_error_does_not_crash_on_markup(auth, post, printed, man
 
     from rich.console import Console
 
+    config.set_profile("default", base_url=BRACKET_URL)
     real = Console(record=True, width=200)
     printed.side_effect = lambda *a, **k: real.print(*a, **k)
     assert run_browser_login(BRACKET_URL) is None

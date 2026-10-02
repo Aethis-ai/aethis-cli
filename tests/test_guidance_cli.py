@@ -52,6 +52,8 @@ def test_generate_cmd_string_hints_passed_with_default_process_type(tmp_path, mo
     """Plain-string hints in hints.yaml should be sent with process_type=rule_generation."""
     (tmp_path / "aethis.yaml").write_text("project: test\napi_key_env: AETHIS_KEY\nbase_url: https://test.local\n")
     monkeypatch.setenv("AETHIS_KEY", "ak_test")
+    monkeypatch.setenv("AETHIS_API_KEY_ENV", "AETHIS_KEY")  # the user designates the project's variable
+    monkeypatch.setenv("AETHIS_BASE_URL", "https://test.local")  # ...and confirms its server
     (tmp_path / "sources").mkdir()
     (tmp_path / "sources" / "policy.md").write_text("# Stub source")
     (tmp_path / "guidance").mkdir()
@@ -79,6 +81,8 @@ def test_generate_cmd_dict_hints_pass_process_type(tmp_path, monkeypatch):
     """Dict-format hints in hints.yaml should pass their process_type to add_guidance."""
     (tmp_path / "aethis.yaml").write_text("project: test\napi_key_env: AETHIS_KEY\nbase_url: https://test.local\n")
     monkeypatch.setenv("AETHIS_KEY", "ak_test")
+    monkeypatch.setenv("AETHIS_API_KEY_ENV", "AETHIS_KEY")  # the user designates the project's variable
+    monkeypatch.setenv("AETHIS_BASE_URL", "https://test.local")  # ...and confirms its server
     (tmp_path / "sources").mkdir()
     (tmp_path / "sources" / "policy.md").write_text("# Stub source")
     (tmp_path / "guidance").mkdir()
@@ -320,6 +324,8 @@ def test_guidance_import_reports_skipped(tmp_path, monkeypatch):
     """guidance import should report N skipped when server returns skipped:true."""
     (tmp_path / "aethis.yaml").write_text("project: test\napi_key_env: AETHIS_KEY\nbase_url: https://test.local\n")
     monkeypatch.setenv("AETHIS_KEY", "ak_test")
+    monkeypatch.setenv("AETHIS_API_KEY_ENV", "AETHIS_KEY")  # the user designates the project's variable
+    monkeypatch.setenv("AETHIS_BASE_URL", "https://test.local")  # ...and confirms its server
     (tmp_path / ".aethis").mkdir()
     (tmp_path / ".aethis" / "state.json").write_text(json.dumps({"project_id": "proj_skip"}))
     monkeypatch.chdir(tmp_path)
@@ -350,6 +356,8 @@ def test_guidance_import_no_skips(tmp_path, monkeypatch):
     """guidance import with no duplicates should not mention skipped."""
     (tmp_path / "aethis.yaml").write_text("project: test\napi_key_env: AETHIS_KEY\nbase_url: https://test.local\n")
     monkeypatch.setenv("AETHIS_KEY", "ak_test")
+    monkeypatch.setenv("AETHIS_API_KEY_ENV", "AETHIS_KEY")  # the user designates the project's variable
+    monkeypatch.setenv("AETHIS_BASE_URL", "https://test.local")  # ...and confirms its server
     (tmp_path / ".aethis").mkdir()
     (tmp_path / ".aethis" / "state.json").write_text(json.dumps({"project_id": "proj_noskip"}))
     monkeypatch.chdir(tmp_path)

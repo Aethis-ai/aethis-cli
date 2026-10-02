@@ -50,6 +50,7 @@ def test_generate_with_empty_sources_dir_fails_fast(tmp_path, monkeypatch):
     """No files in .aethis/sources/ → exit non-zero with a clear message before hitting the API."""
     project = _make_project(tmp_path, include_sources=False, include_tests=True)
     monkeypatch.chdir(project)
+    monkeypatch.setenv("AETHIS_BASE_URL", "http://localhost:8080")  # the user confirms the project's server
     monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
 
     mock_client = MagicMock()
@@ -73,6 +74,7 @@ def test_test_with_zero_test_cases_warns_and_fails(tmp_path, monkeypatch):
     """Running `aethis test` with no scenarios → clear warning, non-zero exit."""
     project = _make_project(tmp_path, include_sources=True, include_tests=False)
     monkeypatch.chdir(project)
+    monkeypatch.setenv("AETHIS_BASE_URL", "http://localhost:8080")  # the user confirms the project's server
     monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
 
     mock_client = MagicMock()

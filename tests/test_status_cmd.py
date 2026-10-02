@@ -92,7 +92,7 @@ def test_status_with_yaml_shows_project_context(tmp_project, monkeypatch):
     """From inside a project dir, status should show the project + config path."""
     monkeypatch.chdir(tmp_project)
     monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
-    monkeypatch.delenv("AETHIS_BASE_URL", raising=False)
+    # tmp_project confirms its (non-default) server via AETHIS_BASE_URL.
 
     with patch("aethis_cli.client.AethisClient.whoami", side_effect=Exception("skip")):
         # Let identity section fail gracefully; we only care about the project section.
@@ -107,7 +107,7 @@ def test_status_with_yaml_shows_project_context(tmp_project, monkeypatch):
     assert "test-policy" in result.output
     assert "aethis.yaml" in result.output
     assert "test.local" in result.output
-    assert "from aethis.yaml" in result.output
+    assert "from AETHIS_BASE_URL" in result.output
 
 
 def _write_multi_profile_credentials(tmp_path: Path, profile: str, api_key: str) -> Path:
@@ -203,7 +203,7 @@ def test_status_with_project_id_shows_generation_progress(tmp_project, monkeypat
     """--project-id adds a generation progress section after the global summary."""
     monkeypatch.chdir(tmp_project)
     monkeypatch.setenv("AETHIS_API_KEY", "ak_test")
-    monkeypatch.delenv("AETHIS_BASE_URL", raising=False)
+    # tmp_project confirms its (non-default) server via AETHIS_BASE_URL.
 
     fake_me = {
         "key_id": "ak_x",

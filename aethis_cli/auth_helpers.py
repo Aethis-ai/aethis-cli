@@ -23,7 +23,7 @@ import sys
 from dataclasses import dataclass
 from typing import Optional
 
-from aethis_cli.errors import AuthRequired, ConfigError
+from aethis_cli.errors import AuthRequired
 
 
 @dataclass
@@ -164,10 +164,12 @@ def require_auth_or_login_inline(
        command doesn't silently spawn a browser.
     4. Otherwise raise :class:`AuthRequired` with a one-line remediation.
 
-    ``base_url`` falls back to ``RUNTIME.base_url_override`` then
-    ``AETHIS_BASE_URL`` then the default — this matters because the browser
-    flow mints a key against a specific server, and minting against prod when
-    the user is targeting a local dev server would silently 401 forever.
+    The server is always the one the user selected (``--base-url`` /
+    ``AETHIS_BASE_URL``, else the active profile's, else the default). A
+    ``base_url`` argument that names a different server (e.g. from a project
+    ``aethis.yaml``) is refused before anything is prompted or sent: the
+    browser flow sends a sign-in token to that server and saves the key it
+    returns.
     """
     if RUNTIME.api_key_override:
         return RUNTIME.api_key_override
@@ -207,17 +209,11 @@ def require_auth_or_login_inline(
         console.print(f"[red]Auth required:[/red] {message}")
         raise AuthRequired(message)
 
-    # Resolve base URL late so we honour both env and project config.
-    resolved_base_url = base_url or RUNTIME.base_url_override or os.environ.get("AETHIS_BASE_URL")
-    if resolved_base_url is None:
-        try:
-            from aethis_cli.config import resolve_base_url_with_source
+    # The sign-in token and the minted key only ever go to / are saved for the
+    # server the user selected — never one a project file chose.
+    from aethis_cli.config import authorize_credential_server
 
-            resolved_base_url, _ = resolve_base_url_with_source()
-        except ConfigError:
-            from aethis_cli.config import DEFAULT_BASE_URL
-
-            resolved_base_url = DEFAULT_BASE_URL
+    resolved_base_url = authorize_credential_server(base_url)
 
     from aethis_cli.output import console
 

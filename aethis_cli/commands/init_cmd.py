@@ -8,7 +8,7 @@ from typing import Optional
 
 import typer
 
-from aethis_cli.config import ProjectConfig, resolve_api_key, write_state
+from aethis_cli.config import ProjectConfig, resolve_api_key, resolve_credential_base_url, write_state
 from aethis_cli.errors import ConfigError
 from aethis_cli.output import console, info, success
 
@@ -68,7 +68,7 @@ def _has_cached_auth() -> bool:
     try:
         # We only need to know if a key exists; the values in ProjectConfig
         # other than api_key_env do not affect lookup.
-        resolve_api_key(ProjectConfig(project=""))
+        resolve_api_key(ProjectConfig(project="", base_url=resolve_credential_base_url()[0]))
         return True
     except ConfigError:
         return False

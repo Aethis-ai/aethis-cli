@@ -20,8 +20,8 @@ def _run(env=None, client_mock=None, api_key="ak_test"):
     )
     patches.append(
         patch(
-            "aethis_cli.commands.whoami_cmd.resolve_base_url_with_source",
-            return_value=("http://localhost:8080", "default"),
+            "aethis_cli.commands.whoami_cmd.project_credential_server",
+            return_value="http://localhost:8080",
         ),
     )
     _env = {"AETHIS_BASE_URL": "http://localhost:8080"}

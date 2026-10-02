@@ -55,8 +55,8 @@ def _run_usage(client_mock, api_key="ak_test"):
         patch("aethis_cli.commands.usage_cmd.AethisClient", return_value=client_mock),
         patch("aethis_cli.commands.usage_cmd.resolve_cached_key", return_value=api_key),
         patch(
-            "aethis_cli.commands.usage_cmd.resolve_base_url_with_source",
-            return_value=(BASE, "default"),
+            "aethis_cli.commands.usage_cmd.project_credential_server",
+            return_value=BASE,
         ),
     ]
     for p in patches:

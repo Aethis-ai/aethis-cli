@@ -9,7 +9,7 @@ from rich.table import Table
 
 from aethis_cli.auth_helpers import resolve_cached_key
 from aethis_cli.client import AethisClient
-from aethis_cli.config import resolve_base_url_with_source
+from aethis_cli.config import project_credential_server
 from aethis_cli.errors import AethisAPIError
 from aethis_cli.output import console, error_panel
 from aethis_cli.render import emit, is_json_requested
@@ -32,8 +32,8 @@ def usage() -> None:
     status polling (`read`) are effectively unlimited. Check here before a big
     authoring run so a 429 is never the first signal.
     """
+    base_url = project_credential_server()
     api_key = resolve_cached_key()
-    base_url, _ = resolve_base_url_with_source()
     if api_key is None:
         console.print(
             "[yellow]No Aethis API key configured.[/yellow]\n[dim]Run 'aethis login' or set AETHIS_API_KEY.[/dim]"

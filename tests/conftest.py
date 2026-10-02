@@ -34,8 +34,15 @@ def _reset_render_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def tmp_project(tmp_path: Path) -> Path:
-    """Create a minimal valid aethis project in a temp dir."""
+def tmp_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Create a minimal valid aethis project in a temp dir.
+
+    The project file names a non-default server, so the fixture also confirms it
+    the way a user must (``AETHIS_BASE_URL``): a credential is never sent to a
+    server only a project file chose. ``tests/test_project_file_trust.py`` covers
+    the unconfirmed case.
+    """
+    monkeypatch.setenv("AETHIS_BASE_URL", "https://test.local")
     (tmp_path / "aethis.yaml").write_text(
         "project: test-policy\napi_key_env: AETHIS_API_KEY\nbase_url: https://test.local\n"
     )

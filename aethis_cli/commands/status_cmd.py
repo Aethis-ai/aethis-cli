@@ -2,21 +2,21 @@
 
 from __future__ import annotations
 
-import os
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 import typer
+from rich.markup import escape
 
 from aethis_cli._version import __version__
 from aethis_cli.auth_helpers import resolve_cached_key
 from aethis_cli.client import AethisClient
 from aethis_cli.config import (
-    DEFAULT_BASE_URL,
     active_profile_name,
+    authorize_credential_server,
     get_profile,
     load_project_config,
     read_state,
-    resolve_base_url_with_source,
+    resolve_credential_base_url,
 )
 from aethis_cli.errors import AethisAPIError, ConfigError
 from aethis_cli.generation_status import format_heartbeat, format_progress_detail
@@ -43,6 +43,35 @@ Examples:
 """
 
 
+class _Target(NamedTuple):
+    """Where credentials would go for this invocation, and why not if refused."""
+
+    server: Optional[str]
+    source: Optional[str]
+    problem: Optional[str]
+
+
+def _credential_target() -> _Target:
+    """The user's selected server, plus a refusal if the project file selects another.
+
+    ``status`` shows the context either way: a refusal is reported in the
+    identity/generation sections and in the exit code, not by hiding the output.
+    """
+    try:
+        server, source = resolve_credential_base_url()
+    except ConfigError as e:
+        return _Target(None, None, str(e))
+    try:
+        requested: Optional[str] = load_project_config().base_url
+    except ConfigError:
+        requested = None
+    try:
+        authorize_credential_server(requested)
+    except ConfigError as e:
+        return _Target(server, source, str(e))
+    return _Target(server, source, None)
+
+
 def status(
     project_id: Optional[str] = typer.Option(
         None,
@@ -52,21 +81,23 @@ def status(
     ),
 ) -> None:
     """Show CLI context and optional project generation progress."""
+    target = _credential_target()
     if is_json_requested():
-        _emit_json_status(project_id)
-        return
+        _emit_json_status(project_id, target)
+    else:
+        _print_cli_section()
+        _print_server_section(target)
+        cfg, state_ruleset = _print_project_section()
+        _print_identity_section(target)
 
-    _print_cli_section()
-    _print_server_section()
-    cfg, state_ruleset = _print_project_section()
-    _print_identity_section()
-
-    pid = project_id or (cfg.project_id if cfg else None)
-    if pid:
-        _print_generation_section(pid)
-    elif state_ruleset:
-        # Don't hit the API if we only have a ruleset_id and no project context
-        pass
+        pid = project_id or (cfg.project_id if cfg else None)
+        if pid:
+            _print_generation_section(pid, target)
+        elif state_ruleset:
+            # Don't hit the API if we only have a ruleset_id and no project context
+            pass
+    if target.problem:
+        raise typer.Exit(code=1)
 
 
 status.__doc__ = STATUS_HELP
@@ -76,16 +107,17 @@ def _print_cli_section() -> None:
     console.print(f"[bold]CLI:[/bold]         aethis v{__version__}")
 
 
-def _print_server_section() -> None:
-    base_url, source = resolve_base_url_with_source()
-    if source == "default":
+def _print_server_section(target: _Target) -> None:
+    base_url, source = target.server, target.source
+    if base_url is None:
+        console.print(f"[bold]Server:[/bold]      [red]✗ {escape(target.problem or 'unusable')}[/red]")
+    elif source == "default":
         console.print(f"[bold]Server:[/bold]      {base_url}")
     else:
         source_label = {
             "env": "from AETHIS_BASE_URL env var",
-            "yaml": "from aethis.yaml",
             "profile": "from active profile",
-        }.get(source, source)
+        }.get(source or "", source)
         console.print(f"[bold]Server:[/bold]      [green]●[/green] {base_url}  [dim]({source_label})[/dim]")
 
     profile_name = active_profile_name()
@@ -117,15 +149,12 @@ def _print_project_section() -> tuple[Optional[object], Optional[str]]:
     return cfg, ruleset_id
 
 
-def _print_identity_section() -> None:
-    """Show identity from /me. Gracefully handle missing key or unreachable server."""
-    base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
-    try:
-        cfg = load_project_config()
-        base_url = cfg.base_url
-    except ConfigError:
-        pass
+def _refused(label: str, target: _Target) -> None:
+    console.print(f"[bold]{label}:[/bold] [red]✗ refused[/red]  [dim]({escape(target.problem or '')})[/dim]")
 
+
+def _print_identity_section(target: _Target) -> None:
+    """Show identity from /me. Gracefully handle missing key or unreachable server."""
     profile = get_profile(active_profile_name())
     auth_mode = profile.get("auth_mode") or "api_key"
     if auth_mode != "api_key":
@@ -143,7 +172,11 @@ def _print_identity_section() -> None:
         )
         return
 
-    client = AethisClient(api_key, base_url)
+    if target.problem or target.server is None:
+        _refused("Identity", target)
+        return
+
+    client = AethisClient(api_key, target.server)
     try:
         me = client.whoami()
     except AethisAPIError as e:
@@ -169,20 +202,17 @@ def _print_identity_section() -> None:
         console.print(f"[bold]Scopes:[/bold]      {', '.join(sorted(scopes))}")
 
 
-def _print_generation_section(project_id: str) -> None:
+def _print_generation_section(project_id: str, target: _Target) -> None:
     """Print generation progress for a specific project."""
-    try:
-        cfg = load_project_config()
-        base_url = cfg.base_url
-    except ConfigError:
-        base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
-
     api_key = resolve_cached_key()
     if api_key is None:
         console.print("[bold]Generation:[/bold]  [dim]skipped — no API key[/dim]")
         return
+    if target.problem or target.server is None:
+        _refused("Generation", target)
+        return
 
-    client = AethisClient(api_key, base_url)
+    client = AethisClient(api_key, target.server)
     try:
         result = client.get_status(project_id)
     except AethisAPIError as e:
@@ -216,13 +246,13 @@ def _print_generation_section(project_id: str) -> None:
     render_source_safeguards(result)
 
 
-def _emit_json_status(project_id: Optional[str]) -> None:
+def _emit_json_status(project_id: Optional[str], target: _Target) -> None:
     """Build and emit a structured status dict for --output json consumers.
 
     Scriptable view of the same context the human view shows. Keys mirror the
     section titles so `--json server,identity` gives a clean projection.
     """
-    base_url, source = resolve_base_url_with_source()
+    base_url, source = target.server, target.source
     profile_name = active_profile_name()
     profile = get_profile(profile_name)
 
@@ -252,15 +282,16 @@ def _emit_json_status(project_id: Optional[str]) -> None:
 
     # Identity section
     auth_mode = profile.get("auth_mode") or "api_key"
-    identity_base_url = cfg.base_url if cfg else base_url
     if auth_mode != "api_key":
         state["identity"] = {"auth_mode": auth_mode, "provider_minted": True}
     else:
         api_key = resolve_cached_key()
         if api_key is None:
             state["identity"] = {"key_present": False}
+        elif target.problem or target.server is None:
+            state["identity"] = {"key_present": True, "refused": target.problem}
         else:
-            client = AethisClient(api_key, identity_base_url)
+            client = AethisClient(api_key, target.server)
             try:
                 me = client.whoami()
                 state["identity"] = {
@@ -285,8 +316,10 @@ def _emit_json_status(project_id: Optional[str]) -> None:
         api_key = resolve_cached_key()
         if api_key is None:
             state["generation"] = {"skipped": "no_api_key"}
+        elif target.problem or target.server is None:
+            state["generation"] = {"refused": target.problem}
         else:
-            client = AethisClient(api_key, identity_base_url)
+            client = AethisClient(api_key, target.server)
             try:
                 state["generation"] = client.get_status(pid)
             except AethisAPIError as e:

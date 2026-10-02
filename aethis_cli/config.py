@@ -49,8 +49,12 @@ class ProjectConfig:
 def resolve_base_url_with_source() -> tuple[str, str]:
     """Return (base_url, source) where source is 'env', 'yaml', 'profile', or 'default'.
 
-    Resolution order matches what every read-only command sees:
+    For ANONYMOUS reads only (public catalogue, no credential). Resolution order:
       AETHIS_BASE_URL env var > aethis.yaml > active profile > DEFAULT_BASE_URL
+
+    The project file may choose the host here, so nothing that carries a key,
+    provider key or sign-in token may use this: go through
+    :func:`authorize_credential_server` / :func:`resolve_credential_base_url`.
     """
     env = os.environ.get("AETHIS_BASE_URL")
     if env:
@@ -173,6 +177,51 @@ def resolve_credential_base_url(profile_name: Optional[str] = None) -> tuple[str
     return parse_credential_base_url(DEFAULT_BASE_URL), "default"
 
 
+_PROJECT_SERVER_REFUSED = (
+    "The server this project selects (aethis.yaml base_url) is not the one your active profile '{p}' uses, "
+    "so no credential was sent. To use it, set AETHIS_BASE_URL (or pass --base-url) to that server, or "
+    "select or create a profile whose base_url is that server (`aethis profile add <name> --base-url <url>`)."
+)
+
+
+def authorize_credential_server(requested_url: Optional[str] = None, profile_name: Optional[str] = None) -> str:
+    """The single decision: may a credential go to ``requested_url``? Returns the server to use.
+
+    A credential (API key, provider key, sign-in token) goes only to the server
+    the USER selected: ``AETHIS_BASE_URL`` (also set by ``--base-url``) > the
+    profile's ``base_url`` > the default. ``requested_url`` is whatever the
+    caller was about to use (e.g. a project file's ``base_url``); if it is not
+    the same server in canonical form this raises BEFORE anything is sent, and
+    never echoes it (it is untrusted). Every credential-bearing request — client
+    construction, inline login, the 401 refresh, the browser sign-in itself —
+    calls this, so there is one rule rather than a check per call site.
+    """
+    name = profile_name or active_profile_name()
+    trusted, _ = resolve_credential_base_url(name)
+    if requested_url is not None:
+        try:
+            requested = parse_credential_base_url(requested_url)
+        except ConfigError as e:
+            raise ConfigError(f"The project's server is not usable for credentials: {e}") from None
+        if requested != trusted:
+            raise ConfigError(_PROJECT_SERVER_REFUSED.format(p=name))
+    return trusted
+
+
+def project_credential_server() -> str:
+    """Server for a credential-bearing command that has no ProjectConfig of its own.
+
+    Applies :func:`authorize_credential_server` to the working directory's
+    project file, if it has a usable one — so such a command refuses in a
+    project that selects another server exactly as the project commands do.
+    """
+    try:
+        requested: Optional[str] = load_project_config().base_url
+    except ConfigError:
+        requested = None
+    return authorize_credential_server(requested)
+
+
 _SAVE_REMEDY = {
     "generate": "Use --no-save, set the profile's server (`aethis profile add {p} --base-url {u}`), "
     "or unset AETHIS_BASE_URL.",
@@ -222,6 +271,7 @@ def make_authed_client(
     from aethis_cli.auth_providers import get_provider
     from aethis_cli.client import AethisClient
 
+    base_url = authorize_credential_server(base_url)
     auth_mode = (profile or {}).get("auth_mode", "api_key")
     auth_provider = get_provider(auth_mode)
 
@@ -256,16 +306,13 @@ def load_client_or_fallback() -> tuple["ProjectConfig", "AethisClient"]:
     When the active profile is ``anonymous`` the function returns an unsigned
     client immediately — no lazy-auth, no browser prompt.
     """
-    from aethis_cli.auth_helpers import RUNTIME, is_anonymous_active, require_auth_or_login_inline
+    from aethis_cli.auth_helpers import is_anonymous_active, require_auth_or_login_inline
     from aethis_cli.client import make_anonymous_client
 
     try:
         cfg = load_project_config()
     except ConfigError:
-        base_url, _ = resolve_base_url_with_source()
-        if RUNTIME.base_url_override:
-            base_url = RUNTIME.base_url_override
-        _validate_base_url(base_url)
+        base_url, _ = resolve_credential_base_url()
         cfg = ProjectConfig(project="", base_url=base_url)
 
     if is_anonymous_active():
@@ -289,16 +336,13 @@ def load_client_or_anon() -> tuple["ProjectConfig", "AethisClient"]:
     get access to their private rulesets. If no key is found, fall back to
     an unsigned client so public rulesets work with zero setup.
     """
-    from aethis_cli.auth_helpers import RUNTIME, resolve_cached_key, is_anonymous_active
+    from aethis_cli.auth_helpers import resolve_cached_key, is_anonymous_active
     from aethis_cli.client import make_anonymous_client
 
     try:
         cfg = load_project_config()
     except ConfigError:
-        base_url, _ = resolve_base_url_with_source()
-        if RUNTIME.base_url_override:
-            base_url = RUNTIME.base_url_override
-        _validate_base_url(base_url)
+        base_url, _ = resolve_credential_base_url()
         cfg = ProjectConfig(project="", base_url=base_url)
 
     if is_anonymous_active():
@@ -337,9 +381,18 @@ def load_project_config(path: Optional[Path] = None) -> ProjectConfig:
     project_dir = yaml_path.parent
     project_id = _read_state_field(project_dir, "project_id")
 
-    # AETHIS_BASE_URL env var overrides aethis.yaml (useful for local dev)
-    base_url = os.environ.get("AETHIS_BASE_URL") or raw.get("base_url", DEFAULT_BASE_URL)
-    _validate_base_url(base_url)
+    # The server this project talks to: AETHIS_BASE_URL (user's choice) >
+    # aethis.yaml > the active profile's server > the default. A yaml value that
+    # differs from the user's own server is honoured for anonymous reads only;
+    # every credential-bearing use is refused by authorize_credential_server.
+    project_url = raw.get("base_url")
+    if project_url is not None and not isinstance(project_url, str):
+        raise ConfigError(f"base_url in {yaml_path} must be a string")
+    base_url = os.environ.get("AETHIS_BASE_URL") or project_url
+    if base_url:
+        _validate_base_url(base_url)
+    else:
+        base_url = get_profile(active_profile_name()).get("base_url") or DEFAULT_BASE_URL
 
     return ProjectConfig(
         project=raw["project"],
@@ -352,6 +405,27 @@ def load_project_config(path: Optional[Path] = None) -> ProjectConfig:
     )
 
 
+_ENV_REFUSED = (
+    "aethis.yaml names a non-default key variable that you have not designated, so it was not read. Environment "
+    "variables are read as keys only if you name them yourself: set {setting} to the variable name in your own "
+    "environment."
+)
+
+
+def _designated_env_name(setting: str, project_value: str, default: str) -> str:
+    """The environment variable the USER designated for a key, or refuse.
+
+    A project file can name any variable (``aethis.yaml`` is copied between
+    machines), so its value is honoured only when it is the default or equals
+    the user's own ``setting``; anything else raises WITHOUT reading it. With no
+    project value the user's ``setting`` (if any) applies, else the default.
+    """
+    designated = os.environ.get(setting) or None
+    if project_value != default and project_value != designated:
+        raise ConfigError(_ENV_REFUSED.format(setting=setting))
+    return designated or default
+
+
 def resolve_api_key(config: ProjectConfig) -> str:
     """Resolve API key: env var → active profile → keychain (default only) → lazy-auth.
 
@@ -362,28 +436,31 @@ def resolve_api_key(config: ProjectConfig) -> str:
     """
     from aethis_cli.auth_helpers import resolve_cached_key, require_auth_or_login_inline
 
-    cached = resolve_cached_key()
-    if cached:
-        # Honour the project's ``api_key_env`` override only when set to the
-        # non-default name — the standard ``AETHIS_API_KEY`` path is already
-        # covered by ``resolve_cached_key``.
-        if config.api_key_env != "AETHIS_API_KEY":
-            override = os.environ.get(config.api_key_env)
-            if override:
-                return override
-        return cached
+    key_env = _designated_env_name("AETHIS_API_KEY_ENV", config.api_key_env, "AETHIS_API_KEY")
+    authorize_credential_server(config.base_url)
 
-    if config.api_key_env != "AETHIS_API_KEY":
-        override = os.environ.get(config.api_key_env)
+    # A non-default variable (one the user designated) beats the cached key; the
+    # standard ``AETHIS_API_KEY`` path is already covered by ``resolve_cached_key``.
+    if key_env != "AETHIS_API_KEY":
+        override = os.environ.get(key_env)
         if override:
             return override
+
+    cached = resolve_cached_key()
+    if cached:
+        return cached
 
     return require_auth_or_login_inline(config.base_url)
 
 
 def resolve_anthropic_key(config: ProjectConfig) -> Optional[str]:
-    """Resolve Anthropic API key from env var. Returns None if not set."""
-    return os.environ.get(config.anthropic_key_env) or None
+    """Resolve the Anthropic key from the variable the user designated. Returns None if not set.
+
+    Default ``ANTHROPIC_API_KEY``; ``AETHIS_ANTHROPIC_KEY_ENV`` names another.
+    A different ``anthropic_key_env`` in a project file is refused unread.
+    """
+    name = _designated_env_name("AETHIS_ANTHROPIC_KEY_ENV", config.anthropic_key_env, "ANTHROPIC_API_KEY")
+    return os.environ.get(name) or None
 
 
 def write_state(config_path: Path, data: dict) -> None:
@@ -591,5 +668,9 @@ def set_active_profile(name: str) -> None:
 
 
 def resolve_deepseek_key(config: ProjectConfig) -> Optional[str]:
-    """Read the generation-only DeepSeek credential from the configured env var."""
-    return os.environ.get(config.deepseek_key_env) or None
+    """Read the generation-only DeepSeek credential from the variable the user designated.
+
+    Default ``DEEPSEEK_API_KEY``; ``AETHIS_DEEPSEEK_KEY_ENV`` names another.
+    """
+    name = _designated_env_name("AETHIS_DEEPSEEK_KEY_ENV", config.deepseek_key_env, "DEEPSEEK_API_KEY")
+    return os.environ.get(name) or None

@@ -162,7 +162,7 @@ def main(
     RUNTIME.profile_override = profile
     if base_url:
         # Make AETHIS_BASE_URL the single source of truth for downstream
-        # code paths (config.resolve_base_url_with_source, status, login)
+        # code paths (AETHIS_BASE_URL consumers: status, login)
         # that read the env var directly.
         os.environ["AETHIS_BASE_URL"] = base_url
     if api_key:

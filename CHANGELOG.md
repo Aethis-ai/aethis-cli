@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.44.0 (2026-10-02)
+
+**Security: a project `aethis.yaml` can no longer choose which credential is read or where it is sent.** Upgrade recommended. Project files are copied between machines (public example repositories), so they are treated as untrusted for credentials, matching `aethis-mcp` 0.19.0.
+
+- **Breaking:** an API key, an Anthropic or DeepSeek key, or the browser sign-in token is sent only to the server you selected: `--base-url` / `AETHIS_BASE_URL`, else the active profile's `base_url`, else `https://api.aethis.ai`. If a project's `base_url` names a different server, the command now stops with an error before sending anything (it previously sent your key there). This covers every authenticated command, `aethis status` (human and JSON output), `whoami`, `usage`, the automatic sign-in prompt and its refresh after a rejected key. A project `base_url` equal to your server is unaffected, and anonymous reads (public rulesets, no key) still follow the project's `base_url`.
+- **Breaking:** `anthropic_key_env`, `api_key_env` and `deepseek_key_env` in `aethis.yaml` are honoured only when they are the default or equal the variable you name yourself in `AETHIS_ANTHROPIC_KEY_ENV`, `AETHIS_API_KEY_ENV` or `AETHIS_DEEPSEEK_KEY_ENV`. Any other value is refused and that variable is never read. Setting one of the new variables also changes which variable is read when the project file says nothing.
+- The browser sign-in refuses to run, before opening a browser, when the server is not the one the target profile names, and saves the new key only to that profile.
+- Fix: project commands (`generate`, `fields`, `review`, `publish`, `test`, `guidance`) and `aethis status --profile <p>` now use the selected profile's server instead of production when the project file names none.
+- No request carries an `X-OpenAI-Key` header; a test now pins that.
+- Migrate: to use a project-named server, run `aethis profile add <name> --base-url <url>` once and select it with `--profile`, or set `AETHIS_BASE_URL=<url>`. To keep a non-default key variable, set `AETHIS_API_KEY_ENV` / `AETHIS_ANTHROPIC_KEY_ENV` / `AETHIS_DEEPSEEK_KEY_ENV` to its name in your own environment, and drop it from the project file. If an example repository's `aethis.yaml` named a server or key variable you did not choose, and you ran authenticated commands in it, rotate those keys.
+
 ## 0.43.1 (2026-10-02)
 
 - Fix `aethis account generate`, `keys` and `revoke`, and `aethis login`,
