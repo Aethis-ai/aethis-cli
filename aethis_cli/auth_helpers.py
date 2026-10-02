@@ -23,7 +23,7 @@ import sys
 from dataclasses import dataclass
 from typing import Optional
 
-from aethis_cli.errors import AuthRequired, ConfigError
+from aethis_cli.errors import AuthRequired
 
 
 @dataclass
@@ -56,33 +56,46 @@ def _is_interactive() -> bool:
         return False
 
 
-def resolve_cached_key() -> Optional[str]:
-    """Return the cached key for the active profile, or None if none is found.
+def resolve_cached_key(*, check_project: bool = True) -> Optional[str]:
+    """The one place an Aethis API key is resolved; every command goes through it.
 
     Resolution order:
 
-    1. ``AETHIS_API_KEY`` env — always wins (back-compat with single-key
-       scripts; matches the precedent that direct env overrides beat any
-       profile machinery).
-    2. The active profile's ``api_key`` field in ``~/.config/aethis/credentials``.
-    3. For the ``default`` profile only: the OS keychain (legacy single-key
+    0. The ``anonymous`` profile means no key at all: nothing below is consulted.
+    1. ``--api-key`` (set on ``RUNTIME``) — the one-shot override.
+    2. The environment variable the user designated: the name in
+       ``AETHIS_API_KEY_ENV``, else ``AETHIS_API_KEY``. When a non-default name
+       is designated and that variable is empty, ``AETHIS_API_KEY`` is NOT read
+       as a fallback: one session never acts as two identities.
+    3. The active profile's ``api_key`` field in ``~/.config/aethis/credentials``.
+    4. For the ``default`` profile only: the OS keychain (legacy single-key
        storage location).
-    4. Legacy ``.yaml``-suffixed credentials file (older builds).
+    5. Legacy ``.yaml``-suffixed credentials file (older builds).
     """
-    key = os.environ.get("AETHIS_API_KEY")
-    if key:
-        return key
-
     from aethis_cli.config import (
         ANONYMOUS_PROFILE,
         DEFAULT_PROFILE,
         active_profile_name,
+        check_project_api_key_env,
+        designated_api_key_env,
         get_profile,
     )
 
     profile_name = active_profile_name()
     if profile_name == ANONYMOUS_PROFILE:
         return None
+
+    if RUNTIME.api_key_override:
+        return RUNTIME.api_key_override
+
+    # A project file may not name which variable is read as the key: refuse (without
+    # reading it) here, in the one place every command resolves a key. Profile setup that
+    # sends nothing (``init``, ``mcp install``) asks for no project check.
+    if check_project:
+        check_project_api_key_env()
+    key = os.environ.get(designated_api_key_env())
+    if key:
+        return key
 
     profile = get_profile(profile_name)
     if profile.get("api_key"):
@@ -164,14 +177,13 @@ def require_auth_or_login_inline(
        command doesn't silently spawn a browser.
     4. Otherwise raise :class:`AuthRequired` with a one-line remediation.
 
-    ``base_url`` falls back to ``RUNTIME.base_url_override`` then
-    ``AETHIS_BASE_URL`` then the default — this matters because the browser
-    flow mints a key against a specific server, and minting against prod when
-    the user is targeting a local dev server would silently 401 forever.
+    The server is always the one the user selected (``--base-url`` /
+    ``AETHIS_BASE_URL``, else the active profile's, else the default). A
+    ``base_url`` argument that names a different server (e.g. from a project
+    ``aethis.yaml``) is refused before anything is prompted or sent: the
+    browser flow sends a sign-in token to that server and saves the key it
+    returns.
     """
-    if RUNTIME.api_key_override:
-        return RUNTIME.api_key_override
-
     if is_anonymous_active():
         # ``--profile anonymous`` is an explicit "use no key" — surface that
         # decision instead of silently falling into the browser flow.
@@ -185,6 +197,9 @@ def require_auth_or_login_inline(
 
         console.print(f"[red]Auth required:[/red] {message}")
         raise AuthRequired(message)
+
+    if RUNTIME.api_key_override:
+        return RUNTIME.api_key_override
 
     if not force_browser:
         cached = resolve_cached_key()
@@ -207,17 +222,17 @@ def require_auth_or_login_inline(
         console.print(f"[red]Auth required:[/red] {message}")
         raise AuthRequired(message)
 
-    # Resolve base URL late so we honour both env and project config.
-    resolved_base_url = base_url or RUNTIME.base_url_override or os.environ.get("AETHIS_BASE_URL")
-    if resolved_base_url is None:
-        try:
-            from aethis_cli.config import resolve_base_url_with_source
+    # The sign-in token and the minted key only ever go to / are saved for the
+    # server the user selected — never one a project file chose.
+    from aethis_cli.config import authorize_credential_server
 
-            resolved_base_url, _ = resolve_base_url_with_source()
-        except ConfigError:
-            from aethis_cli.config import DEFAULT_BASE_URL
+    resolved_base_url = authorize_credential_server(base_url)
 
-            resolved_base_url = DEFAULT_BASE_URL
+    # Refuse a wrong save target now, before asking anything: the prompt must not
+    # lead to a sign-in that is only refused afterwards.
+    from aethis_cli.config import active_profile_name, check_save_target, resolve_credential_base_url
+
+    check_save_target(resolved_base_url, resolve_credential_base_url()[1], active_profile_name(), "login")
 
     from aethis_cli.output import console
 

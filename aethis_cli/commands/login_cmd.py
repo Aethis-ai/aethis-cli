@@ -14,6 +14,7 @@ from aethis_cli.config import (
     active_profile_name,
     check_save_target,
     credentials_path,
+    parse_credential_base_url,
     resolve_credential_base_url,
     set_profile,
 )
@@ -86,6 +87,19 @@ def run_browser_login(base_url: str, timeout: int = 120, *, profile: Optional[st
     """
     from aethis_cli.auth import authenticate_with_clerk
     from aethis_cli.errors import AuthenticationError
+
+    # Every caller funnels through here, so this is the one place that decides
+    # where the sign-in token goes and which profile the minted key is saved to:
+    # the server the user selected for the target profile, nothing else.
+    target = profile or active_profile_name()
+    server, source = resolve_credential_base_url(target)
+    if parse_credential_base_url(base_url) != server:
+        raise ConfigError(
+            f"Refusing to sign in: that server is not the one profile '{target}' uses. "
+            "Set AETHIS_BASE_URL (or --base-url), or select a profile whose base_url is that server."
+        )
+    check_save_target(server, source, target, "login")
+    base_url = server
 
     clerk_domain = os.environ.get("AETHIS_CLERK_DOMAIN", "clerk.aethis.ai")
     clerk_client_id = os.environ.get("AETHIS_CLERK_CLIENT_ID", "gEiHOxoeLgZJifjf")

@@ -7,7 +7,7 @@ from typing import Optional
 import typer
 
 from aethis_cli.config import load_client_or_fallback, load_project_config
-from aethis_cli.errors import AethisAPIError, ConfigError
+from aethis_cli.errors import AethisAPIError, ProjectNotFound
 from aethis_cli.output import console, error_panel, success, warn
 from aethis_cli.prompts import confirm_or_abort, is_noninteractive
 from aethis_cli.render import emit, is_json_requested
@@ -18,7 +18,7 @@ def _resolve_project_id(project_id: Optional[str]) -> str:
         return project_id
     try:
         cfg = load_project_config()
-    except ConfigError:
+    except ProjectNotFound:
         console.print("[red]No project ID. Run from an Aethis project or pass --project-id.[/red]")
         raise typer.Exit(code=1)
     if not cfg.project_id:

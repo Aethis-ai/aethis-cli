@@ -160,9 +160,18 @@ def main(
     RUNTIME.api_key_override = api_key
     RUNTIME.base_url_override = base_url
     RUNTIME.profile_override = profile
+    if api_key:
+        from aethis_cli.config import ANONYMOUS_PROFILE, active_profile_name
+
+        if active_profile_name() == ANONYMOUS_PROFILE:
+            raise typer.BadParameter(
+                "--api-key cannot be combined with the 'anonymous' profile, which sends no key. "
+                "Drop --api-key, or select a different profile.",
+                param_hint="--api-key",
+            )
     if base_url:
         # Make AETHIS_BASE_URL the single source of truth for downstream
-        # code paths (config.resolve_base_url_with_source, status, login)
+        # code paths (AETHIS_BASE_URL consumers: status, login)
         # that read the env var directly.
         os.environ["AETHIS_BASE_URL"] = base_url
     if api_key:

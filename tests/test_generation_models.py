@@ -70,9 +70,11 @@ def test_flags_forward_model(command: str, monkeypatch: pytest.MonkeyPatch) -> N
 def test_configurable_deepseek_env(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     config = tmp_path / "aethis.yaml"
     config.write_text("project: example\ndeepseek_key_env: CUSTOM_DEEPSEEK\n")
+    monkeypatch.setenv("AETHIS_DEEPSEEK_KEY_ENV", "CUSTOM_DEEPSEEK")  # the user designates it
     monkeypatch.setenv("CUSTOM_DEEPSEEK", "secret")
     assert resolve_deepseek_key(load_project_config(config)) == "secret"
     config.write_text("project: example\n")
+    monkeypatch.delenv("AETHIS_DEEPSEEK_KEY_ENV")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "default-secret")
     assert resolve_deepseek_key(load_project_config(config)) == "default-secret"
 

@@ -122,9 +122,10 @@ aethis decide -i '{"space.crew.species": "Human", "space.crew.age": 35, "space.c
 See the example's [README](https://github.com/Aethis-ai/aethis-examples/blob/main/spacecraft-crew-certification/README.md) for what each scenario covers.
 
 Generation and refinement accept `--model claude-sonnet-5` (the default) or
-`--model deepseek-flash`. For DeepSeek, set `DEEPSEEK_API_KEY`; an alternative
-environment variable name can be configured with `deepseek_key_env` in
-`aethis.yaml`. The DeepSeek credential is sent only with generation.
+`--model deepseek-flash`. For DeepSeek, set `DEEPSEEK_API_KEY`; to use another
+environment variable, name it yourself with `AETHIS_DEEPSEEK_KEY_ENV` (see
+[Which keys are read, and where they go](#which-keys-are-read-and-where-they-go)).
+The DeepSeek credential is sent only with generation.
 This option requires an engine supporting model selection. Live-provider
 validation has passed; the matching engine and CLI releases are still pending.
 
@@ -404,8 +405,11 @@ my-rules/
 
 ```yaml
 project: my-rules
-api_key_env: AETHIS_API_KEY
 ```
+
+A project file describes the project, not your credentials: it cannot choose which
+server a key is sent to or which environment variable is read as a key. See
+[Which keys are read, and where they go](#which-keys-are-read-and-where-they-go).
 
 ### scenarios.yaml
 
@@ -438,8 +442,46 @@ rather than leaving you to discover it in an inflated pass-rate total.
 |----------|-------------|----------|---------|
 | `AETHIS_API_KEY` | Your API key (`ak_live_...`). Bypasses the cached credential and any profile machinery. | Authoring only | — |
 | `AETHIS_PROFILE` | Select a named credential profile (overrides the sticky default; see `aethis profile`). | No | `default` |
-| `AETHIS_BASE_URL` | Override the API host (staff/dev use; staging or self-hosted). `aethis login` and `aethis account generate` refuse to save a key minted on a server the target profile does not name; use a profile (`aethis profile add <name> --base-url <url>`) or `--no-save` (generate). | No | Active profile's `base_url`, else `https://api.aethis.ai` (for `account` and `login` only; other commands still prefer a project `aethis.yaml`, tracked in #146) |
+| `AETHIS_BASE_URL` | Override the API host (staff/dev use; staging or self-hosted); `--base-url` sets the same thing. `aethis login` and `aethis account generate` refuse to save a key minted on a server the target profile does not name; use a profile (`aethis profile add <name> --base-url <url>`) or `--no-save` (generate). | No | Active profile's `base_url`, else `https://api.aethis.ai` |
 | `ANTHROPIC_API_KEY` | Forwarded per-request to the generation endpoint when running `aethis generate`. Never stored server-side. | Authoring only | — |
+| `AETHIS_ANTHROPIC_KEY_ENV` | Name of the environment variable holding your Anthropic key, if not `ANTHROPIC_API_KEY`. | No | `ANTHROPIC_API_KEY` |
+| `AETHIS_API_KEY_ENV` | Name of the environment variable holding your Aethis key, if not `AETHIS_API_KEY`. | No | `AETHIS_API_KEY` |
+| `AETHIS_DEEPSEEK_KEY_ENV` | Name of the environment variable holding your DeepSeek key, if not `DEEPSEEK_API_KEY`. | No | `DEEPSEEK_API_KEY` |
+
+### Which keys are read, and where they go
+
+`aethis.yaml` files are copied between machines, so the CLI treats a project file as
+untrusted for credentials:
+
+- **Server.** An API key, provider key or sign-in token is sent only to the server
+  you selected: `--base-url` / `AETHIS_BASE_URL`, else the active profile's
+  `base_url`, else `https://api.aethis.ai`. If a project's `base_url` names a
+  different server, the command stops before sending anything. To use that server,
+  set `AETHIS_BASE_URL` (or pass `--base-url`) to it, or select or create a profile
+  whose `base_url` is that server. A `base_url` equal to your server is fine.
+  (`aethis account`, `aethis login`, `aethis init` and `aethis mcp install` never read
+  `aethis.yaml` for this: they use `AETHIS_BASE_URL`, else the profile's server, so there
+  is nothing to refuse.)
+- **Environment variables.** The CLI reads an Anthropic, Aethis or DeepSeek key
+  from the default variable, or from the one you name in `AETHIS_ANTHROPIC_KEY_ENV`,
+  `AETHIS_API_KEY_ENV` or `AETHIS_DEEPSEEK_KEY_ENV`. An `anthropic_key_env`,
+  `api_key_env` or `deepseek_key_env` in a project file is honoured only if it is
+  the default or equals the name you set; any other value is refused and that
+  variable is never read.
+- **One key resolution.** Every command resolves the Aethis key the same way: `--api-key`, then
+  the variable you designated (`AETHIS_API_KEY_ENV`, else `AETHIS_API_KEY`), then the stored
+  profile key. A designated variable that is empty does not fall back to `AETHIS_API_KEY`.
+  The `anonymous` profile sends no key whatever the environment holds, and `--api-key`
+  together with it is an error.
+- **An invalid project file is an error.** A project `aethis.yaml` that exists but cannot be
+  used (unreadable or not UTF-8, unparseable, not a mapping, no `project`, an empty or null
+  `base_url`, or a `base_url` with credentials, a query or a fragment) stops the command,
+  including anonymous reads; only a missing file means "no project". The file may be in a
+  parent directory: the CLI looks upwards from where you run it. The same structural check
+  applies to `AETHIS_BASE_URL`.
+- Anonymous reads (public rulesets, no key) send no credential and still follow the
+  project's `base_url`.
+- The CLI never sends an OpenAI key.
 
 ## Verifying a release
 

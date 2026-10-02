@@ -100,7 +100,7 @@ class TestInteractive:
                 return_value="ak_freshly_minted",
             ) as run_login,
         ):
-            key = require_auth_or_login_inline("https://api.test")
+            key = require_auth_or_login_inline(None)
 
         assert key == "ak_freshly_minted"
         run_login.assert_called_once()
@@ -111,7 +111,7 @@ class TestInteractive:
             patch("aethis_cli.auth_helpers._prompt_yes_no", return_value=False),
         ):
             with pytest.raises(AuthRequired, match="declined"):
-                require_auth_or_login_inline("https://api.test")
+                require_auth_or_login_inline(None)
 
     def test_browser_flow_failure_raises_auth_required(self):
         with (
@@ -123,7 +123,7 @@ class TestInteractive:
             ),
         ):
             with pytest.raises(AuthRequired, match="did not complete"):
-                require_auth_or_login_inline("https://api.test")
+                require_auth_or_login_inline(None)
 
 
 class TestForceBrowser:
@@ -138,7 +138,7 @@ class TestForceBrowser:
                 return_value="ak_fresh",
             ),
         ):
-            assert require_auth_or_login_inline("https://api.test", force_browser=True) == "ak_fresh"
+            assert require_auth_or_login_inline(None, force_browser=True) == "ak_fresh"
 
     def test_force_browser_still_honours_api_key_override(self, monkeypatch):
         RUNTIME.api_key_override = "ak_override"

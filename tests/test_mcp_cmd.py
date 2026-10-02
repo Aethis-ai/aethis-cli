@@ -210,6 +210,33 @@ def test_override_conflict_refuses_before_config_write(sandbox):
     assert not _cursor_config(sandbox["home"]).exists()
 
 
+def test_install_is_profile_setup_and_ignores_a_project_file_in_the_cwd(sandbox):
+    (sandbox["work"] / "aethis.yaml").write_text("project: x\napi_key_env: AWS_SECRET_ACCESS_KEY\n")
+    result = _run(["mcp", "install", "--target", "cursor"])
+    assert result.exit_code == 0, result.output
+    assert _cursor_config(sandbox["home"]).exists()
+
+
+def test_designated_key_variable_is_compared_with_the_profile_key(sandbox):
+    from aethis_cli.config import set_profile
+
+    set_profile("default", api_key="ak_profile")
+    result = _run(["mcp", "install", "--target", "cursor"], env={"AETHIS_API_KEY_ENV": "MY_KEY", "MY_KEY": "ak_other"})
+    assert result.exit_code != 0 and "does not match" in result.output
+    assert not _cursor_config(sandbox["home"]).exists()
+
+
+def test_default_key_variable_is_ignored_when_another_is_designated(sandbox):
+    from aethis_cli.config import set_profile
+
+    set_profile("default", api_key="ak_profile")
+    result = _run(
+        ["mcp", "install", "--target", "cursor"],
+        env={"AETHIS_API_KEY_ENV": "MY_KEY", "AETHIS_API_KEY": "ak_other_default"},
+    )
+    assert result.exit_code == 0, result.output
+
+
 def test_selected_profile_is_pinned_and_override_must_match(sandbox):
     from aethis_cli.config import set_active_profile, set_profile
 
