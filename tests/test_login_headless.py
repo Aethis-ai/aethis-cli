@@ -16,7 +16,7 @@ def _run(extra_env=None):
     from aethis_cli.main import app
 
     runner = CliRunner()
-    env = {"AETHIS_BASE_URL": "http://test.invalid"}
+    env = {"AETHIS_BASE_URL": "https://test.invalid"}
     if extra_env:
         env.update(extra_env)
     return runner.invoke(app, ["login"], env=env, catch_exceptions=False)
@@ -33,7 +33,7 @@ def test_login_handles_oserror_from_webbrowser_without_traceback(tmp_path, monke
     # Isolated credentials; the default profile names the same server as
     # AETHIS_BASE_URL so the save-target guard has nothing to object to.
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    config.set_profile("default", base_url="http://test.invalid")
+    config.set_profile("default", base_url="https://test.invalid")
 
     # Simulate a headless system: authenticate_with_clerk raises OSError
     # (the same shape auth.py:156 raises when webbrowser.open returns False).

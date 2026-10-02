@@ -438,7 +438,7 @@ rather than leaving you to discover it in an inflated pass-rate total.
 |----------|-------------|----------|---------|
 | `AETHIS_API_KEY` | Your API key (`ak_live_...`). Bypasses the cached credential and any profile machinery. | Authoring only | — |
 | `AETHIS_PROFILE` | Select a named credential profile (overrides the sticky default; see `aethis profile`). | No | `default` |
-| `AETHIS_BASE_URL` | Override the API host (staff/dev use; staging or self-hosted). | No | `https://api.aethis.ai` |
+| `AETHIS_BASE_URL` | Override the API host (staff/dev use; staging or self-hosted). `aethis login` and `aethis account generate` refuse to save a key minted on a server the target profile does not name; use a profile (`aethis profile add <name> --base-url <url>`) or `--no-save` (generate). | No | Active profile's `base_url`, else `https://api.aethis.ai` |
 | `ANTHROPIC_API_KEY` | Forwarded per-request to the generation endpoint when running `aethis generate`. Never stored server-side. | Authoring only | — |
 
 ## Verifying a release
@@ -497,7 +497,7 @@ def register(app: typer.Typer) -> None:
         typer.echo("hello from my plugin")
 ```
 
-Staff-only tools (DSL source viewer, IAM registry, domain-guidance management, `--base-url` override) live in the private `aethis-cli-internal` package, installed on request.
+Staff-only tools (DSL source viewer, IAM registry, domain-guidance management) live in the private `aethis-cli-internal` package, installed on request.
 
 ## Development
 

@@ -58,7 +58,7 @@ Global flags:
 
 - `--api-key <key>` — overrides the cached credential and the lazy-auth helper (one-shot).
 - `--no-prompt` — suppresses lazy-auth's "Open browser to sign in?" prompt (CI / scripts). Combined with no cached key, authenticated commands fail fast with a clean `AuthRequired` error.
-- `AETHIS_BASE_URL` env var — staff/dev override for the API host (staging or self-hosted). Not exposed as a CLI flag in the public build.
+- `AETHIS_BASE_URL` env var — staff/dev override for the API host (staging or self-hosted); the global `--base-url` flag sets the same thing for one invocation.
 
 ## Architecture
 

@@ -8,11 +8,16 @@
   `--base-url`), then the active profile's `base_url` (`--profile`,
   `AETHIS_PROFILE` or the sticky default), then the default. A project
   `aethis.yaml` is deliberately never consulted for them, so a project file
-  cannot redirect sign-in tokens or newly minted keys.
+  cannot redirect the sign-in token or newly minted keys for these commands
+  (the automatic sign-in other commands trigger is tracked separately, #146).
+  The resolved URL is validated (no plaintext HTTP to remote hosts) and
+  normalised (case, default port, trailing slash).
 - `generate`, `revoke` and `login` print the target server and where it came
   from before changing anything. `generate` and `login` refuse to save a key
   when `AETHIS_BASE_URL` names a different server than the target profile
-  (use `--no-save`, set the profile's `base_url`, or unset the variable). This
+  (`generate`: `--no-save`, set the profile's `base_url`, or unset the variable;
+  `login`: set the profile's `base_url`, unset the variable, or pick a matching
+  `--profile`). This
   means `AETHIS_BASE_URL=<url> aethis login` now requires the profile to name
   the same server. Migrate with `aethis profile add <name> --base-url <url>`
   once, then `aethis --profile <name> login`.

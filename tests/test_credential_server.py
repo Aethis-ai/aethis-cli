@@ -292,3 +292,11 @@ class TestStatusGenerationFallback:
             except Exception:
                 pass
         assert client.call_args.args[1] == STAGING_URL
+
+
+class TestCheckSaveTargetDirect:
+    def test_compares_normalised_origins_for_raw_input(self):
+        config.set_profile("p", base_url="https://example.test")
+        config.check_save_target("HTTPS://Example.Test:443/", "env", "p")
+        with pytest.raises(config.ConfigError):
+            config.check_save_target("https://example.test:8443", "env", "p")
