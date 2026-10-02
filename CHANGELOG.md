@@ -2,14 +2,21 @@
 
 ## 0.43.1 (2026-10-02)
 
-- Fix `aethis account generate`, `keys` and `revoke` ignoring the selected
-  profile's server. They now resolve the API server the same way every other
-  command does (`AETHIS_BASE_URL` > `aethis.yaml` > active profile > default),
-  so `--profile`, `AETHIS_PROFILE` and the sticky default are honoured, and a
-  key minted by `generate` belongs to the server of the profile it is saved to.
-  Previously these commands always used the production server unless
-  `AETHIS_BASE_URL` was set. `generate` and `revoke` now print the target server
-  before changing anything.
+- Fix `aethis account generate`, `keys` and `revoke`, and `aethis login`,
+  ignoring the selected profile's server and defaulting to production.
+  These credential-bearing commands now use `AETHIS_BASE_URL` (including
+  `--base-url`), then the active profile's `base_url` (`--profile`,
+  `AETHIS_PROFILE` or the sticky default), then the default. A project
+  `aethis.yaml` is deliberately never consulted for them, so a project file
+  cannot redirect sign-in tokens or newly minted keys.
+- `generate`, `revoke` and `login` print the target server and where it came
+  from before changing anything. `generate` and `login` refuse to save a key
+  when `AETHIS_BASE_URL` names a different server than the target profile
+  (use `--no-save`, set the profile's `base_url`, or unset the variable). This
+  means `AETHIS_BASE_URL=<url> aethis login` now requires the profile to name
+  the same server.
+- `aethis status` identity/generation fall back to the profile's server when
+  there is no project file.
 
 ## 0.43.0 (2026-10-01)
 

@@ -195,24 +195,21 @@ class TestAccountRevoke:
 
 
 class TestClerkConfig:
-    @patch.dict("os.environ", {"AETHIS_CLERK_CLIENT_ID": ""}, clear=False)
-    def test_missing_client_id_exits(self):
+    def test_missing_client_id_exits(self, monkeypatch):
         """Without AETHIS_CLERK_CLIENT_ID, generate should exit with helpful message."""
-        # We need to reload the module to pick up the env var
         import importlib
         import aethis_cli.commands.account_cmd as mod
 
+        monkeypatch.setenv("AETHIS_CLERK_CLIENT_ID", "")
         importlib.reload(mod)
-        # Re-import app since the module was reloaded
-        from aethis_cli.main import app as reloaded_app
-
-        # Patch _fetch_permissions AFTER reload — the reload resets module
-        # globals, so any patch applied via decorator is lost. Without the
-        # patch, the CLI hits the live API for permissions and (until
-        # aethis-core 0.10.0 deploys) gets back the legacy bundles:* names,
-        # which makes scope validation fail before reaching the Clerk check.
-        with patch.object(mod, "_fetch_permissions", return_value=([], set(mod.VALID_SCOPES))):
-            result = runner.invoke(reloaded_app, ["account", "generate"])
+        try:
+            # Patch _fetch_permissions AFTER reload — the reload resets module globals.
+            with patch.object(mod, "_fetch_permissions", return_value=([], set(mod.VALID_SCOPES))):
+                result = runner.invoke(app, ["account", "generate"])
+        finally:
+            # Restore module state so later tests see the real client id.
+            monkeypatch.delenv("AETHIS_CLERK_CLIENT_ID")
+            importlib.reload(mod)
 
         assert result.exit_code == 1
         assert "AETHIS_CLERK_CLIENT_ID" in result.output
@@ -350,3 +347,25 @@ class TestAccountPrintsTargetBeforeMutating:
 
         assert result.exit_code == 0
         assert STAGING_URL in seen[0]
+
+
+class TestRevokeAnnouncesBeforeConfirm:
+    @patch("aethis_cli.commands.account_cmd.httpx.delete")
+    @patch("aethis_cli.commands.account_cmd._clerk_auth", return_value=MOCK_ACCESS_TOKEN)
+    def test_target_line_precedes_confirmation(self, mock_auth, mock_delete):
+        _make_staging_profile()
+        events: list[str] = []
+        mock_delete.return_value = MagicMock(status_code=204)
+
+        with (
+            patch("aethis_cli.commands.account_cmd.info", side_effect=lambda m: events.append(f"info:{m}")),
+            patch(
+                "aethis_cli.commands.account_cmd.confirm_or_abort",
+                side_effect=lambda *a, **k: events.append("confirm"),
+            ),
+        ):
+            result = runner.invoke(app, ["--profile", "staging", "account", "revoke", "ak_x"])
+
+        assert result.exit_code == 0
+        assert STAGING_URL in events[0]
+        assert events.index("confirm") > 0

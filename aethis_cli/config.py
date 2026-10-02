@@ -66,6 +66,47 @@ def resolve_base_url_with_source() -> tuple[str, str]:
     return DEFAULT_BASE_URL, "default"
 
 
+def profile_effective_base_url(profile_name: str) -> str:
+    """The server a profile names: its ``base_url``, or the default if unset."""
+    return get_profile(profile_name).get("base_url") or DEFAULT_BASE_URL
+
+
+def resolve_credential_base_url(profile_name: Optional[str] = None) -> tuple[str, str]:
+    """Return (base_url, source) for commands that send or mint credentials.
+
+    Order: ``AETHIS_BASE_URL`` (also set by ``--base-url``) > the profile's
+    ``base_url`` > the default. Unlike :func:`resolve_base_url_with_source`
+    this NEVER consults a project ``aethis.yaml``: a file found by walking up
+    from the working directory must not choose where sign-in tokens or newly
+    minted keys are sent. ``source`` is 'env', 'profile' or 'default'.
+    """
+    env = os.environ.get("AETHIS_BASE_URL")
+    if env:
+        return env, "env"
+    profile = get_profile(profile_name or active_profile_name())
+    if profile.get("base_url"):
+        return profile["base_url"], "profile"
+    return DEFAULT_BASE_URL, "default"
+
+
+def check_save_target(base_url: str, source: str, profile_name: str) -> None:
+    """Refuse to save a key minted on a server the target profile does not name.
+
+    Only an environment-supplied server can disagree with the profile (the
+    other sources are the profile's own server).
+    """
+    if source != "env":
+        return
+    effective = profile_effective_base_url(profile_name)
+    if base_url.rstrip("/") != effective.rstrip("/"):
+        raise ConfigError(
+            f"AETHIS_BASE_URL ({base_url}) differs from profile '{profile_name}' ({effective}); "
+            "the new key would be saved against the wrong server. Use --no-save, "
+            f"set the profile's server (`aethis profile add {profile_name} --base-url {base_url}`), "
+            "or unset AETHIS_BASE_URL."
+        )
+
+
 def make_authed_client(
     api_key: str,
     base_url: str,

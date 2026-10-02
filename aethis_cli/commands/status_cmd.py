@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any, Optional
 
 import typer
@@ -11,7 +10,6 @@ from aethis_cli._version import __version__
 from aethis_cli.auth_helpers import resolve_cached_key
 from aethis_cli.client import AethisClient
 from aethis_cli.config import (
-    DEFAULT_BASE_URL,
     active_profile_name,
     get_profile,
     load_project_config,
@@ -119,7 +117,7 @@ def _print_project_section() -> tuple[Optional[object], Optional[str]]:
 
 def _print_identity_section() -> None:
     """Show identity from /me. Gracefully handle missing key or unreachable server."""
-    base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
+    base_url, _ = resolve_base_url_with_source()
     try:
         cfg = load_project_config()
         base_url = cfg.base_url
@@ -175,7 +173,7 @@ def _print_generation_section(project_id: str) -> None:
         cfg = load_project_config()
         base_url = cfg.base_url
     except ConfigError:
-        base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
+        base_url, _ = resolve_base_url_with_source()
 
     api_key = resolve_cached_key()
     if api_key is None:

@@ -9,10 +9,11 @@ import typer
 
 from aethis_cli.config import (
     ANONYMOUS_PROFILE,
-    DEFAULT_BASE_URL,
     DEFAULT_PROFILE,
     active_profile_name,
+    check_save_target,
     credentials_path,
+    resolve_credential_base_url,
     set_profile,
 )
 from aethis_cli.errors import ConfigError
@@ -195,7 +196,14 @@ def login(
         )
         raise typer.Exit(code=1)
 
-    base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
+    target_profile = profile or active_profile_name()
+    base_url, source = resolve_credential_base_url(target_profile)
+    info(f"Target server: {base_url} (profile: {target_profile})")
+    try:
+        check_save_target(base_url, source, target_profile)
+    except ConfigError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(code=1) from None
     if api_key:
         if not _validate_key(api_key, base_url):
             console.print("[red]That key was rejected by the API (HTTP 401). Check it and try again.[/red]")
