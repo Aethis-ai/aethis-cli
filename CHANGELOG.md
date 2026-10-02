@@ -29,7 +29,8 @@
   the same server. Migrate with `aethis profile add <name> --base-url <url>`
   once, then `aethis --profile <name> login`.
 - `login` and `account generate` refuse the reserved `anonymous` profile before
-  any sign-in or request (unless `--no-save`, which saves nothing).
+  any sign-in or request (`account generate --no-save` is still allowed, since it
+  saves nothing).
 
 ## 0.43.0 (2026-10-01)
 
