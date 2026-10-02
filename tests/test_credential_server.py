@@ -260,20 +260,23 @@ class TestLoginProfileOption:
 
     def test_login_target_line_names_source(self, browser, save, monkeypatch):
         _staging()
-        out = runner.invoke(app, ["login", "--profile", "staging"]).output
-        assert "from profile" in out and "profile: staging" in out
-        out = runner.invoke(app, ["login"]).output
-        assert "default" in out and DEFAULT_BASE_URL in out
+        out = " ".join(runner.invoke(app, ["login", "--profile", "staging"]).output.split())
+        assert f"Target server: {STAGING_URL} (from profile; profile: staging)" in out
+        out = " ".join(runner.invoke(app, ["login"]).output.split())
+        assert f"Target server: {DEFAULT_BASE_URL} (default; profile: default)" in out
         monkeypatch.setenv("AETHIS_BASE_URL", STAGING_URL)
-        out = runner.invoke(app, ["login", "--profile", "staging"]).output
-        assert "from AETHIS_BASE_URL" in out
+        out = " ".join(runner.invoke(app, ["login", "--profile", "staging"]).output.split())
+        assert f"Target server: {STAGING_URL} (from AETHIS_BASE_URL; profile: staging)" in out
 
     def test_login_refusal_remedy_is_login_specific(self, browser, save, monkeypatch):
         _staging()
         monkeypatch.setenv("AETHIS_BASE_URL", ENV_URL)
-        out = runner.invoke(app, ["login", "--profile", "staging"]).output
-        assert "--no-save" not in out
-        assert "aethis profile add staging --base-url" in out
+        result = runner.invoke(app, ["login", "--profile", "staging"])
+        assert result.exit_code == 1
+        browser.assert_not_called()
+        save.assert_not_called()
+        assert "--no-save" not in result.output
+        assert "aethis profile add staging --base-url" in result.output
 
 
 class TestStatusGenerationFallback:

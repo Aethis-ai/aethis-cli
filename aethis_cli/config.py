@@ -66,51 +66,87 @@ def resolve_base_url_with_source() -> tuple[str, str]:
     return DEFAULT_BASE_URL, "default"
 
 
-def normalize_base_url(url: str) -> str:
-    """Canonical form of a server URL: lowercase scheme and host, default port
-    dropped, trailing slash stripped. Used for requests and for comparisons."""
+def _is_local_host(host: str) -> bool:
+    import ipaddress
+
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def parse_credential_base_url(raw: str) -> str:
+    """Return the canonical form of a server URL, or raise :class:`ConfigError`.
+
+    Strict by design — it never rewrites an invalid URL into a different one.
+    Requires an http(s) scheme and a host; refuses userinfo, query, fragment and
+    a malformed or out-of-range port; allows plain http only for loopback hosts
+    (``localhost``, ``127.0.0.0/8``, ``::1``). Canonical form: lowercase scheme
+    and host, IPv6 bracketed, default port dropped, path kept as written with
+    the trailing slash stripped.
+    """
     from urllib.parse import urlsplit
 
-    parts = urlsplit(url.strip())
+    def bad(why: str) -> ConfigError:
+        return ConfigError(f"Invalid server URL {raw!r}: {why}.")
+
+    if raw != raw.strip() or any(c.isspace() for c in raw):
+        raise bad("contains whitespace")
+    parts = urlsplit(raw)
     scheme = parts.scheme.lower()
-    host = (parts.hostname or "").lower()
-    if ":" in host:
-        host = f"[{host}]"
+    if scheme not in ("http", "https"):
+        raise bad("must start with http:// or https://")
+    if "@" in parts.netloc:
+        raise bad("must not contain credentials")
+    if "?" in raw or "#" in raw:
+        raise bad("must not contain a query or fragment")
+    host = parts.hostname
+    if not host:
+        raise bad("missing host")
+    if parts.netloc.endswith(":"):
+        raise bad("empty port")
     try:
         port = parts.port
     except ValueError:
-        port = None
+        raise bad("invalid port") from None
+    if port is not None and not 1 <= port <= 65535:
+        raise bad("port out of range")
+    host = host.lower()
+    if scheme == "http" and not _is_local_host(host):
+        raise ConfigError(
+            f"Refusing to use HTTP for remote host '{host}'. Use HTTPS or target localhost for local development."
+        )
+    if ":" in host:
+        host = f"[{host}]"
     if port is not None and (scheme, port) not in {("https", 443), ("http", 80)}:
         host = f"{host}:{port}"
     return f"{scheme}://{host}{parts.path.rstrip('/')}"
 
 
 def profile_effective_base_url(profile_name: str) -> str:
-    """The server a profile names: its ``base_url``, or the default if unset."""
-    return normalize_base_url(get_profile(profile_name).get("base_url") or DEFAULT_BASE_URL)
+    """The canonical server a profile names (default if unset); raises if its URL is invalid."""
+    return parse_credential_base_url(get_profile(profile_name).get("base_url") or DEFAULT_BASE_URL)
 
 
 def resolve_credential_base_url(profile_name: Optional[str] = None) -> tuple[str, str]:
-    """Return (base_url, source) for commands that send or mint credentials.
+    """Return (canonical_base_url, source) for commands that send or mint credentials.
 
     Order: ``AETHIS_BASE_URL`` (also set by ``--base-url``) > the profile's
     ``base_url`` > the default. Unlike :func:`resolve_base_url_with_source`
     this NEVER consults a project ``aethis.yaml``: a file found by walking up
     from the working directory must not choose where sign-in tokens or newly
-    minted keys are sent. The URL is validated (no plaintext HTTP to remote
-    hosts) and normalised. ``source`` is 'env', 'profile' or 'default'.
+    minted keys are sent. Every source goes through
+    :func:`parse_credential_base_url`. ``source`` is 'env', 'profile' or 'default'.
     """
     env = os.environ.get("AETHIS_BASE_URL")
     if env:
-        url, source = env, "env"
-    else:
-        profile = get_profile(profile_name or active_profile_name())
-        if profile.get("base_url"):
-            url, source = profile["base_url"], "profile"
-        else:
-            url, source = DEFAULT_BASE_URL, "default"
-    _validate_base_url(url)
-    return normalize_base_url(url), source
+        return parse_credential_base_url(env), "env"
+    profile = get_profile(profile_name or active_profile_name())
+    if profile.get("base_url"):
+        return parse_credential_base_url(profile["base_url"]), "profile"
+    return parse_credential_base_url(DEFAULT_BASE_URL), "default"
 
 
 _SAVE_REMEDY = {
@@ -125,12 +161,12 @@ def check_save_target(base_url: str, source: str, profile_name: str, command: st
     """Refuse to save a key minted on a server the target profile does not name.
 
     Only an environment-supplied server can disagree with the profile (the
-    other sources are the profile's own server). Origins are compared normalised.
+    other sources are the profile's own server). Canonical forms are compared; an invalid URL on either side raises.
     """
     if source != "env":
         return
     effective = profile_effective_base_url(profile_name)
-    if normalize_base_url(base_url) != effective:
+    if parse_credential_base_url(base_url) != effective:
         remedy = _SAVE_REMEDY[command].format(p=profile_name, u=base_url)
         raise ConfigError(
             f"AETHIS_BASE_URL ({base_url}) differs from profile '{profile_name}' ({effective}); "
