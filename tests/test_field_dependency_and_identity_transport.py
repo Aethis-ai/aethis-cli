@@ -136,10 +136,24 @@ def test_absent_options_by_leaves_the_pin_unchanged_and_never_probes(tmp_path):
     client.expected_field_spec_properties.assert_not_called()
 
 
-def test_options_by_survives_a_fields_yaml_round_trip():
-    field = {"key": "vehicle.model", "type": "enum", "enum_values": ["focus"], "options_by": OPTIONS_BY}
+@pytest.mark.parametrize("value", [OPTIONS_BY, {}, None])
+def test_options_by_is_written_back_by_presence_next_to_the_display_metadata(value):
+    """An explicit empty or null declaration is kept, as for enum_labels, and
+    the key is written in its place rather than after the unknown keys."""
+    field = {
+        "key": "vehicle.model",
+        "type": "enum",
+        "enum_values": ["focus"],
+        "canonical_field": "car.model",
+        "options_by": value,
+        "weight": 2,
+    }
 
-    assert generate_cmd._field_to_yaml_dict(field)["options_by"] == OPTIONS_BY
+    out = generate_cmd._field_to_yaml_dict(field)
+
+    assert out["options_by"] == value
+    keys = list(out)
+    assert keys[keys.index("canonical_field") + 1] == "options_by"
 
 
 def test_rulebook_identity_keys_are_not_projected_onto_the_pin(tmp_path):
