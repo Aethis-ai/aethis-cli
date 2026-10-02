@@ -57,28 +57,34 @@ def _is_interactive() -> bool:
 
 
 def resolve_cached_key() -> Optional[str]:
-    """Return the cached key for the active profile, or None if none is found.
+    """The one place an Aethis API key is resolved; every command goes through it.
 
     Resolution order:
 
-    1. ``AETHIS_API_KEY`` env — always wins (back-compat with single-key
-       scripts; matches the precedent that direct env overrides beat any
-       profile machinery).
-    2. The active profile's ``api_key`` field in ``~/.config/aethis/credentials``.
-    3. For the ``default`` profile only: the OS keychain (legacy single-key
+    1. ``--api-key`` (set on ``RUNTIME``) — the one-shot override.
+    2. The environment variable the user designated: the name in
+       ``AETHIS_API_KEY_ENV``, else ``AETHIS_API_KEY``. When a non-default name
+       is designated and that variable is empty, ``AETHIS_API_KEY`` is NOT read
+       as a fallback: one session never acts as two identities.
+    3. The active profile's ``api_key`` field in ``~/.config/aethis/credentials``.
+    4. For the ``default`` profile only: the OS keychain (legacy single-key
        storage location).
-    4. Legacy ``.yaml``-suffixed credentials file (older builds).
+    5. Legacy ``.yaml``-suffixed credentials file (older builds).
     """
-    key = os.environ.get("AETHIS_API_KEY")
-    if key:
-        return key
+    if RUNTIME.api_key_override:
+        return RUNTIME.api_key_override
 
     from aethis_cli.config import (
         ANONYMOUS_PROFILE,
         DEFAULT_PROFILE,
         active_profile_name,
+        designated_api_key_env,
         get_profile,
     )
+
+    key = os.environ.get(designated_api_key_env())
+    if key:
+        return key
 
     profile_name = active_profile_name()
     if profile_name == ANONYMOUS_PROFILE:
@@ -214,6 +220,12 @@ def require_auth_or_login_inline(
     from aethis_cli.config import authorize_credential_server
 
     resolved_base_url = authorize_credential_server(base_url)
+
+    # Refuse a wrong save target now, before asking anything: the prompt must not
+    # lead to a sign-in that is only refused afterwards.
+    from aethis_cli.config import active_profile_name, check_save_target, resolve_credential_base_url
+
+    check_save_target(resolved_base_url, resolve_credential_base_url()[1], active_profile_name(), "login")
 
     from aethis_cli.output import console
 

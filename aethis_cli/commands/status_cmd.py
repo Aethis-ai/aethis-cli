@@ -62,11 +62,7 @@ def _credential_target() -> _Target:
     except ConfigError as e:
         return _Target(None, None, str(e))
     try:
-        requested: Optional[str] = load_project_config().base_url
-    except ConfigError:
-        requested = None
-    try:
-        authorize_credential_server(requested)
+        authorize_credential_server()
     except ConfigError as e:
         return _Target(server, source, str(e))
     return _Target(server, source, None)

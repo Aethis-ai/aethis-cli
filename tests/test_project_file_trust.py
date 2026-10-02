@@ -195,7 +195,7 @@ class TestHostileBaseUrl:
             ["--output", "json", "status", "--project-id", "proj_1"],
             ["projects", "list"],
             ["rulesets", "list", "--project-id", "proj_1"],
-            ["decide", "-b", "slug", "-i", "{}"],
+            ["decide", "-b", "aethis/slug", "-i", "{}"],
             ["review", "proj_1"],
             ["review", "proj_1", "--coach"],
             ["fields", "discover"],
@@ -224,7 +224,7 @@ class TestHostileBaseUrl:
         assert "refused" in json.dumps(body["identity"]).lower()
 
     def test_anonymous_profile_reads_keep_working_without_a_credential(self, net):
-        result = runner.invoke(app, ["--profile", "anonymous", "decide", "-b", "slug", "-i", "{}"])
+        result = runner.invoke(app, ["--profile", "anonymous", "decide", "-b", "aethis/slug", "-i", "{}"])
         for r in _requests(net):
             assert "x-api-key" not in r.headers
             assert "authorization" not in r.headers
@@ -571,3 +571,189 @@ class TestNoOpenAIKey:
         for r in _requests(net):
             assert not [h for h in r.headers if "openai" in h.lower()]
         _no_secret_on_wire(net, "sk-proj-must-never-be-sent")
+
+
+# --------------------------------------------------------------------------- #
+# ONE key resolution for every path: --api-key > designated env var > stored key
+# --------------------------------------------------------------------------- #
+
+KEY_COMMANDS = [
+    ["whoami"],
+    ["usage"],
+    ["--output", "json", "status"],
+    ["projects", "list"],
+    ["rulesets", "list", "--project-id", "proj_1"],
+    ["decide", "-b", "aethis/slug", "-i", "{}"],
+    ["explain", "-b", "aethis/slug"],
+    ["review", "proj_1"],
+]
+
+
+def _keys_sent(net: Any) -> set[str]:
+    return {r.headers["x-api-key"] for r in _requests(net) if "x-api-key" in r.headers}
+
+
+class TestOneKeyResolution:
+    @pytest.mark.parametrize("args", KEY_COMMANDS)
+    def test_designated_variable_beats_the_default_variable_on_every_path(self, net, monkeypatch, args):
+        monkeypatch.setenv("AETHIS_API_KEY_ENV", "MY_API_KEY")
+        monkeypatch.setenv("MY_API_KEY", "ak_designated")
+        monkeypatch.setenv("AETHIS_API_KEY", "ak_default")
+        runner.invoke(app, args)
+        assert _keys_sent(net) == {"ak_designated"}, args
+        _no_secret_on_wire(net, "ak_default")
+
+    @pytest.mark.parametrize("args", KEY_COMMANDS)
+    def test_unset_designated_variable_never_falls_back_to_the_default_variable(self, net, monkeypatch, args):
+        monkeypatch.setenv("AETHIS_API_KEY_ENV", "MY_API_KEY")
+        monkeypatch.setenv("AETHIS_API_KEY", "ak_default")
+        runner.invoke(app, args)
+        _no_secret_on_wire(net, "ak_default")
+
+    def test_unset_designated_variable_falls_through_to_the_stored_key(self, net, monkeypatch):
+        _cache_default_key()
+        monkeypatch.setenv("AETHIS_API_KEY_ENV", "MY_API_KEY")
+        monkeypatch.setenv("AETHIS_API_KEY", "ak_default")
+        runner.invoke(app, ["whoami"])
+        assert _keys_sent(net) == {CACHED}
+
+    @pytest.mark.parametrize("args", KEY_COMMANDS)
+    def test_api_key_flag_beats_every_variable(self, net, monkeypatch, args):
+        monkeypatch.setenv("AETHIS_API_KEY_ENV", "MY_API_KEY")
+        monkeypatch.setenv("MY_API_KEY", "ak_designated")
+        monkeypatch.setenv("AETHIS_API_KEY", "ak_default")
+        _cache_default_key()
+        runner.invoke(app, ["--api-key", "ak_flag", *args])
+        assert _keys_sent(net) == {"ak_flag"}, args
+
+    def test_api_key_flag_beats_the_designated_variable_for_project_commands(self, net, _env, monkeypatch):
+        _yaml(_env, api_key_env="MY_API_KEY")
+        monkeypatch.setenv("AETHIS_API_KEY_ENV", "MY_API_KEY")
+        monkeypatch.setenv("MY_API_KEY", "ak_env")
+        runner.invoke(app, ["--api-key", "ak_flag", "review", "proj_1"])
+        assert _keys_sent(net) == {"ak_flag"}
+
+    def test_unit_precedence(self, monkeypatch):
+        from aethis_cli.auth_helpers import resolve_cached_key
+
+        _cache_default_key()
+        monkeypatch.setenv("AETHIS_API_KEY", "ak_default")
+        assert resolve_cached_key() == "ak_default"
+        monkeypatch.setenv("AETHIS_API_KEY_ENV", "MY_API_KEY")
+        assert resolve_cached_key() == CACHED
+        monkeypatch.setenv("MY_API_KEY", "ak_designated")
+        assert resolve_cached_key() == "ak_designated"
+        RUNTIME.api_key_override = "ak_flag"
+        assert resolve_cached_key() == "ak_flag"
+
+
+# --------------------------------------------------------------------------- #
+# The project's OWN base_url is compared, not the effective one
+# --------------------------------------------------------------------------- #
+
+
+class TestProjectServerComparedBeforeOverrides:
+    @pytest.mark.parametrize("args", [["whoami"], ["review", "proj_1"], ["--output", "json", "status"]])
+    def test_env_server_different_from_the_project_server_is_refused(self, net, _env, monkeypatch, args):
+        _cache_default_key()
+        _yaml(_env, base_url=ATTACKER)
+        monkeypatch.setenv("AETHIS_BASE_URL", ENV_URL)
+        result = runner.invoke(app, args)
+        assert result.exit_code != 0
+        assert _requests(net) == []
+        assert "attacker" not in _msg(result)
+
+    def test_profile_server_different_from_the_project_server_is_refused(self, net, _env):
+        _staging()
+        _yaml(_env, base_url=ATTACKER)
+        result = runner.invoke(app, ["--profile", "staging", "whoami"])
+        assert result.exit_code != 0 and _requests(net) == []
+
+    def test_unit(self, _env, monkeypatch):
+        _yaml(_env, base_url=ATTACKER)
+        monkeypatch.setenv("AETHIS_BASE_URL", ENV_URL)
+        with pytest.raises(ConfigError):
+            config.authorize_credential_server()
+        monkeypatch.setenv("AETHIS_BASE_URL", ATTACKER + "/")
+        assert config.authorize_credential_server() == ATTACKER
+
+
+# --------------------------------------------------------------------------- #
+# A project base_url with userinfo/query/fragment is never contacted, even anonymously
+# --------------------------------------------------------------------------- #
+
+
+class TestProjectUrlStructureForAnonymousReads:
+    @pytest.mark.parametrize(
+        "bad", ["https://u:p@attacker.example", "https://attacker.example?x=1", "https://attacker.example#f"]
+    )
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["decide", "-b", "aethis/slug", "-i", "{}"],
+            ["explain", "-b", "aethis/slug"],
+            ["rulesets", "list", "--public"],
+            ["rulebooks", "list"],
+        ],
+    )
+    def test_never_contacted_and_no_authorization_header(self, net, _env, bad, args):
+        (_env / "project" / "aethis.yaml").write_text(f"project: x\nbase_url: '{bad}'\n")
+        runner.invoke(app, args)
+        assert "attacker.example" not in {r.url.host for r in _requests(net)}
+        assert not [r for r in _requests(net) if "authorization" in r.headers]
+
+
+# --------------------------------------------------------------------------- #
+# Refuse a wrong save target BEFORE asking anything; canonical URL on the wire
+# --------------------------------------------------------------------------- #
+
+
+class TestInlineLoginDetails:
+    def test_no_prompt_when_the_save_target_check_would_refuse(self, net, monkeypatch):
+        config.set_profile("staging", base_url=STAGING)
+        monkeypatch.setenv("AETHIS_BASE_URL", ENV_URL)
+        with (
+            patch("aethis_cli.auth_helpers._is_interactive", return_value=True),
+            patch("builtins.input", return_value="y") as prompt,
+            patch("aethis_cli.auth.authenticate_with_clerk", return_value="signin-token"),
+        ):
+            runner.invoke(app, ["--profile", "staging", "projects", "list"])
+        prompt.assert_not_called()
+
+    def test_run_browser_login_posts_to_the_canonical_server(self, net):
+        from aethis_cli.commands.login_cmd import run_browser_login
+
+        config.set_profile("staging", base_url=STAGING + "/")
+        net.on("POST", f"{STAGING}/api/v1/keys/", httpx.Response(201, json={"full_key": "ak_live_x", "key_id": "k"}))
+        with patch("aethis_cli.auth.authenticate_with_clerk", return_value="signin-token"):
+            run_browser_login("HTTPS://Staging.Example.test/", profile="staging")
+        posts = [r for r in _requests(net) if r.method == "POST"]
+        assert [r.url.path for r in posts] == ["/api/v1/keys/"]
+
+
+# --------------------------------------------------------------------------- #
+# resolve_base_url_with_source keeps the true source
+# --------------------------------------------------------------------------- #
+
+
+class TestAnonymousSourceLabel:
+    def test_profile_source_is_not_reported_as_yaml(self, _env):
+        config.set_profile("default", base_url=STAGING)
+        _yaml(_env)
+        assert config.resolve_base_url_with_source() == (STAGING, "profile")
+
+    def test_yaml_source_is_reported_as_yaml(self, _env):
+        _yaml(_env, base_url=ATTACKER)
+        assert config.resolve_base_url_with_source() == (ATTACKER, "yaml")
+
+
+def test_run_browser_login_refuses_a_save_target_the_profile_does_not_name(net, monkeypatch):
+    from aethis_cli.commands.login_cmd import run_browser_login
+
+    config.set_profile("staging", base_url=STAGING)
+    monkeypatch.setenv("AETHIS_BASE_URL", ENV_URL)
+    with patch("aethis_cli.auth.authenticate_with_clerk", return_value="signin-token") as browser:
+        with pytest.raises(ConfigError):
+            run_browser_login(ENV_URL, profile="staging")
+    browser.assert_not_called()
+    assert _requests(net) == []

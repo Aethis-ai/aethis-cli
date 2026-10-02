@@ -465,6 +465,9 @@ untrusted for credentials:
   `api_key_env` or `deepseek_key_env` in a project file is honoured only if it is
   the default or equals the name you set; any other value is refused and that
   variable is never read.
+- **One key resolution.** Every command resolves the Aethis key the same way: `--api-key`, then
+  the variable you designated (`AETHIS_API_KEY_ENV`, else `AETHIS_API_KEY`), then the stored
+  profile key. A designated variable that is empty does not fall back to `AETHIS_API_KEY`.
 - Anonymous reads (public rulesets, no key) send no credential and still follow the
   project's `base_url`.
 - The CLI never sends an OpenAI key.

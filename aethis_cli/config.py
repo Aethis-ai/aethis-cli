@@ -35,6 +35,25 @@ def _validate_base_url(url: str) -> None:
         )
 
 
+def _reject_unsafe_url_parts(url: str) -> None:
+    """Refuse userinfo, query, fragment, control or non-ASCII characters in a configured server URL.
+
+    Userinfo would make every request (even anonymous ones) carry ``Authorization: Basic``
+    to that host. The URL is never echoed.
+    """
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(url)
+        bad = parts.username is not None or parts.password is not None or "@" in parts.netloc
+    except ValueError:
+        raise ConfigError("Invalid server URL: not a well-formed URL.") from None
+    if bad or parts.query or parts.fragment or "?" in url or "#" in url or not url.isprintable() or not url.isascii():
+        raise ConfigError(
+            "Invalid server URL: must not contain credentials, a query, a fragment or control characters."
+        )
+
+
 @dataclass
 class ProjectConfig:
     project: str
@@ -44,6 +63,7 @@ class ProjectConfig:
     project_id: Optional[str] = None
     config_path: Path = field(default_factory=lambda: Path.cwd())
     deepseek_key_env: str = "DEEPSEEK_API_KEY"
+    project_base_url: Optional[str] = None  # the project file's own value, exactly as written
 
 
 def resolve_base_url_with_source() -> tuple[str, str]:
@@ -61,8 +81,8 @@ def resolve_base_url_with_source() -> tuple[str, str]:
         return env, "env"
     try:
         cfg = load_project_config()
-        if cfg.base_url != DEFAULT_BASE_URL:
-            return cfg.base_url, "yaml"
+        if cfg.project_base_url and cfg.project_base_url != DEFAULT_BASE_URL:
+            return cfg.project_base_url, "yaml"
     except ConfigError:
         pass
     profile = get_profile(active_profile_name())
@@ -198,14 +218,31 @@ def authorize_credential_server(requested_url: Optional[str] = None, profile_nam
     """
     name = profile_name or active_profile_name()
     trusted, _ = resolve_credential_base_url(name)
-    if requested_url is not None:
+    # The project file's OWN value is always compared (read here, not taken from
+    # a caller), before any env/profile override could mask it: a project that
+    # names another server is refused unless the user's own server equals it.
+    for candidate in (requested_url, _read_project_base_url()):
+        if candidate is None:
+            continue
         try:
-            requested = parse_credential_base_url(requested_url)
+            requested = parse_credential_base_url(candidate)
         except ConfigError as e:
             raise ConfigError(f"The project's server is not usable for credentials: {e}") from None
         if requested != trusted:
             raise ConfigError(_PROJECT_SERVER_REFUSED.format(p=name))
     return trusted
+
+
+def _read_project_base_url() -> Optional[str]:
+    """The working directory's project file's ``base_url`` exactly as written, or None."""
+    try:
+        raw = yaml.safe_load(_find_config(Path.cwd()).read_text())
+    except (ConfigError, yaml.YAMLError, OSError):
+        return None
+    value = raw.get("base_url") if isinstance(raw, dict) else None
+    if value is not None and not isinstance(value, str):
+        raise ConfigError("The project's base_url must be a string.")
+    return value
 
 
 def project_credential_server() -> str:
@@ -215,11 +252,7 @@ def project_credential_server() -> str:
     project file, if it has a usable one — so such a command refuses in a
     project that selects another server exactly as the project commands do.
     """
-    try:
-        requested: Optional[str] = load_project_config().base_url
-    except ConfigError:
-        requested = None
-    return authorize_credential_server(requested)
+    return authorize_credential_server()
 
 
 _SAVE_REMEDY = {
@@ -390,6 +423,7 @@ def load_project_config(path: Optional[Path] = None) -> ProjectConfig:
         raise ConfigError(f"base_url in {yaml_path} must be a string")
     base_url = os.environ.get("AETHIS_BASE_URL") or project_url
     if base_url:
+        _reject_unsafe_url_parts(base_url)
         _validate_base_url(base_url)
     else:
         base_url = get_profile(active_profile_name()).get("base_url") or DEFAULT_BASE_URL
@@ -402,6 +436,7 @@ def load_project_config(path: Optional[Path] = None) -> ProjectConfig:
         base_url=base_url,
         project_id=project_id,
         config_path=project_dir,
+        project_base_url=project_url,
     )
 
 
@@ -426,6 +461,11 @@ def _designated_env_name(setting: str, project_value: str, default: str) -> str:
     return designated or default
 
 
+def designated_api_key_env() -> str:
+    """Name of the environment variable the USER designated for the Aethis key."""
+    return os.environ.get("AETHIS_API_KEY_ENV") or "AETHIS_API_KEY"
+
+
 def resolve_api_key(config: ProjectConfig) -> str:
     """Resolve API key: env var → active profile → keychain (default only) → lazy-auth.
 
@@ -436,15 +476,10 @@ def resolve_api_key(config: ProjectConfig) -> str:
     """
     from aethis_cli.auth_helpers import resolve_cached_key, require_auth_or_login_inline
 
-    key_env = _designated_env_name("AETHIS_API_KEY_ENV", config.api_key_env, "AETHIS_API_KEY")
+    # A project file's api_key_env is only validated here (refused unless the user
+    # designated it); the key itself is resolved by the one function, resolve_cached_key.
+    _designated_env_name("AETHIS_API_KEY_ENV", config.api_key_env, "AETHIS_API_KEY")
     authorize_credential_server(config.base_url)
-
-    # A non-default variable (one the user designated) beats the cached key; the
-    # standard ``AETHIS_API_KEY`` path is already covered by ``resolve_cached_key``.
-    if key_env != "AETHIS_API_KEY":
-        override = os.environ.get(key_env)
-        if override:
-            return override
 
     cached = resolve_cached_key()
     if cached:
