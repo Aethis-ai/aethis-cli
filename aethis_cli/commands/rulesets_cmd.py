@@ -118,14 +118,14 @@ def list_rulesets(
     # project context we want to fall through to the public catalogue rather
     # than ask the user to authenticate just to discover what's available.
     from aethis_cli.config import load_project_config, read_state
-    from aethis_cli.errors import ConfigError
+    from aethis_cli.errors import ProjectNotFound
 
     pid: Optional[str] = project_id
     if not pid:
         try:
             cfg = load_project_config()
             pid = read_state(cfg.config_path).get("project_id")
-        except ConfigError:
+        except ProjectNotFound:
             pid = None
 
     if not pid:

@@ -19,6 +19,7 @@ from aethis_cli.config import (
     DEFAULT_BASE_URL,
     DEFAULT_PROFILE,
     active_profile_name,
+    designated_api_key_env,
     get_profile,
     load_credentials,
 )
@@ -55,7 +56,7 @@ def _selected_profile_reference() -> tuple[str, dict[str, str]]:
             f"Selected profile '{profile_name}' uses unsupported auth_mode '{selected_profile['auth_mode']}'. "
             "MCP setup currently supports saved API-key profiles only."
         )
-    key_override = RUNTIME.api_key_override or os.environ.get("AETHIS_API_KEY")
+    key_override = RUNTIME.api_key_override or os.environ.get(designated_api_key_env())
     if key_override is not None and key_override != selected_profile.get("api_key"):
         raise typer.BadParameter(
             "The supplied API key does not match the selected saved profile. Save/select a profile, or configure this one-off MCP process environment yourself."

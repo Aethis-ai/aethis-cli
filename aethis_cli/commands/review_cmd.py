@@ -22,7 +22,7 @@ from aethis_cli.config import (
     resolve_api_key,
     resolve_credential_base_url,
 )
-from aethis_cli.errors import AethisAPIError, ConfigError
+from aethis_cli.errors import AethisAPIError, ConfigError, ProjectNotFound
 from aethis_cli.output import console, error_panel, warn
 from aethis_cli.render import is_json_requested
 
@@ -65,7 +65,7 @@ def review(
     """
     try:
         cfg = load_project_config()
-    except ConfigError:
+    except ProjectNotFound:
         # Allow reviewing any project by id from outside a project dir.
         if not project_id:
             console.print(

@@ -61,6 +61,7 @@ def resolve_cached_key() -> Optional[str]:
 
     Resolution order:
 
+    0. The ``anonymous`` profile means no key at all: nothing below is consulted.
     1. ``--api-key`` (set on ``RUNTIME``) — the one-shot override.
     2. The environment variable the user designated: the name in
        ``AETHIS_API_KEY_ENV``, else ``AETHIS_API_KEY``. When a non-default name
@@ -71,24 +72,28 @@ def resolve_cached_key() -> Optional[str]:
        storage location).
     5. Legacy ``.yaml``-suffixed credentials file (older builds).
     """
-    if RUNTIME.api_key_override:
-        return RUNTIME.api_key_override
-
     from aethis_cli.config import (
         ANONYMOUS_PROFILE,
         DEFAULT_PROFILE,
         active_profile_name,
+        check_project_api_key_env,
         designated_api_key_env,
         get_profile,
     )
 
-    key = os.environ.get(designated_api_key_env())
-    if key:
-        return key
-
     profile_name = active_profile_name()
     if profile_name == ANONYMOUS_PROFILE:
         return None
+
+    if RUNTIME.api_key_override:
+        return RUNTIME.api_key_override
+
+    # A project file may not name which variable is read as the key: refuse (without
+    # reading it) here, in the one place every command resolves a key.
+    check_project_api_key_env()
+    key = os.environ.get(designated_api_key_env())
+    if key:
+        return key
 
     profile = get_profile(profile_name)
     if profile.get("api_key"):
@@ -177,9 +182,6 @@ def require_auth_or_login_inline(
     browser flow sends a sign-in token to that server and saves the key it
     returns.
     """
-    if RUNTIME.api_key_override:
-        return RUNTIME.api_key_override
-
     if is_anonymous_active():
         # ``--profile anonymous`` is an explicit "use no key" — surface that
         # decision instead of silently falling into the browser flow.
@@ -193,6 +195,9 @@ def require_auth_or_login_inline(
 
         console.print(f"[red]Auth required:[/red] {message}")
         raise AuthRequired(message)
+
+    if RUNTIME.api_key_override:
+        return RUNTIME.api_key_override
 
     if not force_browser:
         cached = resolve_cached_key()

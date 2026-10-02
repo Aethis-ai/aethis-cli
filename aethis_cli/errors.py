@@ -16,6 +16,14 @@ class ConfigError(Exception):
     """Raised when aethis.yaml is missing or invalid."""
 
 
+class ProjectNotFound(ConfigError):
+    """No aethis.yaml in the working directory or any parent.
+
+    The ONLY project-file problem a caller may treat as "no project". A file that
+    exists but is invalid raises plain :class:`ConfigError` and must reach the user.
+    """
+
+
 class AuthenticationError(Exception):
     """Raised when browser-based OAuth authentication fails."""
 

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Optional
 
 import yaml
 
-from aethis_cli.errors import ConfigError
+from aethis_cli.errors import ConfigError, ProjectNotFound
 
 if TYPE_CHECKING:
     from aethis_cli.client import AethisClient
@@ -78,12 +78,13 @@ def resolve_base_url_with_source() -> tuple[str, str]:
     """
     env = os.environ.get("AETHIS_BASE_URL")
     if env:
+        _reject_unsafe_url_parts(env)
         return env, "env"
     try:
         cfg = load_project_config()
         if cfg.project_base_url and cfg.project_base_url != DEFAULT_BASE_URL:
             return cfg.project_base_url, "yaml"
-    except ConfigError:
+    except ProjectNotFound:
         pass
     profile = get_profile(active_profile_name())
     if profile.get("base_url"):
@@ -233,16 +234,43 @@ def authorize_credential_server(requested_url: Optional[str] = None, profile_nam
     return trusted
 
 
+def _read_project_raw() -> Optional[dict]:
+    """The working directory's project file, parsed, or None if there is none.
+
+    A file that exists but cannot be parsed is an error, never "no project".
+    """
+    try:
+        path = _find_config(Path.cwd())
+    except ProjectNotFound:
+        return None
+    try:
+        raw = yaml.safe_load(path.read_text())
+    except (yaml.YAMLError, OSError) as e:
+        raise ConfigError(f"Cannot read the project file {path} ({type(e).__name__}).") from None
+    if not isinstance(raw, dict):
+        raise ConfigError(f"The project file {path} must be a YAML mapping.")
+    return raw
+
+
 def _read_project_base_url() -> Optional[str]:
     """The working directory's project file's ``base_url`` exactly as written, or None."""
-    try:
-        raw = yaml.safe_load(_find_config(Path.cwd()).read_text())
-    except (ConfigError, yaml.YAMLError, OSError):
-        return None
-    value = raw.get("base_url") if isinstance(raw, dict) else None
+    raw = _read_project_raw()
+    value = raw.get("base_url") if raw else None
+    # Subsumed, kept for the clearer message: a non-string value would also be refused by
+    # parse_credential_base_url in authorize_credential_server.
     if value is not None and not isinstance(value, str):
         raise ConfigError("The project's base_url must be a string.")
     return value
+
+
+def check_project_api_key_env() -> None:
+    """Refuse a project file's non-default ``api_key_env`` the user has not designated.
+
+    Called from the one key resolution, so no path that resolves a key can skip it.
+    """
+    raw = _read_project_raw()
+    if raw:
+        _designated_env_name("AETHIS_API_KEY_ENV", raw.get("api_key_env", "AETHIS_API_KEY"), "AETHIS_API_KEY")
 
 
 def project_credential_server() -> str:
@@ -252,6 +280,10 @@ def project_credential_server() -> str:
     project file, if it has a usable one — so such a command refuses in a
     project that selects another server exactly as the project commands do.
     """
+    try:
+        load_project_config()  # a project file that exists but is invalid is an error here too
+    except ProjectNotFound:
+        pass
     return authorize_credential_server()
 
 
@@ -344,7 +376,7 @@ def load_client_or_fallback() -> tuple["ProjectConfig", "AethisClient"]:
 
     try:
         cfg = load_project_config()
-    except ConfigError:
+    except ProjectNotFound:
         base_url, _ = resolve_credential_base_url()
         cfg = ProjectConfig(project="", base_url=base_url)
 
@@ -374,7 +406,7 @@ def load_client_or_anon() -> tuple["ProjectConfig", "AethisClient"]:
 
     try:
         cfg = load_project_config()
-    except ConfigError:
+    except ProjectNotFound:
         base_url, _ = resolve_credential_base_url()
         cfg = ProjectConfig(project="", base_url=base_url)
 
@@ -476,8 +508,9 @@ def resolve_api_key(config: ProjectConfig) -> str:
     """
     from aethis_cli.auth_helpers import resolve_cached_key, require_auth_or_login_inline
 
-    # A project file's api_key_env is only validated here (refused unless the user
-    # designated it); the key itself is resolved by the one function, resolve_cached_key.
+    # A project file's api_key_env is refused unless the user designated it. This is
+    # subsumed by resolve_cached_key's check for the cwd's project; kept for a cfg that
+    # was loaded from elsewhere.
     _designated_env_name("AETHIS_API_KEY_ENV", config.api_key_env, "AETHIS_API_KEY")
     authorize_credential_server(config.base_url)
 
@@ -529,7 +562,7 @@ def _find_config(start: Path) -> Path:
         if parent == current:
             break
         current = parent
-    raise ConfigError(f"No aethis.yaml found in {start} or any parent directory.")
+    raise ProjectNotFound(f"No aethis.yaml found in {start} or any parent directory.")
 
 
 def _read_state_field(project_dir: Path, key: str) -> Optional[str]:

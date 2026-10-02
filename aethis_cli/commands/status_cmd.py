@@ -18,7 +18,7 @@ from aethis_cli.config import (
     read_state,
     resolve_credential_base_url,
 )
-from aethis_cli.errors import AethisAPIError, ConfigError
+from aethis_cli.errors import AethisAPIError, ConfigError, ProjectNotFound
 from aethis_cli.generation_status import format_heartbeat, format_progress_detail
 from aethis_cli.output import console, error_panel
 from aethis_cli.render import emit, is_json_requested
@@ -129,7 +129,7 @@ def _print_project_section() -> tuple[Optional[object], Optional[str]]:
     """Print project/config context. Returns (cfg, state_ruleset_id)."""
     try:
         cfg = load_project_config()
-    except ConfigError:
+    except ProjectNotFound:
         console.print("[bold]Project:[/bold]     [dim]no aethis.yaml in this directory[/dim]")
         return None, None
 
@@ -273,7 +273,7 @@ def _emit_json_status(project_id: Optional[str], target: _Target) -> None:
             "project_id": cfg.project_id,
             "ruleset_id": ruleset_id,
         }
-    except ConfigError:
+    except ProjectNotFound:
         state["project"] = None
 
     # Identity section

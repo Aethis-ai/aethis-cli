@@ -679,31 +679,6 @@ class TestProjectServerComparedBeforeOverrides:
 
 
 # --------------------------------------------------------------------------- #
-# A project base_url with userinfo/query/fragment is never contacted, even anonymously
-# --------------------------------------------------------------------------- #
-
-
-class TestProjectUrlStructureForAnonymousReads:
-    @pytest.mark.parametrize(
-        "bad", ["https://u:p@attacker.example", "https://attacker.example?x=1", "https://attacker.example#f"]
-    )
-    @pytest.mark.parametrize(
-        "args",
-        [
-            ["decide", "-b", "aethis/slug", "-i", "{}"],
-            ["explain", "-b", "aethis/slug"],
-            ["rulesets", "list", "--public"],
-            ["rulebooks", "list"],
-        ],
-    )
-    def test_never_contacted_and_no_authorization_header(self, net, _env, bad, args):
-        (_env / "project" / "aethis.yaml").write_text(f"project: x\nbase_url: '{bad}'\n")
-        runner.invoke(app, args)
-        assert "attacker.example" not in {r.url.host for r in _requests(net)}
-        assert not [r for r in _requests(net) if "authorization" in r.headers]
-
-
-# --------------------------------------------------------------------------- #
 # Refuse a wrong save target BEFORE asking anything; canonical URL on the wire
 # --------------------------------------------------------------------------- #
 
@@ -757,3 +732,213 @@ def test_run_browser_login_refuses_a_save_target_the_profile_does_not_name(net, 
             run_browser_login(ENV_URL, profile="staging")
     browser.assert_not_called()
     assert _requests(net) == []
+
+
+# --------------------------------------------------------------------------- #
+# The anonymous profile sends no key, whatever the environment says
+# --------------------------------------------------------------------------- #
+
+ANON_COMMANDS = [
+    ["whoami"],
+    ["usage"],
+    ["status"],
+    ["--output", "json", "status"],
+    ["projects", "list"],
+    ["rulesets", "list", "--project-id", "proj_1"],
+    ["decide", "-b", "aethis/slug", "-i", "{}"],
+    ["explain", "-b", "aethis/slug"],
+    ["review", "proj_1"],
+]
+
+
+class TestAnonymousProfileSendsNoKey:
+    @pytest.fixture(autouse=True)
+    def _keys_everywhere(self, monkeypatch):
+        monkeypatch.setenv("AETHIS_API_KEY", "ak_secret")
+        monkeypatch.setenv("AETHIS_API_KEY_ENV", "MY_API_KEY")
+        monkeypatch.setenv("MY_API_KEY", "ak_designated")
+        _cache_default_key()
+
+    @pytest.mark.parametrize("args", ANON_COMMANDS)
+    def test_flag(self, net, args):
+        runner.invoke(app, ["--profile", "anonymous", *args])
+        _no_secret_on_wire(net, "ak_secret", "ak_designated", CACHED)
+
+    @pytest.mark.parametrize("args", ANON_COMMANDS)
+    def test_env_profile(self, net, monkeypatch, args):
+        monkeypatch.setenv("AETHIS_PROFILE", "anonymous")
+        runner.invoke(app, args)
+        _no_secret_on_wire(net, "ak_secret", "ak_designated", CACHED)
+
+    @pytest.mark.parametrize("args", ANON_COMMANDS)
+    def test_sticky_profile(self, net, args):
+        config.set_active_profile("anonymous")
+        runner.invoke(app, args)
+        _no_secret_on_wire(net, "ak_secret", "ak_designated", CACHED)
+
+    def test_unit(self):
+        from aethis_cli.auth_helpers import resolve_cached_key
+
+        RUNTIME.profile_override = "anonymous"
+        assert resolve_cached_key() is None
+
+    @pytest.mark.parametrize("args", [["whoami"], ["decide", "-b", "aethis/slug", "-i", "{}"], ["review", "proj_1"]])
+    def test_api_key_flag_with_anonymous_profile_is_refused(self, net, args):
+        result = runner.invoke(app, ["--profile", "anonymous", "--api-key", "ak_flag", *args])
+        assert result.exit_code != 0
+        assert _requests(net) == []
+        assert "anonymous" in _msg(result).lower() and "--api-key" in _msg(result)
+
+
+# --------------------------------------------------------------------------- #
+# A project file that exists but is invalid is an error, never "no project"
+# --------------------------------------------------------------------------- #
+
+INVALID_PROJECTS = {
+    "query": "project: x\nbase_url: 'https://staging.example/?tenant=x'\n",
+    "userinfo": "project: x\nbase_url: 'https://u:p@staging.example'\n",
+    "fragment": "project: x\nbase_url: 'https://staging.example/#f'\n",
+    "not_a_string": "project: x\nbase_url: [a, b]\n",
+    "no_project_key": "base_url: https://staging.example\n",
+    "bad_yaml": "project: [unclosed\n",
+    "not_a_mapping": "- a\n- b\n",
+    "plain_mapping_no_project": "foo: bar\n",
+}
+
+INVALID_PROJECT_COMMANDS = [
+    ["decide", "-b", "aethis/slug", "-i", "{}"],
+    ["explain", "-b", "aethis/slug"],
+    ["fields", "-b", "aethis/slug"],
+    ["status"],
+    ["--output", "json", "status"],
+    ["whoami"],
+    ["usage"],
+    ["rulesets", "list", "--public"],
+    ["rulesets", "list"],
+    ["rulebooks", "list"],
+    ["projects", "list"],
+    ["review", "proj_1"],
+    ["cancel"],
+]
+
+# Phrases a command prints when it has quietly treated a broken project file as absent.
+SILENT_FALLBACK_TEXT = ("no aethis.yaml", "no project id", "no project context", "showing public")
+
+
+class TestInvalidProjectFileFailsLoud:
+    @pytest.mark.parametrize("kind", sorted(INVALID_PROJECTS))
+    @pytest.mark.parametrize("args", INVALID_PROJECT_COMMANDS)
+    @pytest.mark.parametrize("keyed", [True, False])
+    def test_command_fails_and_contacts_no_host(self, net, _env, kind, args, keyed):
+        (_env / "project" / "aethis.yaml").write_text(INVALID_PROJECTS[kind])
+        if keyed:
+            _cache_default_key()
+        result = runner.invoke(app, args)
+        assert result.exit_code != 0, (kind, args, keyed, result.output)
+        # The real error, not a command printing its own "no project" line and exiting 1.
+        assert isinstance(result.exception, ConfigError), (kind, args, keyed, repr(result.exception))
+        assert _requests(net) == [], (kind, args, keyed)
+        text = _msg(result).lower()
+        assert text.strip(), "the error must say something"
+        assert not [t for t in SILENT_FALLBACK_TEXT if t in text], (kind, args, text)
+
+    def test_no_project_file_still_means_no_project(self, net):
+        result = runner.invoke(app, ["decide", "-b", "aethis/slug", "-i", "{}"])
+        assert {r.url.host for r in _requests(net)} == {"api.aethis.ai"}, _msg(result)
+
+    def test_status_names_the_problem_not_no_aethis_yaml(self, net, _env):
+        (_env / "project" / "aethis.yaml").write_text(INVALID_PROJECTS["query"])
+        result = runner.invoke(app, ["status"])
+        assert "no aethis.yaml" not in _msg(result)
+
+
+# --------------------------------------------------------------------------- #
+# An undesignated project api_key_env is refused on EVERY key-resolving path
+# --------------------------------------------------------------------------- #
+
+
+class TestUndesignatedProjectApiKeyEnvRefusedEverywhere:
+    @pytest.fixture(autouse=True)
+    def _hostile(self, _env, monkeypatch):
+        _yaml(_env, api_key_env="AWS_SECRET_ACCESS_KEY")
+        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "aws-secret-value")
+        _cache_default_key()
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["projects", "list"],
+            ["decide", "-b", "aethis/slug", "-i", "{}"],
+            ["explain", "-b", "aethis/slug"],
+            ["whoami"],
+            ["usage"],
+            ["status"],
+            ["--output", "json", "status"],
+            ["review", "proj_1"],
+            ["rulesets", "list", "--project-id", "proj_1"],
+        ],
+    )
+    def test_refused_and_never_read_or_sent(self, net, monkeypatch, args):
+        spy = _spy(monkeypatch)
+        result = runner.invoke(app, args)
+        assert result.exit_code != 0, (args, result.output)
+        assert "AWS_SECRET_ACCESS_KEY" not in spy.reads
+        assert _requests(net) == []
+        _no_secret_on_wire(net, "aws-secret-value")
+        assert "AETHIS_API_KEY_ENV" in _msg(result)
+
+    def test_designated_name_is_accepted_on_those_paths(self, net, monkeypatch):
+        monkeypatch.setenv("AETHIS_API_KEY_ENV", "AWS_SECRET_ACCESS_KEY")
+        runner.invoke(app, ["whoami"])
+        assert _keys_sent(net) == {"aws-secret-value"}
+
+
+# --------------------------------------------------------------------------- #
+# AETHIS_BASE_URL outside a project gets the same structural rejection
+# --------------------------------------------------------------------------- #
+
+
+class TestEnvServerStructure:
+    @pytest.mark.parametrize(
+        "bad", ["https://u:p@staging.example", "https://staging.example?x=1", "https://staging.example#f"]
+    )
+    @pytest.mark.parametrize("args", [["rulesets", "list", "--public"], ["rulebooks", "list"]])
+    def test_anonymous_reads_fail_loud(self, net, monkeypatch, bad, args):
+        monkeypatch.setenv("AETHIS_BASE_URL", bad)
+        result = runner.invoke(app, args)
+        assert result.exit_code != 0
+        assert _requests(net) == []
+        assert "u:p" not in _msg(result)
+
+
+class TestUnsafeUrlParts:
+    @pytest.mark.parametrize(
+        "bad", ["https://exämple.test", "https://staging.example/\x07x", "https://staging.example/a\x00b"]
+    )
+    def test_control_and_non_ascii_rejected(self, bad):
+        with pytest.raises(ConfigError):
+            config._reject_unsafe_url_parts(bad)
+
+    @pytest.mark.parametrize("good", ["https://staging.example", "http://0.0.0.0:8080", "https://staging.example/v1"])
+    def test_ordinary_urls_accepted(self, good):
+        config._reject_unsafe_url_parts(good)
+
+    def test_non_string_project_base_url_is_refused_for_credentials_too(self, net, _env):
+        (_env / "project" / "aethis.yaml").write_text("project: x\nbase_url: [a, b]\n")
+        _cache_default_key()
+        with pytest.raises(ConfigError):
+            config.authorize_credential_server()
+
+
+class TestProjectFileReaders:
+    @pytest.mark.parametrize("kind", ["bad_yaml", "not_a_mapping"])
+    def test_unreadable_project_file_is_an_error_for_the_credential_checks(self, _env, kind):
+        (_env / "project" / "aethis.yaml").write_text(INVALID_PROJECTS[kind])
+        with pytest.raises(ConfigError):
+            config.authorize_credential_server()
+        with pytest.raises(ConfigError):
+            config.check_project_api_key_env()
+
+    def test_no_project_file_is_not_an_error_for_the_credential_checks(self):
+        assert config.authorize_credential_server() == DEFAULT_BASE_URL
+        config.check_project_api_key_env()

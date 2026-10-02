@@ -40,6 +40,28 @@ class TestPKCE:
         assert len(set(verifiers)) == 10
 
 
+@pytest.fixture
+def _callback_port_free():
+    """shutdown() closes the listener while its serving thread may still be inside a 5 s
+    handle_request(); the kernel keeps the port bound until that returns, so a following test
+    (in any order other than the file's) fails with EADDRINUSE. Wait for the port to be free."""
+    import socket
+    import time
+
+    deadline = time.monotonic() + 8
+    while time.monotonic() < deadline:
+        probe = socket.socket()
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind(("127.0.0.1", 9876))
+            return
+        except OSError:
+            time.sleep(0.2)
+        finally:
+            probe.close()
+
+
+@pytest.mark.usefixtures("_callback_port_free")
 class TestCallbackServer:
     def test_server_starts_and_captures_code(self):
         server = OAuthCallbackServer()

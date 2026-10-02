@@ -459,6 +459,8 @@ untrusted for credentials:
   different server, the command stops before sending anything. To use that server,
   set `AETHIS_BASE_URL` (or pass `--base-url`) to it, or select or create a profile
   whose `base_url` is that server. A `base_url` equal to your server is fine.
+  (`aethis account` and `aethis login` never read `aethis.yaml` at all: they use
+  `AETHIS_BASE_URL`, else the profile's server, so there is nothing to refuse.)
 - **Environment variables.** The CLI reads an Anthropic, Aethis or DeepSeek key
   from the default variable, or from the one you name in `AETHIS_ANTHROPIC_KEY_ENV`,
   `AETHIS_API_KEY_ENV` or `AETHIS_DEEPSEEK_KEY_ENV`. An `anthropic_key_env`,
@@ -468,6 +470,12 @@ untrusted for credentials:
 - **One key resolution.** Every command resolves the Aethis key the same way: `--api-key`, then
   the variable you designated (`AETHIS_API_KEY_ENV`, else `AETHIS_API_KEY`), then the stored
   profile key. A designated variable that is empty does not fall back to `AETHIS_API_KEY`.
+  The `anonymous` profile sends no key whatever the environment holds, and `--api-key`
+  together with it is an error.
+- **An invalid project file is an error.** A project `aethis.yaml` that exists but cannot be
+  used (unparseable, no `project`, a `base_url` with credentials, a query or a fragment) stops
+  the command, including anonymous reads; only a missing file means "no project". The same
+  structural check applies to `AETHIS_BASE_URL`.
 - Anonymous reads (public rulesets, no key) send no credential and still follow the
   project's `base_url`.
 - The CLI never sends an OpenAI key.
