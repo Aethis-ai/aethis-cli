@@ -116,8 +116,7 @@ def test_path_prefixed_profile_keeps_prefix(auth, dele) -> None:
 @patch("aethis_cli.commands.account_cmd._clerk_auth", return_value="tok")
 @patch("aethis_cli.commands.login_cmd.run_browser_login")
 def test_malformed_stored_profile_url_refuses_before_network(browser, auth, get, bad) -> None:
-    # A hand-edited credentials file: ``profile add`` itself now refuses some of these.
-    config.save_credentials({"active_profile": "default", "profiles": {"bad": {"base_url": bad}}})
+    config.set_profile("bad", base_url=bad)
     r1 = runner.invoke(app, ["--profile", "bad", "account", "keys"])
     r2 = runner.invoke(app, ["login", "--profile", "bad"])
     assert r1.exit_code == 1 and r2.exit_code == 1

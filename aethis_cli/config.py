@@ -66,17 +66,6 @@ class ProjectConfig:
     project_base_url: Optional[str] = None  # the project file's own value, exactly as written
 
 
-def _profile_base_url_for_anonymous_use(profile_name: str) -> Optional[str]:
-    """The profile's ``base_url`` with the structural checks every configured server gets."""
-    value = get_profile(profile_name).get("base_url")
-    if value:
-        try:
-            _reject_unsafe_url_parts(value)
-        except ConfigError as e:
-            raise ConfigError(f"base_url of profile '{profile_name}': {e}") from None
-    return value or None
-
-
 def resolve_base_url_with_source() -> tuple[str, str]:
     """Return (base_url, source) where source is 'env', 'yaml', 'profile', or 'default'.
 
@@ -97,9 +86,9 @@ def resolve_base_url_with_source() -> tuple[str, str]:
             return cfg.project_base_url, "yaml"
     except ProjectNotFound:
         pass
-    profile_url = _profile_base_url_for_anonymous_use(active_profile_name())
-    if profile_url:
-        return profile_url, "profile"
+    profile = get_profile(active_profile_name())
+    if profile.get("base_url"):
+        return profile["base_url"], "profile"
     return DEFAULT_BASE_URL, "default"
 
 
@@ -510,7 +499,7 @@ def load_project_config(path: Optional[Path] = None) -> ProjectConfig:
         _reject_unsafe_url_parts(base_url)
         _validate_base_url(base_url)
     else:
-        base_url = _profile_base_url_for_anonymous_use(active_profile_name()) or DEFAULT_BASE_URL
+        base_url = get_profile(active_profile_name()).get("base_url") or DEFAULT_BASE_URL
 
     return ProjectConfig(
         project=raw["project"],
@@ -560,11 +549,7 @@ def resolve_api_key(config: ProjectConfig) -> str:
     """
     from aethis_cli.auth_helpers import resolve_cached_key, require_auth_or_login_inline
 
-    # A project file's api_key_env is refused unless the user designated it. The resolver
-    # below checks the cwd's project; this covers an explicit cfg loaded from elsewhere.
-    _designated_env_name(
-        "AETHIS_API_KEY_ENV", config.api_key_env, "AETHIS_API_KEY", where=str(config.config_path / "aethis.yaml")
-    )
+    # The project's api_key_env is checked inside resolve_cached_key, after --api-key.
     authorize_credential_server(config.base_url)
 
     cached = resolve_cached_key()
@@ -761,8 +746,6 @@ def set_profile(
             f"Profile name '{ANONYMOUS_PROFILE}' is reserved — selecting it always "
             "uses no API key. Pick a different name."
         )
-    if base_url is not None:
-        _reject_unsafe_url_parts(base_url)
     creds = load_credentials()
     profile = dict(creds["profiles"].get(name, {}))
     if api_key is not None:

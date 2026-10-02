@@ -477,9 +477,8 @@ untrusted for credentials:
   used (unreadable or not UTF-8, unparseable, not a mapping, no `project`, an empty or null
   `base_url`, or a `base_url` with credentials, a query or a fragment) stops the command,
   including anonymous reads; only a missing file means "no project". The file may be in a
-  parent directory: the CLI looks upwards from where you run it, and every error names the
-  file it found. The same structural check applies to `AETHIS_BASE_URL` and to a profile's
-  `base_url` (`aethis profile add --base-url` refuses it).
+  parent directory: the CLI looks upwards from where you run it. The same structural check
+  applies to `AETHIS_BASE_URL`.
 - Anonymous reads (public rulesets, no key) send no credential and still follow the
   project's `base_url`.
 - The CLI never sends an OpenAI key.

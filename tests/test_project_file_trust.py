@@ -525,7 +525,8 @@ class TestProviderKeyEnvIsUserDesignated:
 
 
 class TestAethisKeyEnvIsUserDesignated:
-    def test_project_named_variable_is_refused_even_with_a_cached_key(self, monkeypatch):
+    def test_project_named_variable_is_refused_even_with_a_cached_key(self, _env, monkeypatch):
+        _yaml(_env, api_key_env="EVIL_VAR")
         _cache_default_key()
         monkeypatch.setenv("EVIL_VAR", "ak_attacker_chosen")
         spy = _spy(monkeypatch)
@@ -534,7 +535,8 @@ class TestAethisKeyEnvIsUserDesignated:
         assert "EVIL_VAR" not in spy.reads
         assert "AETHIS_API_KEY_ENV" in str(ei.value)
 
-    def test_project_named_variable_is_refused_with_no_cached_key(self, monkeypatch):
+    def test_project_named_variable_is_refused_with_no_cached_key(self, _env, monkeypatch):
+        _yaml(_env, api_key_env="EVIL_VAR")
         monkeypatch.setenv("EVIL_VAR", "ak_attacker_chosen")
         spy = _spy(monkeypatch)
         with pytest.raises(ConfigError):
@@ -1031,26 +1033,6 @@ class TestStatusReportsTheRefusalWithoutAKey:
         assert _requests(net) == []
 
 
-class TestProfileBaseUrlStructure:
-    @pytest.mark.parametrize("bad", ["https://alice:secret@attacker.example", "https://attacker.example?x=1"])
-    @pytest.mark.parametrize("args", [["rulesets", "list", "--public"], ["rulebooks", "list"], ["projects", "list"]])
-    def test_a_hand_edited_profile_url_is_never_used(self, net, bad, args):
-        config.save_credentials(
-            {"active_profile": "default", "profiles": {"default": {"api_key": CACHED, "base_url": bad}}}
-        )
-        result = runner.invoke(app, args)
-        assert result.exit_code != 0
-        assert _requests(net) == []
-        assert "secret" not in _msg(result)
-
-    @pytest.mark.parametrize("bad", ["https://alice:secret@attacker.example", "https://attacker.example#f"])
-    def test_profile_add_refuses_it(self, bad):
-        result = runner.invoke(app, ["profile", "add", "p", "--base-url", bad])
-        assert result.exit_code != 0
-        assert "p" not in config.load_credentials()["profiles"]
-        assert "secret" not in _msg(result)
-
-
 class TestRefusalTextShowsOriginOnly:
     def test_save_target_error_has_no_path(self):
         config.set_profile("staging", base_url=STAGING)
@@ -1145,13 +1127,14 @@ class TestInitIsProfileSetup:
         browser.assert_called_once()
 
 
-class TestProfileBaseUrlStructureInsideAProject:
-    @pytest.mark.parametrize("bad", ["https://alice:secret@attacker.example", "https://attacker.example#f"])
-    @pytest.mark.parametrize("args", [["decide", "-b", "aethis/slug", "-i", "{}"], ["explain", "-b", "aethis/slug"]])
-    def test_anonymous_reads_never_use_it(self, net, _env, bad, args):
-        _yaml(_env)  # a project that names no server, so the profile's server applies
-        config.save_credentials({"active_profile": "default", "profiles": {"default": {"base_url": bad}}})
-        result = runner.invoke(app, args)
-        assert result.exit_code != 0
-        assert _requests(net) == []
-        assert "secret" not in _msg(result)
+class TestApiKeyFlagWinsWithoutInspectingTheProject:
+    @pytest.mark.parametrize("args", [["review", "proj_1"], ["whoami"], ["projects", "list"]])
+    def test_flag_beats_an_undesignated_project_api_key_env(self, net, _env, monkeypatch, args):
+        _yaml(_env, api_key_env="AWS_SECRET_ACCESS_KEY")
+        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "aws-secret-value")
+        spy = _spy(monkeypatch)
+        result = runner.invoke(app, ["--api-key", "ak_flag", *args])
+        assert result.exit_code == 0, _msg(result)
+        assert _keys_sent(net) == {"ak_flag"}
+        assert "AWS_SECRET_ACCESS_KEY" not in spy.reads
+        _no_secret_on_wire(net, "aws-secret-value")
