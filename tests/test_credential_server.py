@@ -170,3 +170,125 @@ class TestStatusFallback:
 
             _print_identity_section()
         assert client.call_args.args[1] == STAGING_URL
+
+
+class TestUrlValidationAndNormalisation:
+    @patch("aethis_cli.commands.account_cmd.httpx.get")
+    @patch("aethis_cli.commands.account_cmd._clerk_auth", return_value="tok")
+    def test_plaintext_remote_profile_refused_for_account(self, auth, get):
+        config.set_profile("plain", api_key="ak_fake", base_url="http://remote.example.test")
+        result = runner.invoke(app, ["--profile", "plain", "account", "keys"])
+        assert result.exit_code == 1
+        assert "HTTP" in result.output
+        auth.assert_not_called()
+        get.assert_not_called()
+
+    @patch("aethis_cli.commands.account_cmd.httpx.get")
+    @patch("aethis_cli.commands.account_cmd._clerk_auth", return_value="tok")
+    def test_plaintext_remote_env_refused(self, auth, get, monkeypatch):
+        monkeypatch.setenv("AETHIS_BASE_URL", "http://remote.example.test")
+        result = runner.invoke(app, ["account", "keys"])
+        assert result.exit_code == 1
+        get.assert_not_called()
+
+    @patch("aethis_cli.commands.login_cmd.run_browser_login")
+    def test_plaintext_remote_profile_refused_for_login(self, browser):
+        config.set_profile("plain", base_url="http://remote.example.test")
+        result = runner.invoke(app, ["login", "--profile", "plain"])
+        assert result.exit_code == 1
+        browser.assert_not_called()
+
+    @patch("aethis_cli.commands.account_cmd.httpx.delete")
+    @patch("aethis_cli.commands.account_cmd._clerk_auth", return_value="tok")
+    def test_localhost_http_allowed(self, auth, dele):
+        config.set_profile("local", base_url="http://localhost:8080/")
+        dele.return_value = MagicMock(status_code=204)
+        result = runner.invoke(app, ["--profile", "local", "account", "revoke", "ak_x", "--yes"])
+        assert result.exit_code == 0
+        assert dele.call_args.args[0] == "http://localhost:8080/api/v1/keys/ak_x"
+
+    @patch("aethis_cli.commands.account_cmd.httpx.delete")
+    @patch("aethis_cli.commands.account_cmd._clerk_auth", return_value="tok")
+    def test_trailing_slash_env_does_not_double_slash(self, auth, dele, monkeypatch):
+        monkeypatch.setenv("AETHIS_BASE_URL", f"{DEFAULT_BASE_URL}/")
+        dele.return_value = MagicMock(status_code=204)
+        runner.invoke(app, ["account", "revoke", "ak_x", "--yes"])
+        assert dele.call_args.args[0] == f"{DEFAULT_BASE_URL}/api/v1/keys/ak_x"
+
+    @pytest.mark.parametrize(
+        "env_url",
+        ["https://EXAMPLE.test", "https://example.test:443", "https://example.test/", "HTTPS://Example.Test:443/"],
+    )
+    @patch("aethis_cli.commands.account_cmd.save_api_key")
+    @patch("aethis_cli.commands.account_cmd._fetch_permissions", return_value=([], set(VALID_SCOPES)))
+    @patch("aethis_cli.commands.account_cmd.httpx.post")
+    @patch("aethis_cli.commands.account_cmd._clerk_auth", return_value="tok")
+    def test_equivalent_origins_are_not_refused(self, auth, post, perms, save, env_url, monkeypatch):
+        config.set_profile("p", api_key="ak_fake", base_url="https://example.test")
+        monkeypatch.setenv("AETHIS_BASE_URL", env_url)
+        post.return_value = MagicMock(status_code=201, json=MagicMock(return_value=KEY_RESPONSE))
+        result = runner.invoke(app, ["--profile", "p", "account", "generate"])
+        assert result.exit_code == 0
+        assert post.call_args.args[0] == "https://example.test/api/v1/keys/"
+
+    @patch("aethis_cli.commands.account_cmd._fetch_permissions", return_value=([], set(VALID_SCOPES)))
+    @patch("aethis_cli.commands.account_cmd._clerk_auth", return_value="tok")
+    def test_different_port_is_refused(self, auth, perms, monkeypatch):
+        config.set_profile("p", api_key="ak_fake", base_url="https://example.test")
+        monkeypatch.setenv("AETHIS_BASE_URL", "https://example.test:8443")
+        result = runner.invoke(app, ["--profile", "p", "account", "generate"])
+        assert result.exit_code == 1
+
+
+@patch("aethis_cli.commands.login_cmd._save_key")
+@patch("aethis_cli.commands.login_cmd.run_browser_login", return_value="ak_live_fake")
+class TestLoginProfileOption:
+    def test_login_profile_option_targets_that_profile_server(self, browser, save):
+        _staging()
+        result = runner.invoke(app, ["login", "--profile", "staging"])
+        assert result.exit_code == 0
+        assert browser.call_args.args[0] == STAGING_URL
+        assert browser.call_args.kwargs["profile"] == "staging"
+
+    @patch("aethis_cli.commands.login_cmd._validate_key", return_value=True)
+    def test_login_profile_option_api_key_path(self, validate, browser, save):
+        _staging()
+        result = runner.invoke(app, ["login", "--profile", "staging", "--api-key", "ak_fake"])
+        assert result.exit_code == 0
+        assert validate.call_args.args[1] == STAGING_URL
+        assert save.call_args.kwargs["profile"] == "staging"
+
+    def test_login_target_line_names_source(self, browser, save, monkeypatch):
+        _staging()
+        out = runner.invoke(app, ["login", "--profile", "staging"]).output
+        assert "from profile" in out and "profile: staging" in out
+        out = runner.invoke(app, ["login"]).output
+        assert "default" in out and DEFAULT_BASE_URL in out
+        monkeypatch.setenv("AETHIS_BASE_URL", STAGING_URL)
+        out = runner.invoke(app, ["login", "--profile", "staging"]).output
+        assert "from AETHIS_BASE_URL" in out
+
+    def test_login_refusal_remedy_is_login_specific(self, browser, save, monkeypatch):
+        _staging()
+        monkeypatch.setenv("AETHIS_BASE_URL", ENV_URL)
+        out = runner.invoke(app, ["login", "--profile", "staging"]).output
+        assert "--no-save" not in out
+        assert "aethis profile add staging --base-url" in out
+
+
+class TestStatusGenerationFallback:
+    def test_generation_fallback_follows_profile_without_project_file(self, tmp_path, monkeypatch):
+        (tmp_path / "aethis.yaml").unlink()
+        _staging()
+        monkeypatch.setenv("AETHIS_PROFILE", "staging")
+        with (
+            patch("aethis_cli.commands.status_cmd.AethisClient") as client,
+            patch("aethis_cli.commands.status_cmd.resolve_cached_key", return_value="ak_fake"),
+        ):
+            from aethis_cli.commands.status_cmd import _print_generation_section
+
+            try:
+                _print_generation_section("proj")
+            except Exception:
+                pass
+        assert client.call_args.args[1] == STAGING_URL

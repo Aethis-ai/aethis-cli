@@ -197,10 +197,15 @@ def login(
         raise typer.Exit(code=1)
 
     target_profile = profile or active_profile_name()
-    base_url, source = resolve_credential_base_url(target_profile)
-    info(f"Target server: {base_url} (profile: {target_profile})")
     try:
-        check_save_target(base_url, source, target_profile)
+        base_url, source = resolve_credential_base_url(target_profile)
+    except ConfigError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(code=1) from None
+    label = {"env": "from AETHIS_BASE_URL", "profile": "from profile", "default": "default"}[source]
+    info(f"Target server: {base_url} ({label}; profile: {target_profile})")
+    try:
+        check_save_target(base_url, source, target_profile, "login")
     except ConfigError as e:
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(code=1) from None

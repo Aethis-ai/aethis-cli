@@ -66,9 +66,28 @@ def resolve_base_url_with_source() -> tuple[str, str]:
     return DEFAULT_BASE_URL, "default"
 
 
+def normalize_base_url(url: str) -> str:
+    """Canonical form of a server URL: lowercase scheme and host, default port
+    dropped, trailing slash stripped. Used for requests and for comparisons."""
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(url.strip())
+    scheme = parts.scheme.lower()
+    host = (parts.hostname or "").lower()
+    if ":" in host:
+        host = f"[{host}]"
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    if port is not None and (scheme, port) not in {("https", 443), ("http", 80)}:
+        host = f"{host}:{port}"
+    return f"{scheme}://{host}{parts.path.rstrip('/')}"
+
+
 def profile_effective_base_url(profile_name: str) -> str:
     """The server a profile names: its ``base_url``, or the default if unset."""
-    return get_profile(profile_name).get("base_url") or DEFAULT_BASE_URL
+    return normalize_base_url(get_profile(profile_name).get("base_url") or DEFAULT_BASE_URL)
 
 
 def resolve_credential_base_url(profile_name: Optional[str] = None) -> tuple[str, str]:
@@ -78,32 +97,44 @@ def resolve_credential_base_url(profile_name: Optional[str] = None) -> tuple[str
     ``base_url`` > the default. Unlike :func:`resolve_base_url_with_source`
     this NEVER consults a project ``aethis.yaml``: a file found by walking up
     from the working directory must not choose where sign-in tokens or newly
-    minted keys are sent. ``source`` is 'env', 'profile' or 'default'.
+    minted keys are sent. The URL is validated (no plaintext HTTP to remote
+    hosts) and normalised. ``source`` is 'env', 'profile' or 'default'.
     """
     env = os.environ.get("AETHIS_BASE_URL")
     if env:
-        return env, "env"
-    profile = get_profile(profile_name or active_profile_name())
-    if profile.get("base_url"):
-        return profile["base_url"], "profile"
-    return DEFAULT_BASE_URL, "default"
+        url, source = env, "env"
+    else:
+        profile = get_profile(profile_name or active_profile_name())
+        if profile.get("base_url"):
+            url, source = profile["base_url"], "profile"
+        else:
+            url, source = DEFAULT_BASE_URL, "default"
+    _validate_base_url(url)
+    return normalize_base_url(url), source
 
 
-def check_save_target(base_url: str, source: str, profile_name: str) -> None:
+_SAVE_REMEDY = {
+    "generate": "Use --no-save, set the profile's server (`aethis profile add {p} --base-url {u}`), "
+    "or unset AETHIS_BASE_URL.",
+    "login": "Set the profile's server (`aethis profile add {p} --base-url {u}`), "
+    "unset AETHIS_BASE_URL, or pick a matching profile with --profile.",
+}
+
+
+def check_save_target(base_url: str, source: str, profile_name: str, command: str = "generate") -> None:
     """Refuse to save a key minted on a server the target profile does not name.
 
     Only an environment-supplied server can disagree with the profile (the
-    other sources are the profile's own server).
+    other sources are the profile's own server). Origins are compared normalised.
     """
     if source != "env":
         return
     effective = profile_effective_base_url(profile_name)
-    if base_url.rstrip("/") != effective.rstrip("/"):
+    if normalize_base_url(base_url) != effective:
+        remedy = _SAVE_REMEDY[command].format(p=profile_name, u=base_url)
         raise ConfigError(
             f"AETHIS_BASE_URL ({base_url}) differs from profile '{profile_name}' ({effective}); "
-            "the new key would be saved against the wrong server. Use --no-save, "
-            f"set the profile's server (`aethis profile add {profile_name} --base-url {base_url}`), "
-            "or unset AETHIS_BASE_URL."
+            f"the new key would be saved against the wrong server. {remedy}"
         )
 
 

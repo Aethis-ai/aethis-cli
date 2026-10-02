@@ -111,7 +111,11 @@ def _get_clerk_config() -> tuple[str, str]:
 
 def _resolve_server() -> tuple[str, str]:
     """Server for credential-bearing requests: env > profile > default (never aethis.yaml)."""
-    return resolve_credential_base_url()
+    try:
+        return resolve_credential_base_url()
+    except ConfigError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(code=1) from None
 
 
 def _announce_target(base_url: str, source: str) -> None:
