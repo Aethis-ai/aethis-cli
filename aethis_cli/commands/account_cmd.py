@@ -10,7 +10,7 @@ import typer
 
 from aethis_cli.auth import authenticate_with_clerk
 from aethis_cli.commands.login_cmd import save_api_key
-from aethis_cli.config import DEFAULT_BASE_URL
+from aethis_cli.config import active_profile_name, resolve_base_url_with_source
 from aethis_cli.errors import AuthenticationError
 from aethis_cli.output import console, info, success
 from aethis_cli.prompts import confirm_or_abort
@@ -108,6 +108,16 @@ def _get_clerk_config() -> tuple[str, str]:
     return domain, client_id
 
 
+def _resolve_server() -> str:
+    """Resolve the API server the same way every other command does."""
+    base_url, _ = resolve_base_url_with_source()
+    return base_url
+
+
+def _announce_target(base_url: str) -> None:
+    info(f"Target server: {base_url} (profile: {active_profile_name()})")
+
+
 def _clerk_auth(timeout: int) -> str:
     """Run Clerk OAuth flow, return access token."""
     domain, client_id = _get_clerk_config()
@@ -129,7 +139,8 @@ def generate(
     timeout: int = typer.Option(120, "--timeout", help="Browser auth timeout in seconds"),
 ) -> None:
     """Mint an additional API key (for rotation, multi-machine, or scoped access). For first-time setup use `aethis login` instead."""
-    base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
+    base_url = _resolve_server()
+    _announce_target(base_url)
     if scopes is None:
         scopes = list(DEFAULT_SCOPES)
 
@@ -194,7 +205,7 @@ def keys(
     timeout: int = typer.Option(120, "--timeout", help="Browser auth timeout in seconds"),
 ) -> None:
     """List your API keys (requires browser sign-in)."""
-    base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
+    base_url = _resolve_server()
     access_token = _clerk_auth(timeout)
     success("Authenticated successfully.")
 
@@ -251,7 +262,8 @@ def revoke(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
 ) -> None:
     """Revoke an API key (requires browser sign-in)."""
-    base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
+    base_url = _resolve_server()
+    _announce_target(base_url)
     confirm_or_abort(f"Revoke key {key_id}? This cannot be undone", assume_yes=yes)
 
     access_token = _clerk_auth(timeout)

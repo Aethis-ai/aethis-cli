@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.43.1 (2026-10-02)
+
+- Fix `aethis account generate`, `keys` and `revoke` ignoring the selected
+  profile's server. They now resolve the API server the same way every other
+  command does (`AETHIS_BASE_URL` > `aethis.yaml` > active profile > default),
+  so `--profile`, `AETHIS_PROFILE` and the sticky default are honoured, and a
+  key minted by `generate` belongs to the server of the profile it is saved to.
+  Previously these commands always used the production server unless
+  `AETHIS_BASE_URL` was set. `generate` and `revoke` now print the target server
+  before changing anything.
+
 ## 0.43.0 (2026-10-01)
 
 - Validate authored field `notes` locally, ahead of every engine call in `generate`/`refine`. `notes`, when
