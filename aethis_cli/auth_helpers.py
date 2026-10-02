@@ -56,7 +56,7 @@ def _is_interactive() -> bool:
         return False
 
 
-def resolve_cached_key() -> Optional[str]:
+def resolve_cached_key(*, check_project: bool = True) -> Optional[str]:
     """The one place an Aethis API key is resolved; every command goes through it.
 
     Resolution order:
@@ -89,8 +89,10 @@ def resolve_cached_key() -> Optional[str]:
         return RUNTIME.api_key_override
 
     # A project file may not name which variable is read as the key: refuse (without
-    # reading it) here, in the one place every command resolves a key.
-    check_project_api_key_env()
+    # reading it) here, in the one place every command resolves a key. Profile setup that
+    # sends nothing (``init``, ``mcp install``) asks for no project check.
+    if check_project:
+        check_project_api_key_env()
     key = os.environ.get(designated_api_key_env())
     if key:
         return key

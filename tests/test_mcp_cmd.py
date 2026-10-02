@@ -210,6 +210,13 @@ def test_override_conflict_refuses_before_config_write(sandbox):
     assert not _cursor_config(sandbox["home"]).exists()
 
 
+def test_install_is_profile_setup_and_ignores_a_project_file_in_the_cwd(sandbox):
+    (sandbox["work"] / "aethis.yaml").write_text("project: x\napi_key_env: AWS_SECRET_ACCESS_KEY\n")
+    result = _run(["mcp", "install", "--target", "cursor"])
+    assert result.exit_code == 0, result.output
+    assert _cursor_config(sandbox["home"]).exists()
+
+
 def test_designated_key_variable_is_compared_with_the_profile_key(sandbox):
     from aethis_cli.config import set_profile
 

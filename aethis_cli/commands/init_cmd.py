@@ -8,8 +8,8 @@ from typing import Optional
 
 import typer
 
-from aethis_cli.config import ProjectConfig, resolve_api_key, resolve_credential_base_url, write_state
-from aethis_cli.errors import ConfigError
+from aethis_cli.auth_helpers import resolve_cached_key
+from aethis_cli.config import write_state
 from aethis_cli.output import console, info, success
 
 AETHIS_YAML_TEMPLATE = """\
@@ -64,14 +64,11 @@ _NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
 
 
 def _has_cached_auth() -> bool:
-    """Return True if an API key is resolvable from env / keychain / file."""
-    try:
-        # We only need to know if a key exists; the values in ProjectConfig
-        # other than api_key_env do not affect lookup.
-        resolve_api_key(ProjectConfig(project="", base_url=resolve_credential_base_url()[0]))
-        return True
-    except ConfigError:
-        return False
+    """Return True if an API key is resolvable from the flag / env / keychain / file.
+
+    ``init`` sends nothing, so a project file in a parent directory has no say here.
+    """
+    return resolve_cached_key(check_project=False) is not None
 
 
 def _ensure_logged_in(no_prompt: bool) -> None:
@@ -88,7 +85,7 @@ def _ensure_logged_in(no_prompt: bool) -> None:
     # Imported lazily so test patches (`aethis_cli.commands.login_cmd.login`) work.
     from aethis_cli.commands import login_cmd
 
-    login_cmd.login()
+    login_cmd.login(api_key=None, timeout=120, profile=None)
 
 
 def _scaffold_ruleset(proj: Path, name: str) -> None:

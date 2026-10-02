@@ -11,6 +11,7 @@ from __future__ import annotations
 import inspect
 import json
 import os
+import re
 import sys
 import types
 from pathlib import Path
@@ -116,8 +117,16 @@ def _hosts(net: Any) -> set[str]:
     return {r.url.host for r in _requests(net)}
 
 
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _plain(text: str) -> str:
+    """Strip colour codes and collapse wrapping: Rich colours and re-flows output on CI."""
+    return re.sub(r"\s+", " ", _ANSI.sub("", text))
+
+
 def _msg(result: Any) -> str:
-    return (result.output or "") + str(result.exception or "")
+    return _plain((result.output or "") + str(result.exception or ""))
 
 
 def _no_secret_on_wire(net: Any, *secrets: str) -> None:
@@ -224,11 +233,14 @@ class TestHostileBaseUrl:
         assert "refused" in json.dumps(body["identity"]).lower()
 
     def test_anonymous_profile_reads_keep_working_without_a_credential(self, net):
-        result = runner.invoke(app, ["--profile", "anonymous", "decide", "-b", "aethis/slug", "-i", "{}"])
-        for r in _requests(net):
+        net.on("GET", f"{ATTACKER}/api/v1/public/rulesets", httpx.Response(200, json=[]))
+        result = runner.invoke(app, ["--profile", "anonymous", "rulesets", "list", "--public"])
+        assert result.exit_code == 0, _msg(result)
+        reqs = _requests(net)
+        assert reqs and {r.url.host for r in reqs} == {"attacker.example"}  # anonymous reads follow the project
+        for r in reqs:
             assert "x-api-key" not in r.headers
             assert "authorization" not in r.headers
-        assert result.exit_code in (0, 1)
 
     def test_inline_login_refused_before_browser_or_token(self, net):
         config.remove_profile("default")
@@ -803,7 +815,17 @@ INVALID_PROJECTS = {
     "bad_yaml": "project: [unclosed\n",
     "not_a_mapping": "- a\n- b\n",
     "plain_mapping_no_project": "foo: bar\n",
+    "scalar": "just a string\n",
+    "empty_base_url": "project: x\nbase_url: ''\n",
+    "null_base_url": "project: x\nbase_url:\n",
+    "non_utf8": b"project: x\n# \xff\xfe\n",
 }
+
+
+def _write_project(path: Path, kind: str) -> None:
+    data = INVALID_PROJECTS[kind]
+    (path / "aethis.yaml").write_bytes(data if isinstance(data, bytes) else data.encode())
+
 
 INVALID_PROJECT_COMMANDS = [
     ["decide", "-b", "aethis/slug", "-i", "{}"],
@@ -830,7 +852,7 @@ class TestInvalidProjectFileFailsLoud:
     @pytest.mark.parametrize("args", INVALID_PROJECT_COMMANDS)
     @pytest.mark.parametrize("keyed", [True, False])
     def test_command_fails_and_contacts_no_host(self, net, _env, kind, args, keyed):
-        (_env / "project" / "aethis.yaml").write_text(INVALID_PROJECTS[kind])
+        _write_project(_env / "project", kind)
         if keyed:
             _cache_default_key()
         result = runner.invoke(app, args)
@@ -931,9 +953,9 @@ class TestUnsafeUrlParts:
 
 
 class TestProjectFileReaders:
-    @pytest.mark.parametrize("kind", ["bad_yaml", "not_a_mapping"])
+    @pytest.mark.parametrize("kind", ["bad_yaml", "not_a_mapping", "scalar", "non_utf8"])
     def test_unreadable_project_file_is_an_error_for_the_credential_checks(self, _env, kind):
-        (_env / "project" / "aethis.yaml").write_text(INVALID_PROJECTS[kind])
+        _write_project(_env / "project", kind)
         with pytest.raises(ConfigError):
             config.authorize_credential_server()
         with pytest.raises(ConfigError):
@@ -942,3 +964,194 @@ class TestProjectFileReaders:
     def test_no_project_file_is_not_an_error_for_the_credential_checks(self):
         assert config.authorize_credential_server() == DEFAULT_BASE_URL
         config.check_project_api_key_env()
+
+
+# --------------------------------------------------------------------------- #
+# Round 4 review items
+# --------------------------------------------------------------------------- #
+
+
+class TestEmptyProjectBaseUrl:
+    @pytest.mark.parametrize("kind", ["empty_base_url", "null_base_url"])
+    def test_authorize_refuses_a_present_but_empty_base_url(self, _env, kind):
+        _write_project(_env / "project", kind)
+        with pytest.raises(ConfigError):
+            config.authorize_credential_server()
+
+    def test_absent_base_url_still_means_the_default(self, _env):
+        _yaml(_env)
+        assert config.authorize_credential_server() == DEFAULT_BASE_URL
+        assert config.load_project_config().base_url == DEFAULT_BASE_URL
+
+
+class TestUnreadableProjectFile:
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file modes")
+    @pytest.mark.parametrize("args", [["whoami"], ["decide", "-b", "aethis/slug", "-i", "{}"], ["status"]])
+    def test_permission_error_is_a_clean_config_error(self, net, _env, args):
+        _yaml(_env)
+        path = _env / "project" / "aethis.yaml"
+        path.chmod(0)
+        try:
+            result = runner.invoke(app, args)
+        finally:
+            path.chmod(0o600)
+        assert isinstance(result.exception, ConfigError), repr(result.exception)
+        assert str(path) in _msg(result)
+        assert _requests(net) == []
+
+    def test_yaml_error_text_does_not_quote_the_file(self, _env):
+        (_env / "project" / "aethis.yaml").write_text("project: [ak_live_PASTED_SECRET\n")
+        with pytest.raises(ConfigError) as ei:
+            config.load_project_config()
+        assert "ak_live_PASTED_SECRET" not in str(ei.value)
+        with pytest.raises(ConfigError) as ei:
+            config.authorize_credential_server()
+        assert "ak_live_PASTED_SECRET" not in str(ei.value)
+
+
+class TestStatusReportsTheRefusalWithoutAKey:
+    @pytest.fixture(autouse=True)
+    def _hostile_no_key(self, _env):
+        _yaml(_env, base_url=ATTACKER)
+
+    def test_human(self, net):
+        result = runner.invoke(app, ["status", "--project-id", "proj_1"])
+        assert result.exit_code == 1
+        text = _msg(result)
+        assert text.count("refused") >= 2  # identity and generation
+        assert _requests(net) == []
+
+    def test_json(self, net):
+        result = runner.invoke(app, ["--output", "json", "status", "--project-id", "proj_1"])
+        assert result.exit_code == 1
+        body = json.loads(result.output)
+        assert body["server"].get("refused")
+        assert body["identity"].get("refused")
+        assert body["generation"].get("refused")
+        assert _requests(net) == []
+
+
+class TestProfileBaseUrlStructure:
+    @pytest.mark.parametrize("bad", ["https://alice:secret@attacker.example", "https://attacker.example?x=1"])
+    @pytest.mark.parametrize("args", [["rulesets", "list", "--public"], ["rulebooks", "list"], ["projects", "list"]])
+    def test_a_hand_edited_profile_url_is_never_used(self, net, bad, args):
+        config.save_credentials(
+            {"active_profile": "default", "profiles": {"default": {"api_key": CACHED, "base_url": bad}}}
+        )
+        result = runner.invoke(app, args)
+        assert result.exit_code != 0
+        assert _requests(net) == []
+        assert "secret" not in _msg(result)
+
+    @pytest.mark.parametrize("bad", ["https://alice:secret@attacker.example", "https://attacker.example#f"])
+    def test_profile_add_refuses_it(self, bad):
+        result = runner.invoke(app, ["profile", "add", "p", "--base-url", bad])
+        assert result.exit_code != 0
+        assert "p" not in config.load_credentials()["profiles"]
+        assert "secret" not in _msg(result)
+
+
+class TestRefusalTextShowsOriginOnly:
+    def test_save_target_error_has_no_path(self):
+        config.set_profile("staging", base_url=STAGING)
+        with pytest.raises(ConfigError) as ei:
+            config.check_save_target("https://env.example.test/tok_SECRET/x", "env", "staging", "login")
+        text = str(ei.value)
+        assert "env.example.test" in text and "tok_SECRET" not in text
+
+    def test_project_server_refusal_names_the_file_not_the_url(self, _env):
+        _yaml(_env, base_url=ATTACKER + "/tok_SECRET")
+        with pytest.raises(ConfigError) as ei:
+            config.authorize_credential_server()
+        text = str(ei.value)
+        assert str(_env / "project" / "aethis.yaml") in text and "tok_SECRET" not in text
+
+    def test_env_name_refusal_names_the_file(self, _env):
+        _yaml(_env, api_key_env="AWS_SECRET_ACCESS_KEY")
+        with pytest.raises(ConfigError) as ei:
+            config.check_project_api_key_env()
+        assert str(_env / "project" / "aethis.yaml") in str(ei.value)
+        assert "AWS_SECRET_ACCESS_KEY" not in str(ei.value)
+
+
+class TestAnonymousProfileMessages:
+    @pytest.mark.parametrize("cmd", ["whoami", "usage"])
+    def test_say_the_anonymous_profile_is_active(self, net, monkeypatch, cmd):
+        monkeypatch.setenv("AETHIS_API_KEY", "ak_secret")
+        result = runner.invoke(app, ["--profile", "anonymous", cmd])
+        text = _msg(result)
+        assert result.exit_code == 1 and "anonymous" in text.lower()
+        assert "set AETHIS_API_KEY" not in text
+        assert _requests(net) == []
+
+
+class TestAnonymousOrderingPinned:
+    def test_anonymous_beats_the_api_key_override(self):
+        from aethis_cli.auth_helpers import resolve_cached_key
+
+        RUNTIME.profile_override = "anonymous"
+        RUNTIME.api_key_override = "ak_x"
+        assert resolve_cached_key() is None
+
+    def test_inline_login_refuses_before_returning_the_override(self):
+        from aethis_cli.auth_helpers import require_auth_or_login_inline
+        from aethis_cli.errors import AuthRequired
+
+        RUNTIME.profile_override = "anonymous"
+        RUNTIME.api_key_override = "ak_x"
+        with pytest.raises(AuthRequired):
+            require_auth_or_login_inline()
+
+
+class TestInitIsProfileSetup:
+    """``aethis init`` sends nothing: a project file in a parent directory must not gate it."""
+
+    @pytest.fixture(autouse=True)
+    def _key(self, monkeypatch):
+        monkeypatch.setenv("AETHIS_API_KEY", "ak_present")
+
+    @pytest.mark.parametrize(
+        "kind", ["other_server", "undesignated_key_env", "bad_yaml", "non_utf8", "scalar", "empty_base_url"]
+    )
+    def test_no_prompt_with_a_key_set_succeeds_under_any_parent_project(self, net, _env, kind):
+        parent = {
+            "other_server": f"project: x\nbase_url: {ATTACKER}\n",
+            "undesignated_key_env": "project: x\napi_key_env: AWS_SECRET_ACCESS_KEY\n",
+        }.get(kind)
+        if parent is not None:
+            (_env / "project" / "aethis.yaml").write_text(parent)
+        else:
+            _write_project(_env / "project", kind)
+        result = runner.invoke(app, ["--no-prompt", "init", "newproj"])
+        assert result.exit_code == 0, _msg(result)
+        assert (Path.cwd() / "newproj" / "aethis.yaml").exists()
+        assert _requests(net) == []
+
+    def test_login_is_called_with_explicit_arguments(self, net, monkeypatch):
+        monkeypatch.delenv("AETHIS_API_KEY")
+        with patch("aethis_cli.commands.login_cmd.login") as login:
+            result = runner.invoke(app, ["init", "newproj"])
+        assert result.exit_code == 0, _msg(result)
+        login.assert_called_once_with(api_key=None, timeout=120, profile=None)
+
+    def test_real_login_command_accepts_those_arguments(self, net, monkeypatch):
+        """The call init makes must not hand Typer OptionInfo defaults to the command."""
+        from aethis_cli.commands import login_cmd
+
+        monkeypatch.delenv("AETHIS_API_KEY")
+        with patch.object(login_cmd, "run_browser_login", return_value="ak_live_x") as browser:
+            result = runner.invoke(app, ["init", "newproj"])
+        assert result.exit_code == 0, _msg(result)
+        browser.assert_called_once()
+
+
+class TestProfileBaseUrlStructureInsideAProject:
+    @pytest.mark.parametrize("bad", ["https://alice:secret@attacker.example", "https://attacker.example#f"])
+    @pytest.mark.parametrize("args", [["decide", "-b", "aethis/slug", "-i", "{}"], ["explain", "-b", "aethis/slug"]])
+    def test_anonymous_reads_never_use_it(self, net, _env, bad, args):
+        _yaml(_env)  # a project that names no server, so the profile's server applies
+        config.save_credentials({"active_profile": "default", "profiles": {"default": {"base_url": bad}}})
+        result = runner.invoke(app, args)
+        assert result.exit_code != 0
+        assert _requests(net) == []
+        assert "secret" not in _msg(result)

@@ -66,6 +66,17 @@ class ProjectConfig:
     project_base_url: Optional[str] = None  # the project file's own value, exactly as written
 
 
+def _profile_base_url_for_anonymous_use(profile_name: str) -> Optional[str]:
+    """The profile's ``base_url`` with the structural checks every configured server gets."""
+    value = get_profile(profile_name).get("base_url")
+    if value:
+        try:
+            _reject_unsafe_url_parts(value)
+        except ConfigError as e:
+            raise ConfigError(f"base_url of profile '{profile_name}': {e}") from None
+    return value or None
+
+
 def resolve_base_url_with_source() -> tuple[str, str]:
     """Return (base_url, source) where source is 'env', 'yaml', 'profile', or 'default'.
 
@@ -86,9 +97,9 @@ def resolve_base_url_with_source() -> tuple[str, str]:
             return cfg.project_base_url, "yaml"
     except ProjectNotFound:
         pass
-    profile = get_profile(active_profile_name())
-    if profile.get("base_url"):
-        return profile["base_url"], "profile"
+    profile_url = _profile_base_url_for_anonymous_use(active_profile_name())
+    if profile_url:
+        return profile_url, "profile"
     return DEFAULT_BASE_URL, "default"
 
 
@@ -199,10 +210,25 @@ def resolve_credential_base_url(profile_name: Optional[str] = None) -> tuple[str
 
 
 _PROJECT_SERVER_REFUSED = (
-    "The server this project selects (aethis.yaml base_url) is not the one your active profile '{p}' uses, "
+    "The server named by {label} is not the one your active profile '{p}' uses, "
     "so no credential was sent. To use it, set AETHIS_BASE_URL (or pass --base-url) to that server, or "
     "select or create a profile whose base_url is that server (`aethis profile add <name> --base-url <url>`)."
 )
+
+
+def _origin(url: str) -> str:
+    """``scheme://host[:port]`` only: a URL's path or query can hold a token, so errors never print them."""
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname or ""
+        port = f":{parts.port}" if parts.port else ""
+    except ValueError:
+        return "<unprintable server>"
+    if not parts.scheme or not host or not url.isprintable() or not url.isascii():
+        return "<unprintable server>"
+    return f"{parts.scheme}://{f'[{host}]' if ':' in host else host}{port}"
 
 
 def authorize_credential_server(requested_url: Optional[str] = None, profile_name: Optional[str] = None) -> str:
@@ -222,45 +248,73 @@ def authorize_credential_server(requested_url: Optional[str] = None, profile_nam
     # The project file's OWN value is always compared (read here, not taken from
     # a caller), before any env/profile override could mask it: a project that
     # names another server is refused unless the user's own server equals it.
-    for candidate in (requested_url, _read_project_base_url()):
-        if candidate is None:
-            continue
+    candidates: list[tuple[str, str]] = []
+    project = _read_project_server()
+    if project is not None:
+        candidates.append((f"the project file {project[0]}", project[1]))
+    if requested_url is not None:
+        candidates.append(("the requested server", requested_url))
+    for label, candidate in candidates:
         try:
             requested = parse_credential_base_url(candidate)
         except ConfigError as e:
-            raise ConfigError(f"The project's server is not usable for credentials: {e}") from None
+            raise ConfigError(f"The server named by {label} is not usable for credentials: {e}") from None
         if requested != trusted:
-            raise ConfigError(_PROJECT_SERVER_REFUSED.format(p=name))
+            raise ConfigError(_PROJECT_SERVER_REFUSED.format(label=label, p=name))
     return trusted
 
 
-def _read_project_raw() -> Optional[dict]:
-    """The working directory's project file, parsed, or None if there is none.
+def _parse_project_file(path: Path) -> dict:
+    """Parse a project file that exists. Anything unusable is a clean :class:`ConfigError`.
 
-    A file that exists but cannot be parsed is an error, never "no project".
+    Never quotes the file's content (a pasted key must not reach an error message).
     """
     try:
-        path = _find_config(Path.cwd())
-    except ProjectNotFound:
-        return None
-    try:
-        raw = yaml.safe_load(path.read_text())
-    except (yaml.YAMLError, OSError) as e:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as e:
+        mark = getattr(e, "problem_mark", None)
+        where = f" at line {mark.line + 1}" if mark is not None else ""
+        raise ConfigError(f"Invalid YAML in {path}{where} ({type(e).__name__}).") from None
+    except (OSError, UnicodeDecodeError) as e:
         raise ConfigError(f"Cannot read the project file {path} ({type(e).__name__}).") from None
+    if raw is None:
+        return {}
     if not isinstance(raw, dict):
         raise ConfigError(f"The project file {path} must be a YAML mapping.")
     return raw
 
 
-def _read_project_base_url() -> Optional[str]:
-    """The working directory's project file's ``base_url`` exactly as written, or None."""
-    raw = _read_project_raw()
-    value = raw.get("base_url") if raw else None
-    # Subsumed, kept for the clearer message: a non-string value would also be refused by
-    # parse_credential_base_url in authorize_credential_server.
-    if value is not None and not isinstance(value, str):
-        raise ConfigError("The project's base_url must be a string.")
+def _project_file() -> Optional[tuple[Path, dict]]:
+    """The working directory's project file and its parsed content, or None if there is none.
+
+    A file that exists but is unusable is an error, never "no project".
+    """
+    try:
+        path = _find_config(Path.cwd())
+    except ProjectNotFound:
+        return None
+    return path, _parse_project_file(path)
+
+
+def _project_base_url_value(raw: dict, path: Path) -> Optional[str]:
+    """The project's ``base_url`` exactly as written: None when the key is absent, an error when
+    it is present but empty, null or not a string (silently meaning production would hide a mistake)."""
+    if "base_url" not in raw:
+        return None
+    value = raw["base_url"]
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"base_url in {path} must be a non-empty string (remove the key to use the default).")
     return value
+
+
+def _read_project_server() -> Optional[tuple[Path, str]]:
+    """(path, base_url) of the working directory's project file if it names a server, else None."""
+    found = _project_file()
+    if found is None:
+        return None
+    path, raw = found
+    value = _project_base_url_value(raw, path)
+    return None if value is None else (path, value)
 
 
 def check_project_api_key_env() -> None:
@@ -268,9 +322,12 @@ def check_project_api_key_env() -> None:
 
     Called from the one key resolution, so no path that resolves a key can skip it.
     """
-    raw = _read_project_raw()
-    if raw:
-        _designated_env_name("AETHIS_API_KEY_ENV", raw.get("api_key_env", "AETHIS_API_KEY"), "AETHIS_API_KEY")
+    found = _project_file()
+    if found:
+        path, raw = found
+        _designated_env_name(
+            "AETHIS_API_KEY_ENV", raw.get("api_key_env", "AETHIS_API_KEY"), "AETHIS_API_KEY", where=str(path)
+        )
 
 
 def project_credential_server() -> str:
@@ -309,9 +366,9 @@ def check_save_target(base_url: str, source: str, profile_name: str, command: st
         return
     effective = profile_effective_base_url(profile_name)
     if parse_credential_base_url(base_url) != effective:
-        remedy = _SAVE_REMEDY[command].format(p=profile_name, u=base_url)
+        remedy = _SAVE_REMEDY[command].format(p=profile_name, u=_origin(base_url))
         raise ConfigError(
-            f"AETHIS_BASE_URL ({base_url}) differs from profile '{profile_name}' ({effective}); "
+            f"AETHIS_BASE_URL ({_origin(base_url)}) differs from profile '{profile_name}' ({_origin(effective)}); "
             f"the new key would be saved against the wrong server. {remedy}"
         )
 
@@ -436,10 +493,7 @@ def load_project_config(path: Optional[Path] = None) -> ProjectConfig:
     else:
         yaml_path = _find_config(path or Path.cwd())
 
-    try:
-        raw = yaml.safe_load(yaml_path.read_text()) or {}
-    except yaml.YAMLError as e:
-        raise ConfigError(f"Invalid YAML in {yaml_path}: {e}")
+    raw = _parse_project_file(yaml_path)
     if "project" not in raw:
         raise ConfigError(f"Missing 'project' key in {yaml_path}")
 
@@ -450,15 +504,13 @@ def load_project_config(path: Optional[Path] = None) -> ProjectConfig:
     # aethis.yaml > the active profile's server > the default. A yaml value that
     # differs from the user's own server is honoured for anonymous reads only;
     # every credential-bearing use is refused by authorize_credential_server.
-    project_url = raw.get("base_url")
-    if project_url is not None and not isinstance(project_url, str):
-        raise ConfigError(f"base_url in {yaml_path} must be a string")
+    project_url = _project_base_url_value(raw, yaml_path)
     base_url = os.environ.get("AETHIS_BASE_URL") or project_url
     if base_url:
         _reject_unsafe_url_parts(base_url)
         _validate_base_url(base_url)
     else:
-        base_url = get_profile(active_profile_name()).get("base_url") or DEFAULT_BASE_URL
+        base_url = _profile_base_url_for_anonymous_use(active_profile_name()) or DEFAULT_BASE_URL
 
     return ProjectConfig(
         project=raw["project"],
@@ -473,13 +525,13 @@ def load_project_config(path: Optional[Path] = None) -> ProjectConfig:
 
 
 _ENV_REFUSED = (
-    "aethis.yaml names a non-default key variable that you have not designated, so it was not read. Environment "
+    "{where} names a non-default key variable that you have not designated, so it was not read. Environment "
     "variables are read as keys only if you name them yourself: set {setting} to the variable name in your own "
     "environment."
 )
 
 
-def _designated_env_name(setting: str, project_value: str, default: str) -> str:
+def _designated_env_name(setting: str, project_value: str, default: str, *, where: str = "aethis.yaml") -> str:
     """The environment variable the USER designated for a key, or refuse.
 
     A project file can name any variable (``aethis.yaml`` is copied between
@@ -489,7 +541,7 @@ def _designated_env_name(setting: str, project_value: str, default: str) -> str:
     """
     designated = os.environ.get(setting) or None
     if project_value != default and project_value != designated:
-        raise ConfigError(_ENV_REFUSED.format(setting=setting))
+        raise ConfigError(_ENV_REFUSED.format(where=where, setting=setting))
     return designated or default
 
 
@@ -508,10 +560,11 @@ def resolve_api_key(config: ProjectConfig) -> str:
     """
     from aethis_cli.auth_helpers import resolve_cached_key, require_auth_or_login_inline
 
-    # A project file's api_key_env is refused unless the user designated it. This is
-    # subsumed by resolve_cached_key's check for the cwd's project; kept for a cfg that
-    # was loaded from elsewhere.
-    _designated_env_name("AETHIS_API_KEY_ENV", config.api_key_env, "AETHIS_API_KEY")
+    # A project file's api_key_env is refused unless the user designated it. The resolver
+    # below checks the cwd's project; this covers an explicit cfg loaded from elsewhere.
+    _designated_env_name(
+        "AETHIS_API_KEY_ENV", config.api_key_env, "AETHIS_API_KEY", where=str(config.config_path / "aethis.yaml")
+    )
     authorize_credential_server(config.base_url)
 
     cached = resolve_cached_key()
@@ -527,7 +580,12 @@ def resolve_anthropic_key(config: ProjectConfig) -> Optional[str]:
     Default ``ANTHROPIC_API_KEY``; ``AETHIS_ANTHROPIC_KEY_ENV`` names another.
     A different ``anthropic_key_env`` in a project file is refused unread.
     """
-    name = _designated_env_name("AETHIS_ANTHROPIC_KEY_ENV", config.anthropic_key_env, "ANTHROPIC_API_KEY")
+    name = _designated_env_name(
+        "AETHIS_ANTHROPIC_KEY_ENV",
+        config.anthropic_key_env,
+        "ANTHROPIC_API_KEY",
+        where=str(config.config_path / "aethis.yaml"),
+    )
     return os.environ.get(name) or None
 
 
@@ -703,6 +761,8 @@ def set_profile(
             f"Profile name '{ANONYMOUS_PROFILE}' is reserved — selecting it always "
             "uses no API key. Pick a different name."
         )
+    if base_url is not None:
+        _reject_unsafe_url_parts(base_url)
     creds = load_credentials()
     profile = dict(creds["profiles"].get(name, {}))
     if api_key is not None:
@@ -740,5 +800,10 @@ def resolve_deepseek_key(config: ProjectConfig) -> Optional[str]:
 
     Default ``DEEPSEEK_API_KEY``; ``AETHIS_DEEPSEEK_KEY_ENV`` names another.
     """
-    name = _designated_env_name("AETHIS_DEEPSEEK_KEY_ENV", config.deepseek_key_env, "DEEPSEEK_API_KEY")
+    name = _designated_env_name(
+        "AETHIS_DEEPSEEK_KEY_ENV",
+        config.deepseek_key_env,
+        "DEEPSEEK_API_KEY",
+        where=str(config.config_path / "aethis.yaml"),
+    )
     return os.environ.get(name) or None

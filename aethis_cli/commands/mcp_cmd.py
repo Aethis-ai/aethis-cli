@@ -72,7 +72,7 @@ def _selected_profile_reference() -> tuple[str, dict[str, str]]:
     # paired reliably with the selected endpoint until the user saves a named
     # profile with its credential.
     if profile_name != ANONYMOUS_PROFILE and not selected_profile.get("api_key"):
-        if resolve_cached_key() is not None:
+        if resolve_cached_key(check_project=False) is not None:
             raise typer.BadParameter(
                 "A legacy Aethis credential was found but the selected default profile has no saved key. "
                 "Save and select a named profile with `aethis login --profile <name>` "

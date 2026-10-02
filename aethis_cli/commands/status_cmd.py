@@ -160,16 +160,16 @@ def _print_identity_section(target: _Target) -> None:
         console.print(f"[bold]Identity:[/bold]    [dim]{auth_mode} (provider-minted at request time)[/dim]")
         return
 
+    if target.problem or target.server is None:
+        _refused("Identity", target)
+        return
+
     api_key = resolve_cached_key()
     if api_key is None:
         console.print(
             "[bold]Identity:[/bold]    [yellow]no API key[/yellow]  "
             "[dim](decision endpoints still work; run `aethis login` to author)[/dim]"
         )
-        return
-
-    if target.problem or target.server is None:
-        _refused("Identity", target)
         return
 
     client = AethisClient(api_key, target.server)
@@ -200,12 +200,12 @@ def _print_identity_section(target: _Target) -> None:
 
 def _print_generation_section(project_id: str, target: _Target) -> None:
     """Print generation progress for a specific project."""
+    if target.problem or target.server is None:
+        _refused("Generation", target)
+        return
     api_key = resolve_cached_key()
     if api_key is None:
         console.print("[bold]Generation:[/bold]  [dim]skipped — no API key[/dim]")
-        return
-    if target.problem or target.server is None:
-        _refused("Generation", target)
         return
 
     client = AethisClient(api_key, target.server)
@@ -254,7 +254,7 @@ def _emit_json_status(project_id: Optional[str], target: _Target) -> None:
 
     state: dict[str, Any] = {
         "cli": {"version": __version__},
-        "server": {"base_url": base_url, "source": source},
+        "server": {"base_url": base_url, "source": source, **({"refused": target.problem} if target.problem else {})},
         "profile": {
             "name": profile_name,
             "auth_mode": profile.get("auth_mode") or "api_key",
@@ -281,11 +281,11 @@ def _emit_json_status(project_id: Optional[str], target: _Target) -> None:
     if auth_mode != "api_key":
         state["identity"] = {"auth_mode": auth_mode, "provider_minted": True}
     else:
-        api_key = resolve_cached_key()
-        if api_key is None:
+        api_key = None if (target.problem or target.server is None) else resolve_cached_key()
+        if target.problem or target.server is None:
+            state["identity"] = {"refused": target.problem}
+        elif api_key is None:
             state["identity"] = {"key_present": False}
-        elif target.problem or target.server is None:
-            state["identity"] = {"key_present": True, "refused": target.problem}
         else:
             client = AethisClient(api_key, target.server)
             try:
@@ -309,11 +309,11 @@ def _emit_json_status(project_id: Optional[str], target: _Target) -> None:
     # Generation section — only when we have a project id
     pid = project_id or (cfg.project_id if cfg else None)
     if pid:
-        api_key = resolve_cached_key()
-        if api_key is None:
-            state["generation"] = {"skipped": "no_api_key"}
-        elif target.problem or target.server is None:
+        api_key = None if (target.problem or target.server is None) else resolve_cached_key()
+        if target.problem or target.server is None:
             state["generation"] = {"refused": target.problem}
+        elif api_key is None:
+            state["generation"] = {"skipped": "no_api_key"}
         else:
             client = AethisClient(api_key, target.server)
             try:

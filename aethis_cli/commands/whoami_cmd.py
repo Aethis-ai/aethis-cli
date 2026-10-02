@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import typer
 
-from aethis_cli.auth_helpers import resolve_cached_key
+from aethis_cli.auth_helpers import is_anonymous_active, resolve_cached_key
 from aethis_cli.client import AethisClient
 from aethis_cli.config import project_credential_server
 from aethis_cli.errors import AethisAPIError
@@ -17,6 +17,13 @@ def whoami() -> None:
     Answers "can I author rules with this key?" before you try and get a 403.
     """
     base_url = project_credential_server()
+    if is_anonymous_active():
+        console.print(
+            "[yellow]The anonymous profile is active, which sends no key.[/yellow]\n"
+            "[dim]Select another profile with --profile or `aethis profile use <name>`. "
+            "Decision tools work without a key.[/dim]"
+        )
+        raise typer.Exit(code=1)
     api_key = resolve_cached_key()
     if api_key is None:
         console.print(

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import typer
 from rich.table import Table
 
-from aethis_cli.auth_helpers import resolve_cached_key
+from aethis_cli.auth_helpers import is_anonymous_active, resolve_cached_key
 from aethis_cli.client import AethisClient
 from aethis_cli.config import project_credential_server
 from aethis_cli.errors import AethisAPIError
@@ -33,6 +33,12 @@ def usage() -> None:
     authoring run so a 429 is never the first signal.
     """
     base_url = project_credential_server()
+    if is_anonymous_active():
+        console.print(
+            "[yellow]The anonymous profile is active, which sends no key.[/yellow]\n"
+            "[dim]Select another profile with --profile or `aethis profile use <name>`.[/dim]"
+        )
+        raise typer.Exit(code=1)
     api_key = resolve_cached_key()
     if api_key is None:
         console.print(

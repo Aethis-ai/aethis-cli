@@ -459,8 +459,9 @@ untrusted for credentials:
   different server, the command stops before sending anything. To use that server,
   set `AETHIS_BASE_URL` (or pass `--base-url`) to it, or select or create a profile
   whose `base_url` is that server. A `base_url` equal to your server is fine.
-  (`aethis account` and `aethis login` never read `aethis.yaml` at all: they use
-  `AETHIS_BASE_URL`, else the profile's server, so there is nothing to refuse.)
+  (`aethis account`, `aethis login`, `aethis init` and `aethis mcp install` never read
+  `aethis.yaml` for this: they use `AETHIS_BASE_URL`, else the profile's server, so there
+  is nothing to refuse.)
 - **Environment variables.** The CLI reads an Anthropic, Aethis or DeepSeek key
   from the default variable, or from the one you name in `AETHIS_ANTHROPIC_KEY_ENV`,
   `AETHIS_API_KEY_ENV` or `AETHIS_DEEPSEEK_KEY_ENV`. An `anthropic_key_env`,
@@ -473,9 +474,12 @@ untrusted for credentials:
   The `anonymous` profile sends no key whatever the environment holds, and `--api-key`
   together with it is an error.
 - **An invalid project file is an error.** A project `aethis.yaml` that exists but cannot be
-  used (unparseable, no `project`, a `base_url` with credentials, a query or a fragment) stops
-  the command, including anonymous reads; only a missing file means "no project". The same
-  structural check applies to `AETHIS_BASE_URL`.
+  used (unreadable or not UTF-8, unparseable, not a mapping, no `project`, an empty or null
+  `base_url`, or a `base_url` with credentials, a query or a fragment) stops the command,
+  including anonymous reads; only a missing file means "no project". The file may be in a
+  parent directory: the CLI looks upwards from where you run it, and every error names the
+  file it found. The same structural check applies to `AETHIS_BASE_URL` and to a profile's
+  `base_url` (`aethis profile add --base-url` refuses it).
 - Anonymous reads (public rulesets, no key) send no credential and still follow the
   project's `base_url`.
 - The CLI never sends an OpenAI key.
