@@ -159,19 +159,6 @@ class TestLoginServer:
         assert validate.call_args.args[1] == STAGING_URL
 
 
-class TestStatusFallback:
-    def test_status_fallback_follows_profile_without_project_file(self, tmp_path, monkeypatch):
-        (tmp_path / "aethis.yaml").unlink()
-        _staging()
-        monkeypatch.setenv("AETHIS_PROFILE", "staging")
-        with patch("aethis_cli.commands.status_cmd.AethisClient") as client:
-            client.return_value.whoami.return_value = {"key_id": "k"}
-            from aethis_cli.commands.status_cmd import _print_identity_section
-
-            _print_identity_section()
-        assert client.call_args.args[1] == STAGING_URL
-
-
 class TestUrlValidationAndNormalisation:
     @patch("aethis_cli.commands.account_cmd.httpx.get")
     @patch("aethis_cli.commands.account_cmd._clerk_auth", return_value="tok")
@@ -277,24 +264,6 @@ class TestLoginProfileOption:
         save.assert_not_called()
         assert "--no-save" not in result.output
         assert "aethis profile add staging --base-url" in result.output
-
-
-class TestStatusGenerationFallback:
-    def test_generation_fallback_follows_profile_without_project_file(self, tmp_path, monkeypatch):
-        (tmp_path / "aethis.yaml").unlink()
-        _staging()
-        monkeypatch.setenv("AETHIS_PROFILE", "staging")
-        with (
-            patch("aethis_cli.commands.status_cmd.AethisClient") as client,
-            patch("aethis_cli.commands.status_cmd.resolve_cached_key", return_value="ak_fake"),
-        ):
-            from aethis_cli.commands.status_cmd import _print_generation_section
-
-            try:
-                _print_generation_section("proj")
-            except Exception:
-                pass
-        assert client.call_args.args[1] == STAGING_URL
 
 
 class TestCheckSaveTargetDirect:

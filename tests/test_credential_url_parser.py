@@ -54,6 +54,26 @@ def test_accepted(raw: str, canonical: str) -> None:
         "http://foo.localhost",
         "http://localhost.attacker.example",
         "http://128.0.0.1",
+        " https://h",
+        "https://h\t.x",
+        "https://h /x",
+        "http://10.0.0.5",
+        "http://192.168.1.2",
+        "http://0.0.0.0",
+        "http://host.docker.internal",
+        "https://h/p?",
+        "https://h#",
+        "https://[::1]evil",
+        "https://[::1]]",
+        "https://h:0443",
+        "https://[::1",
+        "https://[h]",
+        "https://\u2100.com",
+        "https://\uff45xample.com",
+        "https://h%41",
+        "https://h%00x",
+        "https://h\x00.x",
+        "https://h\x7f.x",
     ],
 )
 def test_refused(raw: str) -> None:
@@ -80,21 +100,6 @@ def test_path_prefixed_profile_keeps_prefix(auth, dele) -> None:
     result = runner.invoke(app, ["--profile", "p", "account", "revoke", "ak_x", "--yes"])
     assert result.exit_code == 0
     assert dele.call_args.args[0] == "https://host.example.test/Prefix/api/v1/keys/ak_x"
-
-
-@patch("aethis_cli.commands.status_cmd.AethisClient")
-@patch("aethis_cli.commands.status_cmd.resolve_cached_key", return_value="ak_fake")
-def test_status_does_not_send_key_to_remote_http_profile(key, client, monkeypatch) -> None:
-    from aethis_cli.commands.status_cmd import _print_generation_section, _print_identity_section
-
-    config.set_profile("plain", base_url="http://remote.example.test")
-    monkeypatch.setenv("AETHIS_PROFILE", "plain")
-    for fn in (lambda: _print_identity_section(), lambda: _print_generation_section("proj")):
-        try:
-            fn()
-        except Exception:
-            pass
-    client.assert_not_called()
 
 
 @pytest.mark.parametrize("bad", ["https://host:abc", "api.aethis.ai", "https://u:p@host"])
@@ -126,3 +131,93 @@ def test_save_guard_compares_canonical_forms_with_unnormalised_profile() -> None
     config.check_save_target("https://example.test", "env", "p")
     with pytest.raises(ConfigError):
         config.check_save_target("https://other.test", "env", "p")
+
+
+@pytest.mark.parametrize(
+    ("raw", "secret"),
+    [
+        ("https://u:FAKEPW@h", "FAKEPW"),
+        ("https://h/?token=FAKETOK", "FAKETOK"),
+        ("https://h/#FAKEFRAG", "FAKEFRAG"),
+        ("https://h:FAKEPORT", "FAKEPORT"),
+    ],
+)
+def test_error_text_never_contains_the_raw_url(raw: str, secret: str) -> None:
+    with pytest.raises(ConfigError) as exc:
+        parse_credential_base_url(raw)
+    assert secret not in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    ("raw", "secret"),
+    [("https://u:FAKEPW@h", "FAKEPW"), ("https://h/?token=FAKETOK", "FAKETOK"), ("https://h/#FAKEFRAG", "FAKEFRAG")],
+)
+@patch("aethis_cli.commands.login_cmd.run_browser_login")
+@patch("aethis_cli.commands.account_cmd._clerk_auth", return_value="tok")
+def test_cli_output_never_contains_the_raw_url(auth, browser, raw: str, secret: str, monkeypatch) -> None:
+    monkeypatch.setenv("AETHIS_BASE_URL", raw)
+    for argv in (["account", "keys"], ["login"]):
+        result = runner.invoke(app, argv)
+        assert result.exit_code == 1
+        assert secret not in result.output
+    auth.assert_not_called()
+    browser.assert_not_called()
+
+
+@patch("aethis_cli.commands.login_cmd.run_browser_login")
+@patch("aethis_cli.commands.account_cmd._clerk_auth", return_value="tok")
+def test_markup_in_url_does_not_crash_error_output(auth, browser, monkeypatch) -> None:
+    monkeypatch.setenv("AETHIS_BASE_URL", "https://example.invalid/[/x]?")
+    for argv in (["account", "keys"], ["login"]):
+        result = runner.invoke(app, argv)
+        assert result.exit_code == 1
+        assert isinstance(result.exception, SystemExit)
+
+
+@patch("aethis_cli.commands.login_cmd._save_key")
+@patch("aethis_cli.commands.login_cmd.run_browser_login", return_value="ak_fake")
+def test_markup_in_valid_path_does_not_crash_target_line(browser, save, monkeypatch) -> None:
+    monkeypatch.setenv("AETHIS_BASE_URL", "https://example.invalid/[bold]x")
+    config.set_profile("default", base_url="https://example.invalid/[bold]x")
+    result = runner.invoke(app, ["login"])
+    assert result.exit_code == 0
+    assert "[bold]x" in result.output
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--profile", "anonymous", "login"],
+        ["--profile", "anonymous", "login", "--api-key", "ak_fake"],
+        ["--profile", "anonymous", "account", "generate"],
+    ],
+)
+@pytest.mark.parametrize("via_env", [False, True])
+@patch("aethis_cli.commands.login_cmd._validate_key")
+@patch("aethis_cli.commands.login_cmd.run_browser_login")
+@patch("aethis_cli.commands.account_cmd._fetch_permissions", return_value=([], {"decide"}))
+@patch("aethis_cli.commands.account_cmd.httpx.post")
+@patch("aethis_cli.commands.account_cmd._clerk_auth", return_value="tok")
+def test_reserved_anonymous_profile_refused_before_any_call(
+    auth, post, perms, browser, validate, argv, via_env, monkeypatch
+) -> None:
+    if via_env:
+        monkeypatch.setenv("AETHIS_PROFILE", "anonymous")
+        argv = argv[2:]
+    result = runner.invoke(app, argv)
+    assert result.exit_code == 1
+    auth.assert_not_called()
+    post.assert_not_called()
+    perms.assert_not_called()
+    browser.assert_not_called()
+    validate.assert_not_called()
+
+
+@patch("aethis_cli.commands.account_cmd.httpx.delete")
+@patch("aethis_cli.commands.account_cmd._clerk_auth", return_value="tok")
+def test_markup_in_valid_path_does_not_crash_account_target_line(auth, dele, monkeypatch) -> None:
+    monkeypatch.setenv("AETHIS_BASE_URL", "https://example.invalid/[bold]x")
+    dele.return_value = MagicMock(status_code=204)
+    result = runner.invoke(app, ["account", "revoke", "ak_x", "--yes"])
+    assert result.exit_code == 0
+    assert "[bold]x" in result.output

@@ -6,6 +6,7 @@ import os
 from typing import Optional
 
 import typer
+from rich.markup import escape
 
 from aethis_cli.config import (
     ANONYMOUS_PROFILE,
@@ -200,14 +201,14 @@ def login(
     try:
         base_url, source = resolve_credential_base_url(target_profile)
     except ConfigError as e:
-        console.print(f"[red]{e}[/red]")
+        console.print(f"[red]{escape(str(e))}[/red]")
         raise typer.Exit(code=1) from None
     label = {"env": "from AETHIS_BASE_URL", "profile": "from profile", "default": "default"}[source]
-    info(f"Target server: {base_url} ({label}; profile: {target_profile})")
+    info(f"Target server: {escape(base_url)} ({label}; profile: {escape(target_profile)})")
     try:
         check_save_target(base_url, source, target_profile, "login")
     except ConfigError as e:
-        console.print(f"[red]{e}[/red]")
+        console.print(f"[red]{escape(str(e))}[/red]")
         raise typer.Exit(code=1) from None
     if api_key:
         if not _validate_key(api_key, base_url):

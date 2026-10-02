@@ -80,49 +80,65 @@ def _is_local_host(host: str) -> bool:
 def parse_credential_base_url(raw: str) -> str:
     """Return the canonical form of a server URL, or raise :class:`ConfigError`.
 
-    Strict by design — it never rewrites an invalid URL into a different one.
-    Requires an http(s) scheme and a host; refuses userinfo, query, fragment and
-    a malformed or out-of-range port; allows plain http only for loopback hosts
-    (``localhost``, ``127.0.0.0/8``, ``::1``). Canonical form: lowercase scheme
-    and host, IPv6 bracketed, default port dropped, path kept as written with
-    the trailing slash stripped.
+    Strict by design — it never rewrites an invalid URL into a different one:
+    the authority is rebuilt from the parsed parts and must equal the original
+    (only an explicit default port may be dropped). Requires an http(s) scheme
+    and a host; refuses control characters, non-ASCII, userinfo, query,
+    fragment and a malformed or out-of-range port; allows plain http only for
+    loopback hosts (``localhost``, ``127.0.0.0/8``, ``::1``). Canonical form:
+    lowercase scheme and host, IPv6 bracketed, default port dropped, path kept
+    as written with the trailing slash stripped.
+
+    Error text never includes the raw URL (it may carry credentials or tokens).
+    Some checks overlap and are kept for clearer messages, not as independent
+    coverage: urlsplit already lowercases scheme and host; the round-trip also
+    catches userinfo, an empty port and a leading-zero port; the final httpx
+    parse is defence in depth behind the ASCII check.
     """
+    import httpx
     from urllib.parse import urlsplit
 
     def bad(why: str) -> ConfigError:
-        return ConfigError(f"Invalid server URL {raw!r}: {why}.")
+        return ConfigError(f"Invalid server URL: {why}.")
 
-    if raw != raw.strip() or any(c.isspace() for c in raw):
-        raise bad("contains whitespace")
-    parts = urlsplit(raw)
-    scheme = parts.scheme.lower()
+    if not raw.isprintable() or not raw.isascii() or " " in raw:
+        raise bad("contains whitespace, control or non-ASCII characters")
+    try:
+        parts = urlsplit(raw)
+        scheme = parts.scheme.lower()
+        host = parts.hostname
+        port = parts.port
+    except ValueError:
+        raise bad("not a well-formed URL") from None
     if scheme not in ("http", "https"):
         raise bad("must start with http:// or https://")
     if "@" in parts.netloc:
         raise bad("must not contain credentials")
+    if "%" in parts.netloc:
+        raise bad("host must not be percent-encoded")
     if "?" in raw or "#" in raw:
         raise bad("must not contain a query or fragment")
-    host = parts.hostname
     if not host:
         raise bad("missing host")
-    if parts.netloc.endswith(":"):
-        raise bad("empty port")
-    try:
-        port = parts.port
-    except ValueError:
-        raise bad("invalid port") from None
+    host = host.lower()
+    shown_host = f"[{host}]" if ":" in host else host
+    authority = shown_host if port is None else f"{shown_host}:{port}"
+    if parts.netloc.lower() != authority:
+        raise bad("host or port is malformed")
     if port is not None and not 1 <= port <= 65535:
         raise bad("port out of range")
-    host = host.lower()
     if scheme == "http" and not _is_local_host(host):
         raise ConfigError(
             f"Refusing to use HTTP for remote host '{host}'. Use HTTPS or target localhost for local development."
         )
-    if ":" in host:
-        host = f"[{host}]"
-    if port is not None and (scheme, port) not in {("https", 443), ("http", 80)}:
-        host = f"{host}:{port}"
-    return f"{scheme}://{host}{parts.path.rstrip('/')}"
+    if port is not None and (scheme, port) in {("https", 443), ("http", 80)}:
+        authority = shown_host
+    canonical = f"{scheme}://{authority}{parts.path.rstrip('/')}"
+    try:
+        httpx.URL(canonical)
+    except (httpx.InvalidURL, ValueError):
+        raise bad("rejected by the HTTP client") from None
+    return canonical
 
 
 def profile_effective_base_url(profile_name: str) -> str:
@@ -163,6 +179,10 @@ def check_save_target(base_url: str, source: str, profile_name: str, command: st
     Only an environment-supplied server can disagree with the profile (the
     other sources are the profile's own server). Canonical forms are compared; an invalid URL on either side raises.
     """
+    if profile_name == ANONYMOUS_PROFILE:
+        raise ConfigError(
+            f"Cannot save a key to the reserved '{ANONYMOUS_PROFILE}' profile. Pick a different profile with --profile."
+        )
     if source != "env":
         return
     effective = profile_effective_base_url(profile_name)

@@ -7,6 +7,7 @@ from typing import List, Optional
 
 import httpx
 import typer
+from rich.markup import escape
 
 from aethis_cli.auth import authenticate_with_clerk
 from aethis_cli.commands.login_cmd import save_api_key
@@ -114,20 +115,20 @@ def _resolve_server() -> tuple[str, str]:
     try:
         return resolve_credential_base_url()
     except ConfigError as e:
-        console.print(f"[red]{e}[/red]")
+        console.print(f"[red]{escape(str(e))}[/red]")
         raise typer.Exit(code=1) from None
 
 
 def _announce_target(base_url: str, source: str) -> None:
     label = {"env": "from AETHIS_BASE_URL", "profile": "from profile", "default": "default"}[source]
-    info(f"Target server: {base_url} ({label}; profile: {active_profile_name()})")
+    info(f"Target server: {escape(base_url)} ({label}; profile: {escape(active_profile_name())})")
 
 
 def _guard_save(base_url: str, source: str) -> None:
     try:
         check_save_target(base_url, source, active_profile_name())
     except ConfigError as e:
-        console.print(f"[red]{e}[/red]")
+        console.print(f"[red]{escape(str(e))}[/red]")
         raise typer.Exit(code=1) from None
 
 
@@ -139,7 +140,7 @@ def _clerk_auth(timeout: int) -> str:
     try:
         return authenticate_with_clerk(domain, client_id, timeout)
     except AuthenticationError as e:
-        console.print(f"[red]{e}[/red]")
+        console.print(f"[red]{escape(str(e))}[/red]")
         raise typer.Exit(code=1) from None
 
 

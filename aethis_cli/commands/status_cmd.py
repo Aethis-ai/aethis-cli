@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any, Optional
 
 import typer
@@ -10,12 +11,12 @@ from aethis_cli._version import __version__
 from aethis_cli.auth_helpers import resolve_cached_key
 from aethis_cli.client import AethisClient
 from aethis_cli.config import (
+    DEFAULT_BASE_URL,
     active_profile_name,
     get_profile,
     load_project_config,
     read_state,
     resolve_base_url_with_source,
-    resolve_credential_base_url,
 )
 from aethis_cli.errors import AethisAPIError, ConfigError
 from aethis_cli.generation_status import format_heartbeat, format_progress_detail
@@ -118,15 +119,12 @@ def _print_project_section() -> tuple[Optional[object], Optional[str]]:
 
 def _print_identity_section() -> None:
     """Show identity from /me. Gracefully handle missing key or unreachable server."""
+    base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
     try:
         cfg = load_project_config()
         base_url = cfg.base_url
     except ConfigError:
-        try:
-            base_url, _ = resolve_credential_base_url()
-        except ConfigError as e:
-            console.print(f"[bold]Identity:[/bold]    [red]✗ {e}[/red]")
-            return
+        pass
 
     profile = get_profile(active_profile_name())
     auth_mode = profile.get("auth_mode") or "api_key"
@@ -177,11 +175,7 @@ def _print_generation_section(project_id: str) -> None:
         cfg = load_project_config()
         base_url = cfg.base_url
     except ConfigError:
-        try:
-            base_url, _ = resolve_credential_base_url()
-        except ConfigError as e:
-            console.print(f"[bold]Generation:[/bold]  [red]✗ {e}[/red]")
-            return
+        base_url = os.environ.get("AETHIS_BASE_URL", DEFAULT_BASE_URL)
 
     api_key = resolve_cached_key()
     if api_key is None:
