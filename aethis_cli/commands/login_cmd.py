@@ -126,7 +126,7 @@ def run_browser_login(base_url: str, timeout: int = 120, *, profile: Optional[st
             timeout=15.0,
         )
     except httpx.HTTPError as e:
-        console.print(f"[yellow]Could not reach API at {base_url}: {e}[/yellow]")
+        console.print(f"[yellow]Could not reach API at {escape(base_url)}: {escape(str(e))}[/yellow]")
         return None
 
     if resp.status_code != 201:

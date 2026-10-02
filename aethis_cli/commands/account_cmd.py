@@ -186,7 +186,7 @@ def generate(
             timeout=15.0,
         )
     except httpx.HTTPError as e:
-        console.print(f"[red]Could not reach API at {base_url}: {e}[/red]")
+        console.print(f"[red]Could not reach API at {escape(base_url)}: {escape(str(e))}[/red]")
         raise typer.Exit(code=1) from None
 
     if resp.status_code != 201:
@@ -221,7 +221,8 @@ def keys(
     timeout: int = typer.Option(120, "--timeout", help="Browser auth timeout in seconds"),
 ) -> None:
     """List your API keys (requires browser sign-in)."""
-    base_url, _ = _resolve_server()
+    base_url, source = _resolve_server()
+    _announce_target(base_url, source)
     access_token = _clerk_auth(timeout)
     success("Authenticated successfully.")
 
@@ -232,7 +233,7 @@ def keys(
             timeout=15.0,
         )
     except httpx.HTTPError as e:
-        console.print(f"[red]Could not reach API at {base_url}: {e}[/red]")
+        console.print(f"[red]Could not reach API at {escape(base_url)}: {escape(str(e))}[/red]")
         raise typer.Exit(code=1) from None
 
     if resp.status_code != 200:
@@ -292,7 +293,7 @@ def revoke(
             timeout=15.0,
         )
     except httpx.HTTPError as e:
-        console.print(f"[red]Could not reach API at {base_url}: {e}[/red]")
+        console.print(f"[red]Could not reach API at {escape(base_url)}: {escape(str(e))}[/red]")
         raise typer.Exit(code=1) from None
 
     if resp.status_code == 204:

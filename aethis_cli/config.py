@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
@@ -66,6 +67,9 @@ def resolve_base_url_with_source() -> tuple[str, str]:
     return DEFAULT_BASE_URL, "default"
 
 
+_HOST_RE = re.compile(r"[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*")
+
+
 def _is_local_host(host: str) -> bool:
     import ipaddress
 
@@ -101,6 +105,8 @@ def parse_credential_base_url(raw: str) -> str:
     def bad(why: str) -> ConfigError:
         return ConfigError(f"Invalid server URL: {why}.")
 
+    if not isinstance(raw, str):
+        raise bad("must be a string")
     if not raw.isprintable() or not raw.isascii() or " " in raw:
         raise bad("contains whitespace, control or non-ASCII characters")
     try:
@@ -122,6 +128,8 @@ def parse_credential_base_url(raw: str) -> str:
         raise bad("missing host")
     host = host.lower()
     shown_host = f"[{host}]" if ":" in host else host
+    if not _HOST_RE.fullmatch(host) and ":" not in host:
+        raise bad("host contains invalid characters")
     authority = shown_host if port is None else f"{shown_host}:{port}"
     if parts.netloc.lower() != authority:
         raise bad("host or port is malformed")

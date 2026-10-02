@@ -15,11 +15,12 @@
   plain http only for loopback hosts (`localhost`, `127.0.0.0/8`, `::1`);
   invalid URLs are refused with an error. Valid URLs are canonicalised (lowercase
   scheme and host, default port dropped, trailing slash stripped, path kept).
-  Error messages never echo the URL. `login`, `account generate` and the other
-  `account` commands accept plain http only for localhost, `127.0.0.0/8` and
-  `::1` (not `0.0.0.0`, private ranges or `host.docker.internal`).
-- `generate`, `revoke` and `login` print the target server and where it came
-  from before changing anything. `generate` and `login` refuse to save a key
+  Error messages never include the raw URL (credentials, query and fragment are
+  refused). Plain http is accepted only for localhost, `127.0.0.0/8` and `::1`
+  (not `0.0.0.0`, private ranges or `host.docker.internal`). Host names must be
+  plain ASCII labels.
+- `generate`, `keys`, `revoke` and `login` print the target server and where it came
+  from before signing in or changing anything. `generate` and `login` refuse to save a key
   when `AETHIS_BASE_URL` names a different server than the target profile
   (`generate`: `--no-save`, set the profile's `base_url`, or unset the variable;
   `login`: set the profile's `base_url`, unset the variable, or pick a matching
@@ -28,7 +29,7 @@
   the same server. Migrate with `aethis profile add <name> --base-url <url>`
   once, then `aethis --profile <name> login`.
 - `login` and `account generate` refuse the reserved `anonymous` profile before
-  any sign-in or request.
+  any sign-in or request (unless `--no-save`, which saves nothing).
 
 ## 0.43.0 (2026-10-01)
 

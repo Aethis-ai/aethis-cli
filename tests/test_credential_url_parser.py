@@ -5,11 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 from typer.testing import CliRunner
 
 from aethis_cli import config
 from aethis_cli.auth_helpers import RUNTIME
+from aethis_cli.commands.account_cmd import VALID_SCOPES
 from aethis_cli.config import ConfigError, parse_credential_base_url
 from aethis_cli.main import app
 
@@ -71,6 +73,13 @@ def test_accepted(raw: str, canonical: str) -> None:
         "https://\u2100.com",
         "https://\uff45xample.com",
         "https://h%41",
+        "https://\u0430pi.aethis.ai",
+        "https://api.aethis.ai/\u00e9",
+        "https://ex!ample.com",
+        "https://e<x>.com",
+        "https://api.aethis.ai\\evil.com",
+        "https://-bad.example.test",
+        "https://a..b.test",
         "https://h%00x",
         "https://h\x00.x",
         "https://h\x7f.x",
@@ -221,3 +230,70 @@ def test_markup_in_valid_path_does_not_crash_account_target_line(auth, dele, mon
     result = runner.invoke(app, ["account", "revoke", "ak_x", "--yes"])
     assert result.exit_code == 0
     assert "[bold]x" in result.output
+
+
+@pytest.mark.parametrize("stored", [123, True, ["https://h"], {"u": "https://h"}])
+def test_non_string_stored_base_url_is_refused_cleanly(stored) -> None:
+    import yaml
+
+    config.set_profile("p", base_url="https://example.test")
+    path = config.credentials_path()
+    data = yaml.safe_load(path.read_text())
+    data["profiles"]["p"]["base_url"] = stored
+    path.write_text(yaml.safe_dump(data))
+    with patch("aethis_cli.commands.account_cmd._clerk_auth", return_value="tok") as auth:
+        result = runner.invoke(app, ["--profile", "p", "account", "keys"])
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    auth.assert_not_called()
+
+
+def test_parse_rejects_non_string() -> None:
+    with pytest.raises(ConfigError):
+        parse_credential_base_url(123)  # type: ignore[arg-type]
+
+
+BRACKET_URL = "https://example.invalid/[/x]"
+
+
+@patch("aethis_cli.commands.account_cmd._fetch_permissions", return_value=([], set(VALID_SCOPES)))
+@patch("aethis_cli.commands.account_cmd.httpx.post", side_effect=httpx.ConnectError("boom [/x]"))
+@patch("aethis_cli.commands.account_cmd.httpx.delete", side_effect=httpx.ConnectError("boom [/x]"))
+@patch("aethis_cli.commands.account_cmd.httpx.get", side_effect=httpx.ConnectError("boom [/x]"))
+@patch("aethis_cli.commands.account_cmd._clerk_auth", return_value="tok")
+def test_account_transport_errors_do_not_crash_on_markup(auth, get, dele, post, perms, monkeypatch) -> None:
+    monkeypatch.setenv("AETHIS_BASE_URL", BRACKET_URL)
+    for argv in (["account", "keys"], ["account", "revoke", "ak_x", "--yes"], ["account", "generate", "--no-save"]):
+        result = runner.invoke(app, argv)
+        assert result.exit_code == 1, argv
+        assert isinstance(result.exception, SystemExit), argv
+        assert "Could not reach API" in result.output
+
+
+@patch("aethis_cli.commands.login_cmd._prompt_manual_key")
+@patch("aethis_cli.commands.login_cmd.console.print")
+@patch("httpx.post", side_effect=httpx.ConnectError("boom [/x]"))
+@patch("aethis_cli.auth.authenticate_with_clerk", return_value="tok")
+def test_login_transport_error_does_not_crash_on_markup(auth, post, printed, manual, monkeypatch) -> None:
+    from aethis_cli.commands.login_cmd import run_browser_login
+
+    from rich.console import Console
+
+    real = Console(record=True, width=200)
+    printed.side_effect = lambda *a, **k: real.print(*a, **k)
+    assert run_browser_login(BRACKET_URL) is None
+    assert "Could not reach API at" in real.export_text()
+
+
+@patch("aethis_cli.commands.account_cmd.httpx.get")
+@patch("aethis_cli.commands.account_cmd._clerk_auth", return_value="tok")
+def test_keys_prints_target_line_before_sign_in(auth, get, monkeypatch) -> None:
+    config.set_profile("staging", base_url="https://staging.example.test")
+    events: list[str] = []
+    auth.side_effect = lambda *a, **k: events.append("auth") or "tok"
+    get.return_value = MagicMock(status_code=200, json=MagicMock(return_value=[]))
+    with patch("aethis_cli.commands.account_cmd.info", side_effect=lambda m: events.append(f"info:{m}")):
+        result = runner.invoke(app, ["--profile", "staging", "account", "keys"])
+    assert result.exit_code == 0
+    assert events[0] == "info:Target server: https://staging.example.test (from profile; profile: staging)"
+    assert events.index("auth") > 0
