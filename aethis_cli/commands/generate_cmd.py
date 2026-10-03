@@ -676,6 +676,7 @@ _FIELD_KEY_ORDER = (
     "value_space",
     "enum_labels",
     "canonical_field",
+    "options_by",
     "weight",
     "elicitation_owner",
     "injection_source",
@@ -692,6 +693,9 @@ _FIELD_KEY_ORDER = (
 _ENGINE_GATED_FIELD_KEYS = (
     "enum_labels",
     "canonical_field",
+    # ``{field, map}``: narrows this enum field's suggested options by the
+    # answer to an earlier field. Opaque to the CLI; the engine validates it.
+    "options_by",
     "label",
     "question",
     "weight",
@@ -707,7 +711,9 @@ _ENGINE_GATED_FIELD_KEYS = (
 # capability gate scoped to properties that RulebookFieldSpec actually carries;
 # otherwise a project-only property in a shared authoring file would make the
 # rulebook command refuse an engine that is fully compatible with that route.
-_RULEBOOK_GATED_FIELD_KEYS = ("enum_labels", "canonical_field")
+# ``input_role`` and ``identity_binding`` are rulebook vocabulary properties
+# only: a project pin does not carry them, so they are not in the pin set.
+_RULEBOOK_GATED_FIELD_KEYS = ("enum_labels", "canonical_field", "input_role", "identity_binding")
 
 
 def _normalise_field_type(t: Optional[str]) -> str:

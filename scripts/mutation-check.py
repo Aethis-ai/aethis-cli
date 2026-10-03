@@ -383,10 +383,39 @@ MUTATIONS: List[Mutation] = [
     Mutation(
         "metadata-missing-from-canonical-key-order",
         "aethis_cli/commands/generate_cmd.py",
-        '    "value_space",\n    "enum_labels",\n    "canonical_field",\n    "weight",',
-        '    "value_space",\n    "weight",',
+        '    "value_space",\n    "enum_labels",\n    "canonical_field",\n    "options_by",\n    "weight",',
+        '    "value_space",\n    "options_by",\n    "weight",',
         "a pull rewrites the metadata out of its modelled place in fields.yaml",
         detects=("tests/test_field_display_metadata_transport.py::test_fields_yaml_write_back_preserves_the_metadata",),
+    ),
+    Mutation(
+        "options-by-missing-from-canonical-key-order",
+        "aethis_cli/commands/generate_cmd.py",
+        '    "canonical_field",\n    "options_by",\n    "weight",',
+        '    "canonical_field",\n    "weight",',
+        "a pull drops an explicitly empty options_by and moves it out of its modelled place",
+        detects=(
+            "tests/test_field_dependency_and_identity_transport.py::test_options_by_is_written_back_by_presence_next_to_the_display_metadata[value1]",
+        ),
+    ),
+    Mutation(
+        "options-by-not-projected-onto-the-pin",
+        "aethis_cli/commands/generate_cmd.py",
+        '    "options_by",\n    "label",',
+        '    "label",',
+        "generate stops carrying the authored options_by to the engine",
+        detects=("tests/test_field_dependency_and_identity_transport.py::test_options_by_is_projected_onto_the_pin",),
+    ),
+    Mutation(
+        "identity-keys-ungated-on-set-fields",
+        "aethis_cli/commands/generate_cmd.py",
+        '_RULEBOOK_GATED_FIELD_KEYS = ("enum_labels", "canonical_field", "input_role", "identity_binding")',
+        '_RULEBOOK_GATED_FIELD_KEYS = ("enum_labels", "canonical_field")',
+        "set-fields posts input_role / identity_binding to an engine that drops them",
+        detects=(
+            "tests/test_field_dependency_and_identity_transport.py::test_set_fields_refuses_an_engine_missing_an_identity_key[input_role]",
+            "tests/test_field_dependency_and_identity_transport.py::test_set_fields_refuses_an_engine_missing_an_identity_key[identity_binding]",
+        ),
     ),
     Mutation(
         "field-spec-properties-probe-answers-a-fixed-set",

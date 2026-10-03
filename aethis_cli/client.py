@@ -422,7 +422,7 @@ class AethisClient:
         """Pin the project's expected field vocabulary (key + type + enum values).
 
         Each entry is ``{key, sort, enum_values?, value_space?, enum_labels?,
-        canonical_field?}``. This constrains generation
+        canonical_field?, options_by?, ...}``. This constrains generation
         to the declared field keys so the same field (e.g. date of birth) is not
         re-invented under a different key. Field hints / questions are carried as
         guidance, not here — this endpoint only fixes the vocabulary.

@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.45.0 (2026-10-03)
+
+- `aethis generate` now carries an authored `options_by` on a field to the engine, the same way it carries `enum_labels`. Previously the CLI did not send it. It narrows an enum field's suggested options by the answer to an earlier field:
+
+  ```yaml
+  - key: vehicle.model
+    type: enum
+    enum_values: [focus, fiesta, model_3, model_y]
+    options_by:
+      field: vehicle.make
+      map:
+        ford: [focus, fiesta]
+        tesla: [model_3, model_y]
+  ```
+
+- `aethis rulebooks set-fields` now checks the engine before posting `input_role` (`factual`) and `identity_binding` (`{subject, component}`) on a rulebook field. Previously they were posted unchecked, and an engine that does not support them accepted the upload and dropped them. These two keys belong to the rulebook vocabulary, so `aethis generate` does not send them.
+- If the target engine does not support a declared key, the command stops before uploading anything. Files that declare none of these keys are uploaded unchanged and the engine is not queried.
+
 ## 0.44.0 (2026-10-02)
 
 **Security: a project `aethis.yaml` can no longer choose which credential is read or where it is sent.** Upgrade recommended. Project files are copied between machines (public example repositories), so they are treated as untrusted for credentials, matching `aethis-mcp` 0.19.0.
