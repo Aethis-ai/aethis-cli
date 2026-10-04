@@ -550,10 +550,15 @@ class AethisClient:
         rulebook_id: str | None = None,
         ruleset_name: str | None = None,
         source_targets: dict[str, dict] | None = None,
+        name: str | None = None,
     ) -> dict:
         body: dict = {}
         if slug is not None:
             body["slug"] = slug
+        # Human-readable ruleset name. Omitted unless given, so the request is
+        # unchanged for callers that do not set it.
+        if name is not None:
+            body["name"] = name
         if force_unsafe:
             # Tell the server-side TDD gate (aethis-core 0.11+) to refuse a
             # publish when stored test cases fail; force_unsafe=True records

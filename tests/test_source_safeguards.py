@@ -178,7 +178,9 @@ def test_warning_text_is_never_parsed_as_markup(capsys):
 
 
 def _publish(publish_response: dict) -> str:
-    cfg = SimpleNamespace(base_url="http://engine.test", project_id="proj_test", config_path="/tmp/.aethis")
+    cfg = SimpleNamespace(
+        base_url="http://engine.test", project_id="proj_test", config_path="/tmp/.aethis", display_name=None
+    )
     client = MagicMock()
     client.run_tests.return_value = {"passed": 1, "total": 1, "failed": 0, "errors": 0, "results": []}
     client.publish.return_value = publish_response
