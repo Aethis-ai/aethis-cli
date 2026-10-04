@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.46.0 (2026-10-04)
+
+- `aethis publish` can now set the human-readable name of the ruleset. Pass `--name "Life in the UK"`, or add an optional `display_name:` key to `aethis.yaml`; the flag wins when both are given. The name is shown to end users in rulebook responses. When neither is set the request is unchanged and the engine keeps its default name.
+
 ## 0.45.0 (2026-10-03)
 
 - `aethis generate` now carries an authored `options_by` on a field to the engine, the same way it carries `enum_labels`. Previously the CLI did not send it. It narrows an enum field's suggested options by the answer to an earlier field:

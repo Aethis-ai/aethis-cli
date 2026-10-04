@@ -64,6 +64,7 @@ class ProjectConfig:
     config_path: Path = field(default_factory=lambda: Path.cwd())
     deepseek_key_env: str = "DEEPSEEK_API_KEY"
     project_base_url: Optional[str] = None  # the project file's own value, exactly as written
+    display_name: Optional[str] = None  # optional human-readable ruleset name, sent on publish
 
 
 def resolve_base_url_with_source() -> tuple[str, str]:
@@ -510,7 +511,18 @@ def load_project_config(path: Optional[Path] = None) -> ProjectConfig:
         project_id=project_id,
         config_path=project_dir,
         project_base_url=project_url,
+        display_name=_display_name_value(raw, yaml_path),
     )
+
+
+def _display_name_value(raw: dict, yaml_path: Path) -> Optional[str]:
+    """The optional ``display_name`` key: a non-empty string, or absent."""
+    value = raw.get("display_name")
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"'display_name' in {yaml_path} must be a non-empty string.")
+    return value.strip()
 
 
 _ENV_REFUSED = (

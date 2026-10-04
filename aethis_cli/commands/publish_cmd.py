@@ -125,6 +125,15 @@ def publish(
             "namespace is reserved for official rulesets."
         ),
     ),
+    name: Optional[str] = typer.Option(
+        None,
+        "--name",
+        help=(
+            "Human-readable name for this ruleset, shown to end users in "
+            "rulebook responses. Overrides an optional 'display_name:' key in "
+            "aethis.yaml. When neither is set the engine keeps its default name."
+        ),
+    ),
     rulebook: Optional[str] = typer.Option(
         None,
         "--rulebook",
@@ -259,6 +268,7 @@ def publish(
             rulebook_id=rulebook,
             ruleset_name=ruleset_name,
             source_targets=wire_targets or None,
+            name=name if name is not None else cfg.display_name,
         )
     except AethisAPIError as e:
         error_panel(e)
