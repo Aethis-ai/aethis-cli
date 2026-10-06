@@ -22,6 +22,32 @@ KeyRefreshCallback = Callable[..., str]
 # True/False (asked, got an answer) and None (asked, could not tell) — the
 # three states a capability probe genuinely has.
 _UNPROBED = object()
+# Distinguishes a caller omitting thinking from explicitly sending JSON null.
+_UNSET = object()
+# Keep this in lockstep with the engine's syntax-only guard. Leading zeroes
+# are stripped before counting, so the limit bounds integer work rather than
+# rejecting a canonicalisable spelling.
+_MAX_THINKING_DIGITS = 10
+
+
+def normalize_thinking(thinking: str | None | object = _UNSET) -> str | None | object:
+    """Validate only the public syntax; engine owns model capabilities/bounds."""
+    if thinking is _UNSET or thinking is None:
+        return thinking
+    if not isinstance(thinking, str):
+        raise ValueError("invalid_thinking: use disabled, adaptive, or enabled:ASCII-decimal>=1024")
+    value = thinking.strip()
+    if value in {"disabled", "adaptive"}:
+        return value
+    if not value.startswith("enabled:"):
+        raise ValueError("invalid_thinking: use disabled, adaptive, or enabled:ASCII-decimal>=1024")
+    digits = value[len("enabled:") :]
+    if not digits or not digits.isascii() or not digits.isdecimal():
+        raise ValueError("invalid_thinking: use disabled, adaptive, or enabled:ASCII-decimal>=1024")
+    canonical = digits.lstrip("0") or "0"
+    if len(canonical) > _MAX_THINKING_DIGITS or len(canonical) < 4 or (len(canonical) == 4 and canonical < "1024"):
+        raise ValueError("invalid_thinking: use disabled, adaptive, or enabled:ASCII-decimal>=1024")
+    return f"enabled:{canonical}"
 
 
 class GenerationModel(str, Enum):
@@ -418,6 +444,17 @@ class AethisClient:
         """
         return self._schema_properties("RulebookFieldSpec")
 
+    def generation_mode_request_properties(self, *, refresh: bool = False) -> Optional[set[str]]:
+        """Properties advertised for generation admission controls.
+
+        Unlike a harmless display property, an unknown thinking control could be
+        silently ignored by an older engine, so callers use this as a strict
+        compatibility gate before any authoring mutation.
+        """
+        if refresh:
+            self._field_spec_properties.pop("GenerationModeRequest", None)
+        return self._schema_properties("GenerationModeRequest")
+
     def set_field_spec(self, project_id: str, expected_fields: list[dict]) -> dict:
         """Pin the project's expected field vocabulary (key + type + enum values).
 
@@ -483,6 +520,7 @@ class AethisClient:
         *,
         model: Optional[GenerationModel] = None,
         deepseek_key: Optional[str] = None,
+        thinking: str | None | object = _UNSET,
     ) -> dict:
         """Trigger generation. ``mode="refine"`` seeds from the section's active
         ruleset and makes the minimal edit to fix failing tests; omitting ``mode``
@@ -496,6 +534,18 @@ class AethisClient:
             body["seed_ruleset_id"] = seed_ruleset_id
         if model is not None:
             body["model"] = GenerationModel(model).value
+        # Presence matters: JSON null inherits the engine setting; an explicit
+        # string is validated by the engine before it admits the job.
+        thinking = normalize_thinking(thinking)
+        if thinking is not _UNSET:
+            properties = self.generation_mode_request_properties(refresh=True)
+            if properties is None:
+                raise ValueError("The generation control schema could not be read; no generation was started")
+            if "thinking" not in properties:
+                raise ValueError(
+                    "This engine does not advertise per-generation thinking controls; no generation was started"
+                )
+            body["thinking"] = thinking
         if deepseek_key and model != GenerationModel.deepseek:
             raise ValueError("A DeepSeek key requires model=deepseek-flash")
         kwargs: dict[str, Any] = {"json": body} if body else {}

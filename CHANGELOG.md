@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.47.0 (2026-10-06)
+
+- Add `--thinking` to `aethis generate` and `aethis refine`. Explicit values
+  are normalised and forwarded to the engine; omission continues to inherit its
+  configured default. Engine-provided thinking warnings, including DeepSeek's
+  `thinking_budget_ignored`, are rendered rather than claiming a requested
+  budget controls DeepSeek reasoning.
+
 ## 0.46.0 (2026-10-04)
 
 - `aethis publish` can now set the human-readable name of the ruleset. Pass `--name "Life in the UK"`, or add an optional `display_name:` key to `aethis.yaml`; the flag wins when both are given. The name is shown to end users in rulebook responses. When neither is set the request is unchanged and the engine keeps its default name.
