@@ -48,26 +48,28 @@ def _is_collection_or_computed_row(row: dict) -> bool:
     return str(row.get("field_type") or "").strip().lower() == "collection" or bool(row.get("computed_from"))
 
 
-def _refuse_unauthored_collections(server_keys: list[str], field_map: dict, verb: str) -> None:
-    """Exit before any write if the server holds a collection or computed field fields.yaml does not declare.
+def _refuse_unauthored_collections(server_keys: list[str], field_map: dict) -> None:
+    """Exit before ``fields pull`` writes if the schema holds a collection or computed field fields.yaml does not declare.
 
-    The engine publishes a collection's ``items`` and a computed field's
-    ``computed_from`` but never the full ``{op, collection, values}``
-    declaration, so these cannot be written faithfully from server data. A key
-    already declared locally as one is left exactly as authored and is not
-    counted here.
+    The only engine call that precedes this is the read of the ruleset schema,
+    so on refusal neither fields.yaml nor the engine has been written. The
+    engine publishes a collection's ``items`` and a computed field's
+    ``computed_from`` on ``/schema`` but never the full ``{op, collection,
+    values}`` declaration, so these cannot be written faithfully from server
+    data. A key already declared locally as one is left exactly as authored and
+    is not counted here.
     """
     unsupported = [k for k in server_keys if not _is_collection_or_computed(field_map.get(k, {}))]
     if not unsupported:
         return
     console.print(
-        f"[red]Cannot {verb}: the server has collection or computed field(s) fields.yaml does not declare: "
+        f"[red]Cannot pull: the server has collection or computed field(s) fields.yaml does not declare: "
         f"{', '.join(unsupported)}.[/red]"
     )
     console.print(
-        "[red]These declarations are not published in full, so they are not supported here and nothing was "
-        "written. They must be authored in fields.yaml (type: collection with items, and computed on a bool), "
-        "then run again.[/red]"
+        "[red]These declarations are not published in full, so they are not supported here; fields.yaml was not "
+        "changed and nothing was sent to the engine. Author them in fields.yaml (type: collection with items, and "
+        "computed on a bool), then run again.[/red]"
     )
     raise typer.Exit(code=1)
 
@@ -184,11 +186,6 @@ def discover() -> None:
         raise typer.Exit(code=1)
 
     discovered = result.get("fields", []) or []
-    _refuse_unauthored_collections(
-        [df["key"] for df in discovered if df.get("key") and _is_collection_or_computed_row(df)],
-        field_map,
-        "discover",
-    )
     added = 0
     for df in discovered:
         key = df.get("key")
@@ -262,7 +259,6 @@ def pull(
     _refuse_unauthored_collections(
         [sf["field_id"] for sf in server_fields if sf.get("field_id") and _is_collection_or_computed_row(sf)],
         field_map,
-        "pull",
     )
 
     server_keys = set()

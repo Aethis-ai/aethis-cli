@@ -744,8 +744,9 @@ def _safe_field_type(raw_type: Optional[str], enum_values: Optional[list]) -> st
     values (not a representable enum on disk). Both fall back to ``string``.
 
     A ``collection`` is returned as such but is NOT valid without ``items``;
-    ``fields pull`` and ``fields discover`` refuse a server collection that
-    ``fields.yaml`` does not already declare, so neither writes one from here.
+    ``fields pull`` refuses a server collection that ``fields.yaml`` does not
+    already declare, so it never writes one from here. Discovery's response
+    cannot name a collection at all (it arrives as ``string``).
     """
     t = _normalise_field_type(raw_type)
     if t not in VALID_FIELD_TYPES:
@@ -978,7 +979,10 @@ def _validate_display_metadata(key: str, f: dict, ftype: str) -> list[str]:
                 # A collection's members are its items' members.
                 items = f.get("items")
                 members = items.get("enum_values") if isinstance(items, dict) else None
-            if isinstance(members, list):
+            # A named value_space supplies the members from the registry and the
+            # engine replaces any inline list, so membership is never checked
+            # locally then — whatever an inline list (empty or stale) holds.
+            if not f.get("value_space") and isinstance(members, list):
                 unknown = sorted(m for m in labels if isinstance(m, str) and m not in members)
                 if unknown:
                     errors.append(
@@ -1410,8 +1414,8 @@ def check_collection_support(client: AethisClient, fields: list[dict]) -> None:
     declared = sorted({k for f in fields if isinstance(f, dict) for k in ("items", "computed") if k in f})
     if not declared:
         return
-    advertised = client.expected_field_spec_properties()
-    if not isinstance(advertised, set):  # unreadable: fail CLOSED, unlike check_display_metadata_support
+    advertised = client.expected_field_spec_properties(strict=True)
+    if not isinstance(advertised, set):  # unreadable or malformed: fail CLOSED, unlike check_display_metadata_support
         console.print(
             f"[red]Could not read the engine's field-spec schema ({client.base_url}), so it is unknown whether it "
             f"keeps {', '.join(declared)}.[/red]"

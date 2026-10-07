@@ -448,13 +448,19 @@ instead of listing `items.enum_values`, may carry `enum_labels`, and has at most
 one computed field. Run `aethis fields validate` to check the file locally; the
 engine checks what the declarations mean.
 
-Two things are refused in this version. A rulebook's `fields.yaml` (and
-`aethis rulebooks set-fields`) may not hold a collection row, `items` or
-`computed`, nor any row for a key a ruleset declares as one. And
-`aethis fields pull` / `aethis fields discover` stop, writing nothing, if the
-server has a collection or computed field your `fields.yaml` does not declare,
-because the engine does not publish these declarations in full: author them in
-`fields.yaml`. A key you already declared is left exactly as written.
+Two things are refused in this version. A rulebook's `fields.yaml` may not hold
+a collection row, `items` or `computed`, nor any row for a key a ruleset
+declares as one; `aethis rulebooks set-fields` refuses a row that is a
+collection or carries `items` or `computed`, but it cannot see a ruleset, so a
+plain row there that overrides a key a ruleset computes is posted and rejected
+by the engine. And `aethis fields pull` stops, changing nothing and sending
+nothing to the engine, if the schema has a collection or computed field your
+`fields.yaml` does not declare, because the engine does not publish these
+declarations in full: author them in `fields.yaml`. A key you already declared
+is left exactly as written by `pull`.
+
+Field discovery does not report collection or computed declarations; author
+them in `fields.yaml`, and discovery will not overwrite ones already there.
 
 ### scenarios.yaml
 

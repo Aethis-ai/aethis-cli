@@ -562,6 +562,8 @@ DERIVED_SCHEMA = {"field_id": "derived", "field_type": "bool", "computed_from": 
 
 
 def test_an_inline_collection_whose_members_match_the_pin_is_clean(tmp_path, capsys):
+    """POSITIVE CONTROL: passes on origin/main too (it skips the comparison);
+    the drift tests below are what discriminate."""
     _, out = _diff(tmp_path, capsys, INLINE_COLLECTION_PIN, [_schema_collection(["b", "a"]), DERIVED_SCHEMA])
 
     assert "all 2 pinned field(s) were produced" in out
@@ -570,6 +572,7 @@ def test_an_inline_collection_whose_members_match_the_pin_is_clean(tmp_path, cap
 
 @pytest.mark.parametrize("spelling", ["collection", "Collection", "COLLECTION"])
 def test_the_collection_field_type_is_matched_in_any_case(spelling, tmp_path, capsys):
+    """POSITIVE CONTROL: passes on origin/main too; the drift tests discriminate."""
     _, out = _diff(
         tmp_path, capsys, INLINE_COLLECTION_PIN, [_schema_collection(["a", "b"], field_type=spelling), DERIVED_SCHEMA]
     )
@@ -690,7 +693,7 @@ def test_a_pull_refuses_collection_and_computed_fields_it_cannot_author_and_writ
 
     assert result.exit_code != 0
     assert "c" in out and "derived" in out
-    assert "not published in full" in out and "authored in fields.yaml" in out
+    assert "not published in full" in out and "Author them in fields.yaml" in out
     assert not path.exists()
 
 
@@ -789,29 +792,43 @@ def _discover(tmp_path, monkeypatch, discovered, local_yaml=None):
     return _fields_cli(tmp_path, monkeypatch, ["discover"], client, local_yaml)
 
 
-@pytest.mark.parametrize(
-    "found",
-    [
-        {"key": "c", "field_type": "collection"},
-        {"key": "c", "field_type": "Collection"},
-        {"key": "d", "field_type": "boolean", "computed_from": "c"},
-    ],
-)
-def test_discover_refuses_a_collection_or_computed_field_and_writes_nothing(found, tmp_path, monkeypatch):
-    result, path, out = _discover(tmp_path, monkeypatch, [found, {"key": "crew.age", "field_type": "integer"}])
-
-    assert result.exit_code != 0
-    assert found["key"] in out and "authored in fields.yaml" in out
-    assert not path.exists()
+# The engine's discovery response cannot represent these fields: a collection
+# arrives as "string" and a computed field as a plain "boolean" with no
+# `computed_from`. A guard on this path could not see what it claims to guard,
+# so there is none; the one promise is that an entry already authored locally
+# is not overwritten.
+REAL_DISCOVERY = [
+    {"key": "c", "field_type": "string"},
+    {"key": "derived", "field_type": "boolean"},
+    {"key": "crew.age", "field_type": "integer"},
+]
 
 
-def test_discover_leaves_an_already_declared_key_alone(tmp_path, monkeypatch):
-    result, path, _ = _discover(
-        tmp_path, monkeypatch, [{"key": "c", "field_type": "collection"}], VALUE_SPACE_COLLECTION_LOCAL
-    )
+def test_discover_does_not_overwrite_a_collection_or_computed_entry_already_authored(tmp_path, monkeypatch):
+    result, path, _ = _discover(tmp_path, monkeypatch, REAL_DISCOVERY, VALUE_SPACE_COLLECTION_LOCAL)
 
     assert result.exit_code == 0, result.output
     assert yaml.safe_load(path.read_text())["fields"] == yaml.safe_load(VALUE_SPACE_COLLECTION_LOCAL)["fields"]
+
+
+def test_discover_adds_a_new_key_as_it_always_did(tmp_path, monkeypatch):
+    """Control: discovery still writes keys that are not declared locally."""
+    result, path, _ = _discover(tmp_path, monkeypatch, [{"key": "crew.age", "field_type": "integer"}])
+
+    assert result.exit_code == 0, result.output
+    assert yaml.safe_load(path.read_text()) == {"fields": [{"key": "crew.age", "type": "int"}]}
+
+
+def test_a_refused_pull_has_made_no_engine_write_and_says_exactly_that(tmp_path, monkeypatch):
+    client = MagicMock()
+    client.get_schema.return_value = REAL_SCHEMA
+
+    result, path, out = _fields_cli(tmp_path, monkeypatch, ["pull", "-b", "rs_1"], client)
+
+    assert result.exit_code != 0
+    assert not path.exists()
+    assert [c[0] for c in client.method_calls] == ["get_schema"]
+    assert "fields.yaml was not changed and nothing was sent to the engine" in out
 
 
 # --- the rulebook layer: refused, never merged ---------------------------------
@@ -1055,3 +1072,97 @@ def test_labels_on_a_value_space_collection_are_shape_checked_only():
 def test_labels_are_still_refused_on_a_scalar_field():
     errors = generate_cmd.validate_fields_list([{"key": "n", "type": "int", "enum_labels": {"x": "X"}}])
     assert any("enum_labels" in e and "int" in e for e in errors)
+
+
+# --- labels never membership-checked against inline members when a value_space names them
+
+
+@pytest.mark.parametrize(
+    "inline",
+    [
+        pytest.param([], id="empty-inline-list"),
+        pytest.param(["stale"], id="stale-inline-list"),
+        pytest.param(None, id="no-inline-members"),
+    ],
+)
+def test_labels_on_a_value_space_collection_are_never_membership_checked_locally(inline):
+    """The registry supplies the members; whatever the inline list holds, a
+    label for a registry member must not be refused as undeclared."""
+    items = {"sort": "Enum"} if inline is None else {"sort": "Enum", "enum_values": inline}
+    field = {
+        "key": "c",
+        "type": "collection",
+        "value_space": "certs",
+        "items": items,
+        "enum_labels": {"a": "A"},
+    }
+
+    assert generate_cmd.validate_fields_list([field]) == []
+
+
+def test_labels_on_a_value_space_enum_are_never_membership_checked_locally():
+    field = {"key": "e", "type": "enum", "value_space": "certs", "enum_values": ["stale"], "enum_labels": {"a": "A"}}
+    # enum_values + value_space is its own refusal; the label rule must add none.
+    errors = generate_cmd.validate_fields_list([field])
+    assert not any("does not declare" in e for e in errors)
+
+
+# --- the items/computed gate accepts only a well-formed advertisement ----------
+
+# Declares items and computed and nothing else gated (no `question`), so a
+# refusal can only come from the items/computed gate itself.
+BARE_COLLECTION_FIELDS = """\
+fields:
+  - key: c
+    type: collection
+    items: {sort: Enum, enum_values: [a, b]}
+  - key: derived
+    type: bool
+    computed: {op: any_in, collection: c, values: [a]}
+"""
+
+
+@pytest.mark.parametrize(
+    "properties",
+    [
+        pytest.param(["items", "computed"], id="list"),
+        pytest.param("items computed", id="string"),
+        pytest.param(None, id="null"),
+        pytest.param(7, id="number"),
+    ],
+)
+@respx.mock(base_url=BASE, assert_all_called=False)
+def test_a_malformed_field_spec_advertisement_is_not_capability_evidence(properties, respx_mock, tmp_path, capsys):
+    body = {"components": {"schemas": {"ExpectedFieldSpec": {"properties": properties}}}}
+    respx_mock.get("/openapi.json").mock(return_value=httpx.Response(200, json=body))
+    spec = respx_mock.post("/api/v1/public/projects/proj_1/fields/spec").mock(return_value=httpx.Response(200, json={}))
+
+    with AethisClient("ak", BASE) as client:
+        with pytest.raises(typer.Exit):
+            generate_cmd._upload_field_vocabulary(client, "proj_1", _project(tmp_path, BARE_COLLECTION_FIELDS))
+
+    assert spec.call_count == 0
+
+
+@respx.mock(base_url=BASE, assert_all_called=False)
+def test_a_well_formed_mapping_advertisement_still_passes_the_gate(respx_mock, tmp_path):
+    """Control: the same input shape with a real mapping is accepted."""
+    body = {"components": {"schemas": {"ExpectedFieldSpec": {"properties": {"items": {}, "computed": {}, "key": {}}}}}}
+    respx_mock.get("/openapi.json").mock(return_value=httpx.Response(200, json=body))
+    spec = respx_mock.post("/api/v1/public/projects/proj_1/fields/spec").mock(return_value=httpx.Response(200, json={}))
+    respx_mock.post("/api/v1/public/projects/proj_1/guidance").mock(return_value=httpx.Response(200, json={}))
+
+    with AethisClient("ak", BASE) as client:
+        generate_cmd._upload_field_vocabulary(client, "proj_1", _project(tmp_path, BARE_COLLECTION_FIELDS))
+
+    assert spec.call_count == 1
+
+
+def test_the_older_gated_keys_still_read_a_list_advertisement_as_before(tmp_path):
+    """Unchanged behaviour for the other gated keys (out of scope here)."""
+    client = _client({"key", "sort", "enum_values", "enum_labels"})
+    project = _project(tmp_path, "fields:\n  - key: a\n    type: enum\n    enum_values: [x]\n    enum_labels: {x: X}\n")
+
+    generate_cmd._upload_field_vocabulary(client, "proj_1", project)
+
+    client.set_field_spec.assert_called_once()

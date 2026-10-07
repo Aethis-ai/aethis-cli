@@ -584,8 +584,8 @@ MUTATIONS: List[Mutation] = [
     Mutation(
         "collection-support-gate-fails-open",
         "aethis_cli/commands/generate_cmd.py",
-        "    advertised = client.expected_field_spec_properties()\n    if not isinstance(advertised, set):",
-        "    advertised = client.expected_field_spec_properties()\n    if not isinstance(advertised, set):\n        return\n    if False:",
+        "    advertised = client.expected_field_spec_properties(strict=True)\n    if not isinstance(advertised, set):",
+        "    advertised = client.expected_field_spec_properties(strict=True)\n    if not isinstance(advertised, set):\n        return\n    if False:",
         "an unreadable engine schema lets items/computed be sent to an engine that may drop them",
         detects=(
             "tests/test_collection_and_computed_fields.py::test_an_unreadable_engine_schema_refuses_a_collection_project[404]",
@@ -632,14 +632,44 @@ MUTATIONS: List[Mutation] = [
         ),
     ),
     Mutation(
-        "pull-and-discover-write-server-collections",
+        "pull-writes-server-collections",
         "aethis_cli/commands/fields_cmd.py",
         "    if not unsupported:\n        return\n",
         "    return\n",
-        "pull or discover writes a collection or computed field it cannot reconstruct",
+        "pull writes a collection or computed field it cannot reconstruct",
         detects=(
             "tests/test_collection_and_computed_fields.py::test_a_pull_refuses_collection_and_computed_fields_it_cannot_author_and_writes_nothing",
-            "tests/test_collection_and_computed_fields.py::test_discover_refuses_a_collection_or_computed_field_and_writes_nothing[found0]",
+            "tests/test_collection_and_computed_fields.py::test_a_refused_pull_has_made_no_engine_write_and_says_exactly_that",
+        ),
+    ),
+    Mutation(
+        "discover-overwrites-an-authored-key",
+        "aethis_cli/commands/fields_cmd.py",
+        "        if not key or key in field_map:\n            continue\n        ftype = _safe_field_type(df.get",
+        "        if not key:\n            continue\n        ftype = _safe_field_type(df.get",
+        "discovery replaces a collection or computed entry authored locally with a scalar",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_discover_does_not_overwrite_a_collection_or_computed_entry_already_authored",
+        ),
+    ),
+    Mutation(
+        "labels-membership-checked-despite-a-value-space",
+        "aethis_cli/commands/generate_cmd.py",
+        '            if not f.get("value_space") and isinstance(members, list):',
+        "            if isinstance(members, list):",
+        "a label for a registry member is refused because an inline list is empty or stale",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_labels_on_a_value_space_collection_are_never_membership_checked_locally[empty-inline-list]",
+        ),
+    ),
+    Mutation(
+        "gate-accepts-a-malformed-advertisement",
+        "aethis_cli/commands/generate_cmd.py",
+        "    advertised = client.expected_field_spec_properties(strict=True)",
+        "    advertised = client.expected_field_spec_properties()",
+        "a list-shaped ExpectedFieldSpec.properties is read as capability evidence",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_a_malformed_field_spec_advertisement_is_not_capability_evidence[list]",
         ),
     ),
     Mutation(
