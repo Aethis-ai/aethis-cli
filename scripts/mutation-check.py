@@ -420,7 +420,7 @@ MUTATIONS: List[Mutation] = [
     Mutation(
         "field-spec-properties-probe-answers-a-fixed-set",
         "aethis_cli/client.py",
-        '                answer = set(schemas[model]["properties"])',
+        "                answer = set(properties) if isinstance(properties, dict) or not strict else None",
         '                answer = {"key", "sort"}',
         "the probe stops reporting what the engine actually advertises",
         detects=(
