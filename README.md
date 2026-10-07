@@ -443,13 +443,18 @@ fields:
 Both are sent to the engine exactly as written, and `aethis generate` stops
 before creating or uploading anything if the engine does not support them or
 its schema cannot be read. Declare a collection and its computed field together
-in the ruleset's own `fields.yaml`; a rulebook's `fields.yaml` may mention such
-a key only by `key` and `type`. A collection may name a `value_space` instead
-of listing `items.enum_values`, and has at most one computed field. Run
-`aethis fields validate` to check the file locally; the engine checks what the
-declarations mean. `aethis fields pull` writes a collection with its `items`,
-but the engine does not publish a computed field's declaration, so author it
-locally.
+in the ruleset's own `fields.yaml`. A collection may name a `value_space`
+instead of listing `items.enum_values`, may carry `enum_labels`, and has at most
+one computed field. Run `aethis fields validate` to check the file locally; the
+engine checks what the declarations mean.
+
+Two things are refused in this version. A rulebook's `fields.yaml` (and
+`aethis rulebooks set-fields`) may not hold a collection row, `items` or
+`computed`, nor any row for a key a ruleset declares as one. And
+`aethis fields pull` / `aethis fields discover` stop, writing nothing, if the
+server has a collection or computed field your `fields.yaml` does not declare,
+because the engine does not publish these declarations in full: author them in
+`fields.yaml`. A key you already declared is left exactly as written.
 
 ### scenarios.yaml
 

@@ -18,7 +18,6 @@ wrong on their face. Anything semantic is the engine's to judge.
 
 from __future__ import annotations
 
-import inspect
 import json
 import re
 from types import SimpleNamespace
@@ -222,13 +221,6 @@ def test_computed_naming_a_field_that_does_not_exist_is_rejected():
     assert any("crew.certifications_held" in e and "not declared" in e for e in errors)
 
 
-def test_validation_takes_one_layer_only():
-    """A computed field reads a collection declared in the SAME file: the engine
-    needs both in one pin set, so there is no cross-layer resolution to offer."""
-    assert "external_fields" not in inspect.signature(generate_cmd.validate_fields_list).parameters
-    assert not hasattr(generate_cmd, "enclosing_rulebook_fields")
-
-
 def test_two_computed_fields_over_one_collection_are_rejected():
     second = _computed(key="crew.holds_other_certification")
     errors = generate_cmd.validate_fields_list([_collection(), _computed(), second])
@@ -401,98 +393,6 @@ def _pull_cfg(tmp_path):
     )
 
 
-# The engine's /schema publishes a collection with its ``items`` object, and a
-# computed field only as ``computed_from: <collection key>`` -- the full
-# {op, collection, values} declaration is NOT published, so a pull cannot
-# reconstruct it. This is the real response shape, not a fixture that omits it.
-SCHEMA_ITEMS = {"sort": "Enum", "enum_values": ["a", "b"]}
-REAL_SCHEMA = {
-    "fields": [
-        {"field_id": "c", "field_type": "Collection", "items": SCHEMA_ITEMS},
-        {"field_id": "derived", "field_type": "boolean", "computed_from": "c"},
-    ]
-}
-
-
-def _pull(tmp_path, monkeypatch, schema):
-    monkeypatch.chdir(tmp_path)
-    client = MagicMock()
-    client.get_schema.return_value = schema
-    with (
-        patch("aethis_cli.commands.fields_cmd.load_project_config", return_value=_pull_cfg(tmp_path)),
-        patch("aethis_cli.commands.fields_cmd.resolve_api_key", return_value="ak"),
-        patch("aethis_cli.commands.fields_cmd.make_authed_client", return_value=client),
-    ):
-        from aethis_cli.main import app
-
-        result = CliRunner().invoke(app, ["fields", "pull", "-b", "rs_1"], catch_exceptions=False)
-    assert result.exit_code == 0, result.output
-    return generate_cmd._parse_fields_yaml(tmp_path / "fields" / "fields.yaml"), " ".join(result.output.split())
-
-
-def test_a_clean_pull_writes_the_collection_and_its_items(tmp_path, monkeypatch):
-    parsed, _ = _pull(tmp_path, monkeypatch, REAL_SCHEMA)
-
-    assert parsed["c"]["type"] == "collection"
-    assert parsed["c"]["items"] == SCHEMA_ITEMS
-    assert generate_cmd.validate_fields_list([parsed["c"]]) == []
-
-
-@pytest.mark.parametrize("spelling", ["Collection", "collection", "COLLECTION"])
-def test_a_pulled_collection_type_is_matched_in_any_case(spelling, tmp_path, monkeypatch):
-    schema = {"fields": [{"field_id": "c", "field_type": spelling, "items": SCHEMA_ITEMS}]}
-    parsed, _ = _pull(tmp_path, monkeypatch, schema)
-    assert parsed["c"]["type"] == "collection"
-    assert parsed["c"]["items"] == SCHEMA_ITEMS
-
-
-def test_a_clean_pull_never_guesses_a_computed_declaration_and_says_so(tmp_path, monkeypatch):
-    parsed, out = _pull(tmp_path, monkeypatch, REAL_SCHEMA)
-
-    assert parsed["derived"]["type"] == "bool"
-    assert "computed" not in parsed["derived"]
-    assert "derived" in out
-    assert "computed" in out and "authored locally" in out
-
-
-def test_a_pull_keeps_a_local_computed_declaration_and_does_not_warn(tmp_path, monkeypatch):
-    (tmp_path / "fields").mkdir()
-    local = {"fields": [{"key": "derived", "type": "bool", "computed": dict(COMPUTED, collection="c")}]}
-    (tmp_path / "fields" / "fields.yaml").write_text(yaml.safe_dump(local))
-
-    parsed, out = _pull(tmp_path, monkeypatch, REAL_SCHEMA)
-
-    assert parsed["derived"]["computed"] == dict(COMPUTED, collection="c")
-    assert "authored locally" not in out
-
-
-def test_a_pull_keeps_local_items_when_the_server_row_carries_none(tmp_path, monkeypatch):
-    (tmp_path / "fields").mkdir()
-    (tmp_path / "fields" / "fields.yaml").write_text(COLLECTION_FIELDS)
-    schema = {
-        "fields": [
-            {"field_id": "crew.certifications_held", "field_type": "Collection"},
-            {"field_id": "crew.holds_accepted_certification", "field_type": "boolean", "computed_from": "x"},
-            {"field_id": "crew.age", "field_type": "integer"},
-        ]
-    }
-
-    parsed, _ = _pull(tmp_path, monkeypatch, schema)
-
-    assert parsed["crew.certifications_held"]["items"] == ITEMS
-    assert parsed["crew.holds_accepted_certification"]["computed"] == COMPUTED
-
-
-def test_a_pull_drops_items_from_a_field_the_server_no_longer_calls_a_collection(tmp_path, monkeypatch):
-    (tmp_path / "fields").mkdir()
-    (tmp_path / "fields" / "fields.yaml").write_text(yaml.safe_dump({"fields": [_collection(key="c")]}))
-
-    parsed, _ = _pull(tmp_path, monkeypatch, {"fields": [{"field_id": "c", "field_type": "string"}]})
-
-    assert parsed["c"]["type"] == "string"
-    assert "items" not in parsed["c"]
-
-
 def test_fields_validate_reports_a_collection_without_items(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "fields").mkdir()
@@ -506,181 +406,6 @@ def test_fields_validate_reports_a_collection_without_items(tmp_path, monkeypatc
 
     assert result.exit_code == 1
     assert "items" in result.output
-
-
-# --- one layer only: a rulebook never speaks for a collection or computed key --
-#
-# A collection and the computed field reading it are declared in the ruleset's
-# OWN fields.yaml, both in the one pin set the engine requires. A rulebook row
-# for such a key may carry only its identity -- key and one of sort/type -- and
-# never replaces the member's declaration.
-
-# The engine advertises ``items`` but not ``computed``.
-ENGINE_WITH_ITEMS_ONLY = ENGINE_BASE | {"items"}
-
-MEMBER_FIELDS = [
-    {"key": "c", "type": "collection", "items": {"sort": "Enum", "enum_values": ["a", "b"]}},
-    {"key": "derived", "type": "bool", "computed": {"op": "any_in", "collection": "c", "values": ["a"]}},
-]
-
-
-def _layers(tmp_path, rulebook_rows, member_rows=None):
-    rulebook = tmp_path / "rb"
-    member = rulebook / "rulesets" / "crew"
-    (rulebook / "fields").mkdir(parents=True)
-    (member / "fields").mkdir(parents=True)
-    (rulebook / "aethis.yaml").write_text("project: rb\nkind: rulebook\n")
-    (member / "aethis.yaml").write_text("project: crew\n")
-    (rulebook / "fields" / "fields.yaml").write_text(yaml.safe_dump({"fields": rulebook_rows}))
-    (member / "fields" / "fields.yaml").write_text(yaml.safe_dump({"fields": member_rows or MEMBER_FIELDS}))
-    return member
-
-
-def _pushed_by_key(client) -> dict:
-    _, expected_fields = client.set_field_spec.call_args.args
-    return {f["key"]: f for f in expected_fields}
-
-
-def test_a_rulebook_row_cannot_erase_the_computed_the_member_declares(tmp_path, capsys):
-    """Finding 1: the rulebook's `{key: derived, sort: Bool}` used to replace the
-    member's row, so the posted pin lost `computed` -- and an engine that does not
-    advertise `computed` passed the capability check because nothing was left to
-    check. The member's declaration is what is pinned, and what is gated."""
-    member = _layers(tmp_path, [{"key": "derived", "sort": "Bool"}])
-    client = _client(ENGINE_WITH_ITEMS_ONLY)
-
-    with pytest.raises(typer.Exit):
-        generate_cmd._upload_field_vocabulary(client, "proj_1", member)
-
-    client.set_field_spec.assert_not_called()
-    assert "does not carry computed" in _flat(capsys)
-
-
-def test_the_members_computed_is_what_is_pinned_when_the_engine_supports_it(tmp_path):
-    member = _layers(tmp_path, [{"key": "derived", "sort": "Bool"}])
-    client = _client()
-
-    generate_cmd._upload_field_vocabulary(client, "proj_1", member)
-
-    assert _pushed_by_key(client)["derived"]["computed"] == MEMBER_FIELDS[1]["computed"]
-
-
-def test_an_identity_only_rulebook_row_for_a_collection_is_accepted_and_keeps_items(tmp_path):
-    """The row the set-fields guard permits must also work as a rulebook layer:
-    it validates, and it does not erase the member's `items`."""
-    member = _layers(tmp_path, [{"key": "c", "sort": "Collection"}])
-    client = _client()
-
-    generate_cmd._upload_field_vocabulary(client, "proj_1", member)
-
-    assert _pushed_by_key(client)["c"]["items"] == MEMBER_FIELDS[0]["items"]
-
-
-@pytest.mark.parametrize(
-    "row, named",
-    [
-        ({"key": "derived", "type": "bool", "question": "Choose an answer"}, "question"),
-        ({"key": "c", "type": "collection", "question": "Which?"}, "question"),
-        ({"key": "c", "type": "collection", "enum_values": ["a"]}, "enum_values"),
-        ({"key": "c", "sort": "Collection", "type": "collection"}, "sort and type"),
-    ],
-)
-def test_a_rulebook_row_that_says_more_than_identity_about_a_protected_key_is_refused(row, named, tmp_path, capsys):
-    member = _layers(tmp_path, [row])
-    client = _client()
-
-    with pytest.raises(typer.Exit):
-        generate_cmd._upload_field_vocabulary(client, "proj_1", member)
-
-    client.set_field_spec.assert_not_called()
-    out = _flat(capsys)
-    assert row["key"] in out and named in out and "only" in out
-
-
-@pytest.mark.parametrize("declaration", ["items", "computed"])
-def test_a_rulebook_file_that_declares_items_or_computed_is_refused(declaration, tmp_path, capsys):
-    """Finding 3/6: a rulebook declaring a collection or computed field would
-    otherwise be silently dropped from the member's pin set -- or counted as a
-    second reader the member's own file never shows."""
-    identity = {"key": "c", "sort": "Collection"}
-    row = (
-        _collection(key="z") if declaration == "items" else _computed(key="z", computed=dict(COMPUTED, collection="c"))
-    )
-    # The computed case carries the collection identity too, so the only fault
-    # in the rulebook file is the declaration under test.
-    member = _layers(tmp_path, [row] if declaration == "items" else [identity, row])
-    client = _client()
-
-    with pytest.raises(typer.Exit):
-        generate_cmd._upload_field_vocabulary(client, "proj_1", member)
-
-    client.set_field_spec.assert_not_called()
-    out = _flat(capsys)
-    assert "'z'" in out and f"declares {declaration}" in out and "may not declare items or computed" in out
-
-
-def test_a_computed_reading_a_collection_only_the_rulebook_declares_is_refused(tmp_path, capsys):
-    """Finding 3: the engine wants the collection in the same pin set, and the
-    pushed payload would hold only `derived`."""
-    member = _layers(tmp_path, [{"key": "c", "sort": "Collection"}], member_rows=[MEMBER_FIELDS[1]])
-    client = _client()
-
-    with pytest.raises(typer.Exit):
-        generate_cmd._upload_field_vocabulary(client, "proj_1", member)
-
-    client.set_field_spec.assert_not_called()
-    assert "not declared" in _flat(capsys)
-
-
-def test_a_second_computed_reader_hiding_in_the_rulebook_is_refused(tmp_path, capsys):
-    """Finding 6: the member reads `c` from `a`; the rulebook's `z` carries a
-    second computed over the same collection while the member's own `z` is a
-    plain stub, so per-file duplicate checks both passed."""
-    rulebook_rows = [
-        _collection(key="c", items={"sort": "Enum", "enum_values": ["a", "b"]}),
-        {"key": "z", "type": "bool", "computed": {"op": "any_in", "collection": "c", "values": ["a"]}},
-    ]
-    member_rows = [
-        MEMBER_FIELDS[0],
-        {"key": "a", "type": "bool", "computed": {"op": "any_in", "collection": "c", "values": ["a"]}},
-        {"key": "z", "type": "bool"},
-    ]
-    member = _layers(tmp_path, rulebook_rows, member_rows)
-    client = _client()
-
-    with pytest.raises(typer.Exit):
-        generate_cmd._upload_field_vocabulary(client, "proj_1", member)
-
-    client.set_field_spec.assert_not_called()
-    out = _flat(capsys)
-    assert "'z'" in out and "may not declare items or computed" in out
-
-
-def test_an_unrelated_shared_key_still_lets_the_rulebook_win(tmp_path):
-    """The override stays for every key the member does not declare as a
-    collection or computed."""
-    member = _layers(
-        tmp_path,
-        [{"key": "crew.age", "type": "int", "question": "Rulebook wording?"}],
-        member_rows=[*MEMBER_FIELDS, {"key": "crew.age", "type": "int", "question": "Member wording?"}],
-    )
-    client = _client()
-
-    generate_cmd._upload_field_vocabulary(client, "proj_1", member)
-
-    assert _pushed_by_key(client)["crew.age"]["question"] == "Rulebook wording?"
-
-
-def test_fields_validate_refuses_a_rulebook_row_that_overreaches(tmp_path, monkeypatch):
-    member = _layers(tmp_path, [{"key": "derived", "type": "bool", "question": "x"}])
-    monkeypatch.chdir(member)
-    from aethis_cli.main import app
-
-    with patch("aethis_cli.commands.fields_cmd.load_project_config", return_value=_pull_cfg(member)):
-        result = CliRunner().invoke(app, ["fields", "validate"], catch_exceptions=False)
-
-    assert result.exit_code == 1
-    assert "derived" in result.output
 
 
 # --- the capability gate fails closed, and runs before anything is written ----
@@ -803,91 +528,6 @@ def test_the_same_run_proceeds_against_an_engine_that_models_them(tmp_path, monk
     assert expected_fields[0]["items"] == ITEMS
 
 
-# --- rulebooks set-fields: the vocabulary row carries only key and sort ------
-
-
-def _rulebook_client() -> MagicMock:
-    client = MagicMock()
-    client.rulebook_field_spec_properties.return_value = {"key", "sort", "enum_values"}
-    client.set_rulebook_fields.return_value = {"fields": [], "field_lock_state": "unlocked"}
-    client.base_url = BASE
-    return client
-
-
-def _set_fields(tmp_path, monkeypatch, rows) -> MagicMock:
-    client = _rulebook_client()
-    monkeypatch.setattr(rulebooks_cmd, "load_client_or_fallback", lambda: (None, client))
-    path = tmp_path / "fields.yaml"
-    path.write_text(yaml.safe_dump({"fields": rows}))
-    rulebooks_cmd.set_fields("rb_1", path)
-    return client
-
-
-def test_set_fields_posts_a_collection_row_that_carries_only_key_and_sort(tmp_path, monkeypatch):
-    rows = [{"key": "crew.certifications_held", "sort": "Collection"}, {"key": "crew.age", "sort": "Int"}]
-
-    client = _set_fields(tmp_path, monkeypatch, rows)
-
-    client.set_rulebook_fields.assert_called_once_with("rb_1", rows)
-
-
-@pytest.mark.parametrize(
-    "row, named",
-    [
-        ({"key": "crew.certifications_held", "sort": "Collection", "items": dict(ITEMS)}, "items"),
-        ({"key": "crew.holds_accepted_certification", "sort": "Bool", "computed": dict(COMPUTED)}, "computed"),
-        ({"key": "crew.certifications_held", "sort": "Collection", "enum_values": ["eva_basic"]}, "enum_values"),
-    ],
-)
-def test_set_fields_refuses_a_row_that_says_more_about_a_collection_or_computed_key(
-    row, named, tmp_path, monkeypatch, capsys
-):
-    client = _rulebook_client()
-    monkeypatch.setattr(rulebooks_cmd, "load_client_or_fallback", lambda: (None, client))
-    path = tmp_path / "fields.yaml"
-    path.write_text(yaml.safe_dump({"fields": [row]}))
-
-    with pytest.raises(typer.Exit):
-        rulebooks_cmd.set_fields("rb_1", path)
-
-    client.set_rulebook_fields.assert_not_called()
-    out = _flat(capsys)
-    assert row["key"] in out
-    assert named in out
-    assert "only key and one of sort or type" in out
-
-
-def test_set_fields_refuses_a_collection_row_that_carries_both_sort_and_type(tmp_path, monkeypatch, capsys):
-    """Finding 7: `type` was whitelisted beside `sort`, so a row could say
-    `sort: Collection` and `type: Bool` at once and pass."""
-    client = _rulebook_client()
-    monkeypatch.setattr(rulebooks_cmd, "load_client_or_fallback", lambda: (None, client))
-    path = tmp_path / "fields.yaml"
-    path.write_text(yaml.safe_dump({"fields": [{"key": "c", "sort": "Collection", "type": "Bool"}]}))
-
-    with pytest.raises(typer.Exit):
-        rulebooks_cmd.set_fields("rb_1", path)
-
-    client.set_rulebook_fields.assert_not_called()
-    assert "sort and type" in _flat(capsys)
-
-
-def test_set_fields_accepts_a_collection_row_that_uses_type_alone(tmp_path, monkeypatch):
-    rows = [{"key": "c", "type": "collection"}]
-
-    client = _set_fields(tmp_path, monkeypatch, rows)
-
-    client.set_rulebook_fields.assert_called_once_with("rb_1", rows)
-
-
-def test_set_fields_leaves_a_plain_enum_row_with_members_alone(tmp_path, monkeypatch):
-    rows = [{"key": "crew.rank", "sort": "Enum", "enum_values": ["pilot", "medic"]}]
-
-    client = _set_fields(tmp_path, monkeypatch, rows)
-
-    client.set_rulebook_fields.assert_called_once_with("rb_1", rows)
-
-
 # --- the post-generation field diff reads a collection's members from items ----
 #
 # The engine's /schema publishes a collection with field_type "collection" and
@@ -1002,3 +642,416 @@ def test_a_value_space_collection_that_genuinely_differs_still_warns(tmp_path, c
 
     assert "Enum members differ from the pin: c" in out
     assert "dropped c" in out
+
+
+# --- `fields pull` / `fields discover` do not support these declarations ------
+#
+# The engine's /schema publishes a collection with its ``items`` and a computed
+# field only as ``computed_from`` -- never the full {op, collection, values}
+# declaration -- so neither a pull nor a discovery can write a faithful entry.
+# A key already declared locally is left exactly as authored; anything else the
+# server holds as a collection or computed field is refused before any write.
+
+REAL_SCHEMA = {
+    "fields": [
+        {"field_id": "c", "field_type": "Collection", "items": {"sort": "Enum", "enum_values": ["a", "b"]}},
+        {"field_id": "derived", "field_type": "boolean", "computed_from": "c"},
+    ]
+}
+
+
+def _fields_cli(tmp_path, monkeypatch, command, client, local_yaml=None):
+    monkeypatch.chdir(tmp_path)
+    path = tmp_path / "fields" / "fields.yaml"
+    if local_yaml is not None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(local_yaml)
+    with (
+        patch("aethis_cli.commands.fields_cmd.load_project_config", return_value=_pull_cfg(tmp_path)),
+        patch("aethis_cli.commands.fields_cmd.resolve_api_key", return_value="ak"),
+        patch("aethis_cli.commands.fields_cmd.resolve_anthropic_key", return_value="sk"),
+        patch("aethis_cli.commands.fields_cmd.make_authed_client", return_value=client),
+        patch("aethis_cli.commands.fields_cmd._ensure_project_and_sources", return_value="proj_1"),
+    ):
+        from aethis_cli.main import app
+
+        result = CliRunner().invoke(app, ["fields", *command], catch_exceptions=False)
+    return result, path, " ".join(result.output.split())
+
+
+def _pull(tmp_path, monkeypatch, schema, local_yaml=None):
+    client = MagicMock()
+    client.get_schema.return_value = schema
+    return _fields_cli(tmp_path, monkeypatch, ["pull", "-b", "rs_1"], client, local_yaml)
+
+
+def test_a_pull_refuses_collection_and_computed_fields_it_cannot_author_and_writes_nothing(tmp_path, monkeypatch):
+    result, path, out = _pull(tmp_path, monkeypatch, REAL_SCHEMA)
+
+    assert result.exit_code != 0
+    assert "c" in out and "derived" in out
+    assert "not published in full" in out and "authored in fields.yaml" in out
+    assert not path.exists()
+
+
+@pytest.mark.parametrize("spelling", ["Collection", "collection", "COLLECTION"])
+def test_a_pulled_collection_type_is_matched_in_any_case(spelling, tmp_path, monkeypatch):
+    schema = {"fields": [{"field_id": "c", "field_type": spelling, "items": {"sort": "Enum", "enum_values": ["a"]}}]}
+
+    result, path, _ = _pull(tmp_path, monkeypatch, schema)
+
+    assert result.exit_code != 0
+    assert not path.exists()
+
+
+def test_a_computed_field_alone_is_refused_not_written_as_a_plain_bool(tmp_path, monkeypatch):
+    """The input that used to exit 0 with `{key: d, type: bool}` and lose the derivation."""
+    schema = {"fields": [{"field_id": "d", "field_type": "boolean", "computed_from": "c"}]}
+
+    result, path, out = _pull(tmp_path, monkeypatch, schema)
+
+    assert result.exit_code != 0
+    assert "d" in out
+    assert not path.exists()
+
+
+def test_a_pull_refuses_before_writing_even_when_other_fields_are_fine(tmp_path, monkeypatch):
+    local = "fields:\n  - key: crew.age\n    type: int\n"
+    schema = {"fields": [{"field_id": "crew.age", "field_type": "integer"}, *REAL_SCHEMA["fields"]]}
+
+    result, path, _ = _pull(tmp_path, monkeypatch, schema, local)
+
+    assert result.exit_code != 0
+    assert path.read_text() == local
+
+
+VALUE_SPACE_COLLECTION_LOCAL = """\
+fields:
+  - key: c
+    type: collection
+    value_space: certs
+    items:
+      sort: Enum
+  - key: derived
+    type: bool
+    computed:
+      op: any_in
+      collection: c
+      values: [a]
+  - key: crew.age
+    type: int
+"""
+
+
+def test_a_pull_leaves_locally_declared_collection_and_computed_entries_exactly_as_authored(tmp_path, monkeypatch):
+    """The registry's members must not be materialised into a reference-only
+    collection: a later registry change would leave a stale inline list."""
+    before = yaml.safe_load(VALUE_SPACE_COLLECTION_LOCAL)["fields"]
+    schema = {
+        "fields": [
+            {
+                "field_id": "c",
+                "field_type": "Collection",
+                "items": {"sort": "Enum", "enum_values": ["a", "b"], "max_items": 500},
+                # A server question would be written onto an ordinary entry, so
+                # leaving it off proves the entry was not touched at all.
+                "question": "Server wording for c?",
+            },
+            {
+                "field_id": "derived",
+                "field_type": "boolean",
+                "computed_from": "c",
+                "question": "Server wording for derived?",
+            },
+            {"field_id": "crew.age", "field_type": "integer"},
+        ]
+    }
+
+    result, path, _ = _pull(tmp_path, monkeypatch, schema, VALUE_SPACE_COLLECTION_LOCAL)
+
+    assert result.exit_code == 0, result.output
+    after = yaml.safe_load(path.read_text())["fields"]
+    assert after == before
+
+
+def test_a_pull_without_any_of_these_fields_still_works(tmp_path, monkeypatch):
+    schema = {"fields": [{"field_id": "crew.age", "field_type": "integer"}]}
+
+    result, path, _ = _pull(tmp_path, monkeypatch, schema)
+
+    assert result.exit_code == 0, result.output
+    assert yaml.safe_load(path.read_text()) == {"fields": [{"key": "crew.age", "type": "int"}]}
+
+
+def _discover(tmp_path, monkeypatch, discovered, local_yaml=None):
+    client = MagicMock()
+    client.discover_fields.return_value = {"fields": discovered}
+    return _fields_cli(tmp_path, monkeypatch, ["discover"], client, local_yaml)
+
+
+@pytest.mark.parametrize(
+    "found",
+    [
+        {"key": "c", "field_type": "collection"},
+        {"key": "c", "field_type": "Collection"},
+        {"key": "d", "field_type": "boolean", "computed_from": "c"},
+    ],
+)
+def test_discover_refuses_a_collection_or_computed_field_and_writes_nothing(found, tmp_path, monkeypatch):
+    result, path, out = _discover(tmp_path, monkeypatch, [found, {"key": "crew.age", "field_type": "integer"}])
+
+    assert result.exit_code != 0
+    assert found["key"] in out and "authored in fields.yaml" in out
+    assert not path.exists()
+
+
+def test_discover_leaves_an_already_declared_key_alone(tmp_path, monkeypatch):
+    result, path, _ = _discover(
+        tmp_path, monkeypatch, [{"key": "c", "field_type": "collection"}], VALUE_SPACE_COLLECTION_LOCAL
+    )
+
+    assert result.exit_code == 0, result.output
+    assert yaml.safe_load(path.read_text())["fields"] == yaml.safe_load(VALUE_SPACE_COLLECTION_LOCAL)["fields"]
+
+
+# --- the rulebook layer: refused, never merged ---------------------------------
+#
+# Collection and computed fields are declared on the ruleset. A rulebook's
+# fields.yaml may not hold a collection or computed row at all, and may not
+# mention a key the ruleset declares as one -- the engine forbids a rulebook
+# overriding such a key, and a merge would silently change what is pinned.
+
+REFUSAL = "declared on the ruleset"
+
+MEMBER_FIELDS = [
+    {"key": "c", "type": "collection", "items": {"sort": "Enum", "enum_values": ["a", "b"]}},
+    {"key": "derived", "type": "bool", "computed": {"op": "any_in", "collection": "c", "values": ["a"]}},
+]
+
+
+def _layers(tmp_path, rulebook_rows, member_rows=None):
+    rulebook = tmp_path / "rb"
+    member = rulebook / "rulesets" / "crew"
+    (rulebook / "fields").mkdir(parents=True)
+    (member / "fields").mkdir(parents=True)
+    (rulebook / "aethis.yaml").write_text("project: rb\nkind: rulebook\n")
+    (member / "aethis.yaml").write_text("project: crew\n")
+    (rulebook / "fields" / "fields.yaml").write_text(yaml.safe_dump({"fields": rulebook_rows}))
+    (member / "fields" / "fields.yaml").write_text(yaml.safe_dump({"fields": member_rows or MEMBER_FIELDS}))
+    return member
+
+
+def _refused_upload(member, capsys):
+    client = _client()
+    with pytest.raises(typer.Exit):
+        generate_cmd._upload_field_vocabulary(client, "proj_1", member)
+    client.set_field_spec.assert_not_called()
+    client.expected_field_spec_properties.assert_not_called()
+    return _flat(capsys)
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        {"key": "x", "sort": "Collection"},
+        {"key": "x", "type": "collection"},
+        {"key": "x", "type": "collection", "items": {"sort": "Enum", "enum_values": ["a"]}},
+        {"key": "x", "type": "bool", "computed": {"op": "any_in", "collection": "c", "values": ["a"]}},
+        {"key": "x", "type": "string", "items": {"sort": "Enum", "enum_values": ["a"]}},
+    ],
+)
+def test_a_parent_rulebook_row_that_is_a_collection_or_carries_items_or_computed_is_refused(row, tmp_path, capsys):
+    member = _layers(tmp_path, [row], member_rows=[{"key": "crew.age", "type": "int"}])
+
+    out = _refused_upload(member, capsys)
+
+    assert REFUSAL in out and "remove the row" in out and "'x'" in out
+
+
+@pytest.mark.parametrize("row", [{"key": "c", "sort": "Bool"}, {"key": "c", "type": "string", "question": "Which?"}])
+def test_a_rulebook_row_for_a_key_the_ruleset_declares_a_collection_is_refused(row, tmp_path, capsys):
+    out = _refused_upload(_layers(tmp_path, [row]), capsys)
+
+    assert "'c'" in out and REFUSAL in out
+
+
+@pytest.mark.parametrize("row", [{"key": "derived", "sort": "Bool"}, {"key": "derived", "type": "bool", "label": "x"}])
+def test_a_rulebook_row_for_a_key_the_ruleset_computes_is_refused(row, tmp_path, capsys):
+    """Even a row that says only key and sort: the rulebook's row used to
+    replace the member's, dropping `computed` from the pin and from the gate."""
+    out = _refused_upload(_layers(tmp_path, [row]), capsys)
+
+    assert "'derived'" in out and REFUSAL in out
+
+
+def test_a_rulebook_collection_row_over_a_plain_member_field_is_refused(tmp_path, capsys):
+    """The reverse direction: member `c: string`, rulebook `c: Collection` used
+    to merge into an items-less collection and skip the capability probe."""
+    member = _layers(tmp_path, [{"key": "c", "sort": "Collection"}], member_rows=[{"key": "c", "type": "string"}])
+
+    out = _refused_upload(member, capsys)
+
+    assert REFUSAL in out
+
+
+def test_a_rulebook_project_root_may_not_hold_a_collection_row(tmp_path, monkeypatch):
+    """Finding 4: at the rulebook root the file used to be validated as a ruleset."""
+    root = tmp_path / "rb"
+    (root / "fields").mkdir(parents=True)
+    (root / "aethis.yaml").write_text("project: rb\nkind: rulebook\n")
+    from aethis_cli.main import app
+
+    for row in (
+        {"key": "c", "sort": "Collection"},
+        {"key": "c", "type": "collection", "items": {"sort": "Enum", "enum_values": ["a"]}},
+        {"key": "d", "type": "bool", "computed": {"op": "any_in", "collection": "c", "values": ["a"]}},
+    ):
+        (root / "fields" / "fields.yaml").write_text(yaml.safe_dump({"fields": [row]}))
+        monkeypatch.chdir(root)
+        with patch("aethis_cli.commands.fields_cmd.load_project_config", return_value=_pull_cfg(root)):
+            result = CliRunner().invoke(app, ["fields", "validate"], catch_exceptions=False)
+        assert result.exit_code == 1, row
+        assert REFUSAL in " ".join(result.output.split()), row
+
+
+def test_fields_validate_in_a_ruleset_refuses_an_overlapping_rulebook_row(tmp_path, monkeypatch):
+    member = _layers(tmp_path, [{"key": "derived", "sort": "Bool"}])
+    monkeypatch.chdir(member)
+    from aethis_cli.main import app
+
+    with patch("aethis_cli.commands.fields_cmd.load_project_config", return_value=_pull_cfg(member)):
+        result = CliRunner().invoke(app, ["fields", "validate"], catch_exceptions=False)
+
+    assert result.exit_code == 1
+    assert "'derived'" in " ".join(result.output.split())
+
+
+def test_a_ruleset_inside_a_rulebook_uploads_its_own_collection_and_computed(tmp_path):
+    member = _layers(tmp_path, [{"key": "crew.age", "type": "int"}], member_rows=[*MEMBER_FIELDS])
+    client = _client()
+
+    generate_cmd._upload_field_vocabulary(client, "proj_1", member)
+
+    _, expected_fields = client.set_field_spec.call_args.args
+    by_key = {f["key"]: f for f in expected_fields}
+    assert by_key["c"]["items"] == MEMBER_FIELDS[0]["items"]
+    assert by_key["derived"]["computed"] == MEMBER_FIELDS[1]["computed"]
+
+
+def test_an_engine_without_computed_still_refuses_a_ruleset_inside_a_rulebook(tmp_path, capsys):
+    member = _layers(tmp_path, [{"key": "crew.age", "type": "int"}])
+    client = _client(ENGINE_BASE | {"items"})
+
+    with pytest.raises(typer.Exit):
+        generate_cmd._upload_field_vocabulary(client, "proj_1", member)
+
+    client.set_field_spec.assert_not_called()
+    assert "does not carry computed" in _flat(capsys)
+
+
+def test_an_unrelated_shared_key_still_lets_the_rulebook_win(tmp_path):
+    """Regression guard, not a new behaviour: the override of ordinary keys stays."""
+    member = _layers(
+        tmp_path,
+        [{"key": "crew.age", "type": "int", "question": "Rulebook wording?"}],
+        member_rows=[*MEMBER_FIELDS, {"key": "crew.age", "type": "int", "question": "Member wording?"}],
+    )
+    client = _client()
+
+    generate_cmd._upload_field_vocabulary(client, "proj_1", member)
+
+    _, expected_fields = client.set_field_spec.call_args.args
+    assert {f["key"]: f for f in expected_fields}["crew.age"]["question"] == "Rulebook wording?"
+
+
+def test_the_merge_itself_refuses_a_conflict_that_validation_should_have_caught(tmp_path):
+    """Guard, not a merge rule: if validation was skipped the merge must not
+    quietly pick a winner for a collection or computed key."""
+    member = _layers(tmp_path, [{"key": "derived", "sort": "Bool"}])
+
+    with pytest.raises(RuntimeError, match="declared on the ruleset"):
+        generate_cmd._merged_field_map(member)
+
+
+# --- rulebooks set-fields: no collection or computed row at all ---------------
+
+
+def _rulebook_client() -> MagicMock:
+    client = MagicMock()
+    client.rulebook_field_spec_properties.return_value = {"key", "sort", "enum_values"}
+    client.set_rulebook_fields.return_value = {"fields": [], "field_lock_state": "unlocked"}
+    client.base_url = BASE
+    return client
+
+
+def _set_fields(tmp_path, monkeypatch, rows) -> MagicMock:
+    client = _rulebook_client()
+    monkeypatch.setattr(rulebooks_cmd, "load_client_or_fallback", lambda: (None, client))
+    path = tmp_path / "fields.yaml"
+    path.write_text(yaml.safe_dump({"fields": rows}))
+    rulebooks_cmd.set_fields("rb_1", path)
+    return client
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        {"key": "c", "sort": "Collection"},
+        {"key": "c", "sort": "collection"},
+        {"key": "c", "type": "collection"},
+        {"key": "c", "sort": "Collection", "type": "Bool"},
+        {"key": "c", "sort": "Collection", "items": {"sort": "Enum", "enum_values": ["a"]}},
+        {"key": "d", "sort": "Bool", "computed": {"op": "any_in", "collection": "c", "values": ["a"]}},
+        {"key": "x", "sort": "String", "items": {"sort": "Enum"}},
+    ],
+)
+def test_set_fields_refuses_any_collection_or_computed_row(row, tmp_path, monkeypatch, capsys):
+    client = _rulebook_client()
+    monkeypatch.setattr(rulebooks_cmd, "load_client_or_fallback", lambda: (None, client))
+    path = tmp_path / "fields.yaml"
+    path.write_text(yaml.safe_dump({"fields": [row]}))
+
+    with pytest.raises(typer.Exit):
+        rulebooks_cmd.set_fields("rb_1", path)
+
+    client.set_rulebook_fields.assert_not_called()
+    out = _flat(capsys)
+    assert row["key"] in out and REFUSAL in out
+
+
+def test_set_fields_leaves_a_plain_enum_row_with_members_alone(tmp_path, monkeypatch):
+    """Regression guard: ordinary rows post unchanged."""
+    rows = [{"key": "crew.rank", "sort": "Enum", "enum_values": ["pilot", "medic"]}]
+
+    client = _set_fields(tmp_path, monkeypatch, rows)
+
+    client.set_rulebook_fields.assert_called_once_with("rb_1", rows)
+
+
+# --- enum_labels are valid on a collection -------------------------------------
+
+
+def test_labels_on_a_collection_with_inline_members_are_valid():
+    field = _collection(enum_labels={"zero_g_operations": "Zero-g operations", "eva_basic": "EVA basic"})
+    assert generate_cmd.validate_fields_list([field]) == []
+
+
+def test_an_empty_labels_map_on_a_collection_is_valid():
+    assert generate_cmd.validate_fields_list([_collection(enum_labels={})]) == []
+
+
+def test_a_label_for_a_member_a_collection_does_not_have_is_refused():
+    errors = generate_cmd.validate_fields_list([_collection(enum_labels={"not_a_member": "Nope"})])
+    assert any("not_a_member" in e and "does not declare" in e for e in errors)
+
+
+def test_labels_on_a_value_space_collection_are_shape_checked_only():
+    field = _collection(items={"sort": "Enum"}, value_space="certs", enum_labels={"anything": "Fine"})
+    assert generate_cmd.validate_fields_list([field]) == []
+    bad = _collection(items={"sort": "Enum"}, value_space="certs", enum_labels={"anything": "  "})
+    assert any("enum_labels" in e for e in generate_cmd.validate_fields_list([bad]))
+
+
+def test_labels_are_still_refused_on_a_scalar_field():
+    errors = generate_cmd.validate_fields_list([{"key": "n", "type": "int", "enum_labels": {"x": "X"}}])
+    assert any("enum_labels" in e and "int" in e for e in errors)

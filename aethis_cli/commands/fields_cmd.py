@@ -10,7 +10,6 @@ for public rulesets). The subcommands manage the local ``fields/fields.yaml``:
 
 from __future__ import annotations
 
-import copy
 from typing import Optional
 
 import typer
@@ -18,6 +17,7 @@ from rich.table import Table
 
 from aethis_cli.commands.generate_cmd import (
     _field_layer_errors,
+    _is_collection_or_computed,
     _load_yaml_file,
     _parse_fields_yaml,
     _resolve_or_create_project,
@@ -41,6 +41,35 @@ fields_app = typer.Typer(
     help="Inspect a ruleset's fields and manage the local fields/fields.yaml vocabulary.",
     no_args_is_help=False,
 )
+
+
+def _is_collection_or_computed_row(row: dict) -> bool:
+    """Whether a server field row is a collection (any case) or a computed field (``computed_from``)."""
+    return str(row.get("field_type") or "").strip().lower() == "collection" or bool(row.get("computed_from"))
+
+
+def _refuse_unauthored_collections(server_keys: list[str], field_map: dict, verb: str) -> None:
+    """Exit before any write if the server holds a collection or computed field fields.yaml does not declare.
+
+    The engine publishes a collection's ``items`` and a computed field's
+    ``computed_from`` but never the full ``{op, collection, values}``
+    declaration, so these cannot be written faithfully from server data. A key
+    already declared locally as one is left exactly as authored and is not
+    counted here.
+    """
+    unsupported = [k for k in server_keys if not _is_collection_or_computed(field_map.get(k, {}))]
+    if not unsupported:
+        return
+    console.print(
+        f"[red]Cannot {verb}: the server has collection or computed field(s) fields.yaml does not declare: "
+        f"{', '.join(unsupported)}.[/red]"
+    )
+    console.print(
+        "[red]These declarations are not published in full, so they are not supported here and nothing was "
+        "written. They must be authored in fields.yaml (type: collection with items, and computed on a bool), "
+        "then run again.[/red]"
+    )
+    raise typer.Exit(code=1)
 
 
 def _show_fields(ruleset_id: Optional[str]) -> None:
@@ -155,6 +184,11 @@ def discover() -> None:
         raise typer.Exit(code=1)
 
     discovered = result.get("fields", []) or []
+    _refuse_unauthored_collections(
+        [df["key"] for df in discovered if df.get("key") and _is_collection_or_computed_row(df)],
+        field_map,
+        "discover",
+    )
     added = 0
     for df in discovered:
         key = df.get("key")
@@ -225,14 +259,23 @@ def pull(
     fields_path = cfg.config_path / "fields" / "fields.yaml"
     field_map = _parse_fields_yaml(fields_path) if fields_path.exists() else {}
 
+    _refuse_unauthored_collections(
+        [sf["field_id"] for sf in server_fields if sf.get("field_id") and _is_collection_or_computed_row(sf)],
+        field_map,
+        "pull",
+    )
+
     server_keys = set()
     added = updated = 0
-    needs_computed: list[str] = []
     for sf in server_fields:
         key = sf.get("field_id")
         if not key:
             continue
         server_keys.add(key)
+        if _is_collection_or_computed(field_map.get(key, {})):
+            # Declared locally as a collection or computed field: left exactly
+            # as authored. The server's rows for it are not the full declaration.
+            continue
         entry = dict(field_map.get(key, {}))  # preserve local label/hints
         existed = key in field_map
         entry["key"] = key
@@ -247,19 +290,6 @@ def pull(
             entry["enum_values"] = sf["enum_values"]
         else:
             entry.pop("enum_values", None)
-        if entry["type"] == "collection":
-            # The engine publishes a collection's ``items`` object, so the
-            # server is authoritative for it. A row that carries none keeps
-            # whatever is authored locally.
-            if isinstance(sf.get("items"), dict):
-                entry["items"] = copy.deepcopy(sf["items"])
-        else:
-            entry.pop("items", None)
-        if sf.get("computed_from") and "computed" not in entry:
-            # The engine publishes only which collection a computed field reads
-            # (``computed_from``), never its ``{op, collection, values}``. It
-            # cannot be reconstructed, so none is guessed.
-            needs_computed.append(key)
         if sf.get("question"):
             entry["question"] = sf["question"]
         field_map[key] = entry
@@ -268,12 +298,6 @@ def pull(
 
     _write_fields_yaml(fields_path, field_map)
     success(f"Pulled {len(server_fields)} field(s): {added} added, {updated} updated.")
-    if needs_computed:
-        console.print(
-            f"[yellow]Computed from a collection, but the engine does not publish the declaration "
-            f"(op, collection, values): {', '.join(needs_computed)}. Its computed declaration must be authored "
-            f"locally in fields.yaml; until then the field is written as a plain bool.[/yellow]"
-        )
 
     local_only = sorted(set(field_map) - server_keys)
     if local_only:
