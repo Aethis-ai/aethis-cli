@@ -456,8 +456,15 @@ plain row there that overrides a key a ruleset computes is posted and rejected
 by the engine. And `aethis fields pull` stops, changing nothing and sending
 nothing to the engine, if the schema has a collection or computed field your
 `fields.yaml` does not declare, because the engine does not publish these
-declarations in full: author them in `fields.yaml`. A key you already declared
-is left exactly as written by `pull`.
+declarations in full: author them in `fields.yaml`. An entry you already
+declared as a collection or with `computed` is left exactly as written by
+`pull`.
+
+Two limits of the engine check: it confirms that the engine's published
+field-spec names `items` and `computed` as properties, not that their schemas
+are well formed; and field discovery cannot tell a collection or a computed
+field from a plain one, so a discovered key you have not declared is written
+as its plain type.
 
 Field discovery does not report collection or computed declarations; author
 them in `fields.yaml`, and discovery will not overwrite ones already there.
