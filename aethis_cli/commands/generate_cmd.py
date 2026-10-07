@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import math
@@ -655,7 +656,7 @@ def _field_guidance_lines(key: str, field: dict) -> list[str]:
 
 # The set of value types a ``fields.yaml`` entry may declare. Mirrors the
 # engine's accepted sorts (it normalises case + the long forms below).
-VALID_FIELD_TYPES = {"int", "bool", "string", "enum", "date", "duration"}
+VALID_FIELD_TYPES = {"int", "bool", "string", "enum", "date", "duration", "collection"}
 
 # The server speaks the long, public-facing type names; ``fields.yaml`` uses the
 # short canonical forms. Map server → on-disk so a pulled/discovered field reads
@@ -674,6 +675,8 @@ _FIELD_KEY_ORDER = (
     "type",
     "label",
     "question",
+    "items",
+    "computed",
     "enum_values",
     "value_space",
     "enum_labels",
@@ -693,6 +696,13 @@ _FIELD_KEY_ORDER = (
 # them is worth sending. An engine that does not model a property ignores it,
 # so the upload succeeds and the metadata is gone.
 _ENGINE_GATED_FIELD_KEYS = (
+    # ``{sort, enum_values?, max_items?, completion_question?}``: the member
+    # declaration of a ``collection`` field. Carried exactly as authored; the
+    # engine owns its semantics.
+    "items",
+    # ``{op, collection, values}``: derives a ``bool`` field from one
+    # collection. Carried exactly as authored; the engine owns its semantics.
+    "computed",
     "enum_labels",
     "canonical_field",
     # ``{field, map}``: narrows this enum field's suggested options by the
@@ -732,6 +742,11 @@ def _safe_field_type(raw_type: Optional[str], enum_values: Optional[list]) -> st
     Server/discovery payloads can carry a type we don't model (it would write a
     file the next ``validate``/``generate`` rejects) or an ``enum`` with no
     values (not a representable enum on disk). Both fall back to ``string``.
+
+    A ``collection`` is returned as such but is NOT valid without ``items``;
+    ``fields pull`` refuses a server collection that ``fields.yaml`` does not
+    already declare, so it never writes one from here. Discovery's response
+    cannot name a collection at all (it arrives as ``string``).
     """
     t = _normalise_field_type(raw_type)
     if t not in VALID_FIELD_TYPES:
@@ -741,7 +756,7 @@ def _safe_field_type(raw_type: Optional[str], enum_values: Optional[list]) -> st
     return t
 
 
-def validate_fields_list(fields: list) -> list[str]:
+def validate_fields_list(fields: list, *, rulebook_layer: bool = False) -> list[str]:
     """Return human-readable validation errors for a ``fields.yaml`` field list.
 
     Checks: every entry has a key, no duplicate keys, the ``type`` is one of
@@ -751,10 +766,22 @@ def validate_fields_list(fields: list) -> list[str]:
     field, and where the members are declared inline it may not label a member
     the field does not have — a mislabelled key is silently inert on the
     engine, so it is caught here. ``canonical_field`` must be a non-empty
-    string. An empty return means the list is valid.
+    string. A ``collection`` field declares ``items`` (members inline, or a
+    ``value_space`` on the field) and ``items`` is refused elsewhere; a
+    ``computed`` declaration belongs on a ``bool`` field and must read a
+    collection declared in this same list that no other computed field reads —
+    the engine needs both in one pin set, so nothing is resolved across files.
+    An empty return means the list is valid.
+
+    ``rulebook_layer`` validates a rulebook-level list instead (the parent of
+    the project, or the project itself when it is a rulebook): collection and
+    computed fields are declared on the ruleset, so a row that is a collection
+    or carries ``items`` or ``computed`` is refused there.
     """
     errors: list[str] = []
     seen: set[str] = set()
+    universe: dict[str, dict] = {f["key"]: f for f in fields or [] if isinstance(f, dict) and f.get("key")}
+    readers = _computed_readers(universe)
     for i, f in enumerate(fields or []):
         if not isinstance(f, dict):
             errors.append(f"Field #{i + 1} is not a mapping.")
@@ -778,13 +805,135 @@ def validate_fields_list(fields: list) -> list[str]:
                 f"mutually exclusive; the named reference is authoritative, so drop the "
                 f"inline members."
             )
-        if f.get("value_space") and ftype != "enum":
-            errors.append(f"Field {key!r} declares value_space but is type {ftype!r} — only enum fields may.")
+        if f.get("value_space") and ftype not in _VALUE_SPACE_TYPES:
+            errors.append(
+                f"Field {key!r} declares value_space but is type {ftype!r} — only enum or collection fields may."
+            )
         if ftype == "enum" and not f.get("enum_values") and not f.get("value_space"):
             errors.append(f"Field {key!r} is type 'enum' but declares no enum_values (or value_space).")
+        if rulebook_layer:
+            if _is_collection_row(f):
+                errors.append(_RULEBOOK_ROW_REFUSAL.format(key=key))
+        else:
+            errors.extend(_validate_collection_declarations(key, f, ftype, universe, readers))
         errors.extend(_validate_display_metadata(key, f, ftype))
         errors.extend(_validate_field_notes(key, f))
     return errors
+
+
+_RULEBOOK_ROW_REFUSAL = (
+    "Rulebook field {key!r} is a collection or carries items or computed. Collection and computed fields are "
+    "declared on the ruleset, not the rulebook; remove the row."
+)
+_RULEBOOK_KEY_REFUSAL = (
+    "Rulebook field {key!r} names a key the ruleset declares as a collection or computed field. Collection and "
+    "computed fields are declared on the ruleset, so the rulebook may not mention that key; remove the row."
+)
+
+
+def _is_collection_row(row: dict) -> bool:
+    """A vocabulary row that is a collection or carries ``items``/``computed``, by ``sort`` or ``type``."""
+    spelled = (str(row.get(k) or "").strip().lower() for k in ("sort", "type"))
+    return "collection" in spelled or "items" in row or "computed" in row
+
+
+# Field types whose members may be a named ``value_space`` reference. A
+# collection's items are drawn from the same registry an enum's members are.
+_VALUE_SPACE_TYPES = ("enum", "collection")
+
+
+def _computed_readers(universe: dict[str, dict]) -> dict[str, list[str]]:
+    """``{collection key: sorted keys of the fields whose computed reads it}``."""
+    readers: dict[str, list[str]] = {}
+    for key, f in universe.items():
+        computed = f.get("computed")
+        collection = computed.get("collection") if isinstance(computed, dict) else None
+        if isinstance(collection, str) and collection.strip():
+            readers.setdefault(collection, []).append(key)
+    return {collection: sorted(keys) for collection, keys in readers.items()}
+
+
+def _validate_collection_declarations(
+    key: str, f: dict, ftype: str, universe: dict[str, dict], readers: dict[str, list[str]]
+) -> list[str]:
+    """Cheap structural checks on a field's ``items`` and ``computed`` declarations.
+
+    Both travel to the engine exactly as authored, and the engine judges what
+    they mean. Only what is wrong on the face of the file is caught here: a
+    collection with no way to know its members, a declaration on a field of the
+    wrong type, a ``computed`` that names no collection or has nothing to match.
+    The operator set, the member ranges and the member-versus-``values``
+    agreement are deliberately not checked — a newer engine may widen them, and
+    an older CLI must not be what refuses its authors.
+    """
+    errors: list[str] = []
+    items = f.get("items")
+    if ftype == "collection":
+        if "items" not in f:
+            errors.append(f"Field {key!r} is type 'collection' but declares no items.")
+        elif items is None:
+            errors.append(f"Field {key!r} declares items: null — give it a mapping of the collection's members.")
+        elif not isinstance(items, dict):
+            errors.append(f"Field {key!r} declares items but it is not a mapping.")
+        else:
+            sort = items.get("sort")
+            if not isinstance(sort, str) or not sort.strip():
+                errors.append(f"Field {key!r} declares items without items.sort as text (the engine requires it).")
+            members = items.get("enum_values")
+            if members is not None and not isinstance(members, list):
+                errors.append(f"Field {key!r} declares items.enum_values but it is not a list.")
+            elif not members and not f.get("value_space"):
+                errors.append(
+                    f"Field {key!r} is type 'collection' but declares neither items.enum_values nor a value_space."
+                )
+    elif "items" in f:
+        # Presence, not value: the engine rejects an explicit `items: null` too.
+        errors.append(
+            f"Field {key!r} declares items{': null' if items is None else ''} but is type {ftype!r} — "
+            f"only collection fields may."
+        )
+
+    if "computed" not in f:
+        return errors
+    computed = f["computed"]
+    if computed is None:
+        errors.append(f"Field {key!r} declares computed: null — omit it, or give it op, collection and values.")
+        return errors
+    if ftype != "bool":
+        errors.append(f"Field {key!r} declares computed but is type {ftype!r} — only bool fields may.")
+    if not isinstance(computed, dict):
+        errors.append(f"Field {key!r} declares computed but it is not a mapping of op, collection and values.")
+        return errors
+    for part in ("op", "collection"):
+        value = computed.get(part)
+        if not isinstance(value, str) or not value.strip():
+            errors.append(f"Field {key!r} computed needs {part} as text.")
+    values = computed.get("values")
+    if not isinstance(values, list) or not values:
+        errors.append(f"Field {key!r} computed needs values as a non-empty list.")
+    collection = computed.get("collection")
+    if isinstance(collection, str) and collection.strip():
+        target = universe.get(collection)
+        if target is None:
+            errors.append(f"Field {key!r} computed reads {collection!r}, which is not declared in fields.yaml.")
+        else:
+            target_type = _field_type(target)
+            if target_type != "collection":
+                errors.append(
+                    f"Field {key!r} computed reads {collection!r}, which is not a collection (it is type {target_type!r})."
+                )
+        readers_of = readers.get(collection, [])
+        if len(readers_of) > 1 and key != readers_of[0]:
+            errors.append(
+                f"Field {key!r} computed reads {collection!r}, which {readers_of[0]!r} already reads — "
+                f"a collection may have at most one computed field."
+            )
+    return errors
+
+
+def _field_type(f: dict) -> str:
+    """A field entry's declared type, lower-cased, whichever spelling it used."""
+    return str(f.get("type") or f.get("sort") or "").strip().lower()
 
 
 def _validate_display_metadata(key: str, f: dict, ftype: str) -> list[str]:
@@ -810,8 +959,10 @@ def _validate_display_metadata(key: str, f: dict, ftype: str) -> list[str]:
         else:
             # An empty map is a legitimate declaration — the engine keeps it —
             # so the checks below simply have nothing to say about it.
-            if ftype != "enum":
-                errors.append(f"Field {key!r} declares enum_labels but is type {ftype!r} — only enum fields may.")
+            if ftype not in _VALUE_SPACE_TYPES:
+                errors.append(
+                    f"Field {key!r} declares enum_labels but is type {ftype!r} — only enum or collection fields may."
+                )
             # Members are compared as text, so a non-text key can never match
             # one and is reported as its own fault rather than as a member the
             # field does not declare.
@@ -824,7 +975,14 @@ def _validate_display_metadata(key: str, f: dict, ftype: str) -> list[str]:
             if bad:
                 errors.append(f"Field {key!r} has empty or non-text enum_labels for: {', '.join(bad)}.")
             members = f.get("enum_values")
-            if isinstance(members, list):
+            if ftype == "collection":
+                # A collection's members are its items' members.
+                items = f.get("items")
+                members = items.get("enum_values") if isinstance(items, dict) else None
+            # A named value_space supplies the members from the registry and the
+            # engine replaces any inline list, so membership is never checked
+            # locally then — whatever an inline list (empty or stale) holds.
+            if not f.get("value_space") and isinstance(members, list):
                 unknown = sorted(m for m in labels if isinstance(m, str) and m not in members)
                 if unknown:
                     errors.append(
@@ -979,6 +1137,11 @@ def _merged_field_map(project_dir: Path) -> dict:
 
     For a standalone project or the rulebook project itself, the own file is
     the whole universe, unchanged.
+
+    There is no merge rule for collection or computed keys: validation
+    (:func:`_field_layer_errors`) refuses a rulebook that holds such a row or
+    mentions such a key, so this merge never sees one. It raises rather than
+    pick a winner if validation was somehow skipped.
     """
     own_fields = project_dir / "fields" / "fields.yaml"
     own = _parse_fields_yaml(own_fields) if own_fields.exists() else {}
@@ -996,7 +1159,28 @@ def _merged_field_map(project_dir: Path) -> dict:
         # rulebook-level project has no parent and falls through to {} anyway.
         return {}
 
+    if rb_map:
+        conflicts = _rulebook_conflicts(own, rb_map)
+        if conflicts:
+            raise RuntimeError(
+                "Collection and computed fields are declared on the ruleset, but the rulebook's fields.yaml has "
+                f"{', '.join(conflicts)}. Validate the project's fields before merging them."
+            )
     return {key: rb_map.get(key, field) for key, field in own.items()}
+
+
+def _is_collection_or_computed(field: dict) -> bool:
+    """Whether a field entry is a collection or carries a computed declaration."""
+    return _field_type(field) == "collection" or "computed" in field
+
+
+def _rulebook_conflicts(own: dict, rb_map: dict) -> list[str]:
+    """Keys of a rulebook map that are collection rows or that name a collection/computed key of ``own``."""
+    return sorted(
+        key
+        for key, row in rb_map.items()
+        if _is_collection_row(row) or (key in own and _is_collection_or_computed(own[key]))
+    )
 
 
 def _local_value_space_files(project_dir: Path) -> dict:
@@ -1146,35 +1330,120 @@ def _upload_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) 
     _push_field_vocabulary(client, pid, project_dir)
 
 
+def _rulebook_key_errors(own_fields: list, rulebook_fields: list) -> list[str]:
+    """Refuse any rulebook row for a key the ruleset declares as a collection or computed field.
+
+    The engine forbids a rulebook overriding such a key, and the CLI does not
+    merge one: the rulebook may not mention the key at all, whatever the row says.
+    """
+    protected = {f["key"] for f in own_fields if isinstance(f, dict) and f.get("key") and _is_collection_or_computed(f)}
+    return [
+        _RULEBOOK_KEY_REFUSAL.format(key=row["key"])
+        for row in rulebook_fields
+        if isinstance(row, dict) and row.get("key") in protected
+    ]
+
+
+def _project_is_rulebook(project_dir: Path) -> bool:
+    """Whether ``project_dir`` is itself a rulebook (``kind: rulebook`` in its ``aethis.yaml``)."""
+    cfg_file = project_dir / "aethis.yaml"
+    if not cfg_file.exists():
+        return False
+    try:
+        raw = yaml.safe_load(cfg_file.read_text()) or {}
+    except yaml.YAMLError:
+        return False
+    return isinstance(raw, dict) and str(raw.get("kind") or "").strip().lower() == "rulebook"
+
+
+def _field_layer_errors(project_dir: Path) -> list[tuple[Path, list[str]]]:
+    """``[(fields.yaml path, errors)]`` for every contributing file that has any.
+
+    Each contributing file's RAW list is validated, so duplicate keys *within a
+    file* surface — the merged map would silently collapse them. A key shared
+    between the rulebook and the ruleset is intentional (rulebook wins), not a
+    duplicate. Any rulebook-level file — the parent of the project, or the
+    project's own file when the project is a rulebook — is validated as the
+    rulebook layer, which holds no collection or computed row; and the parent
+    may not mention a key the ruleset declares as one.
+    """
+    own_path = project_dir / "fields" / "fields.yaml"
+    own_raw = (_load_yaml_file(own_path).get("fields") or []) if own_path.exists() else []
+    found: list[tuple[Path, list[str]]] = []
+    rb_dir = _parent_rulebook_dir(project_dir)
+    if rb_dir is not None:
+        rb_path = rb_dir / "fields" / "fields.yaml"
+        if rb_path.exists():
+            rb_raw = _load_yaml_file(rb_path).get("fields") or []
+            errors = validate_fields_list(rb_raw, rulebook_layer=True) + _rulebook_key_errors(own_raw, rb_raw)
+            if errors:
+                found.append((rb_path, errors))
+    if own_path.exists():
+        errors = validate_fields_list(own_raw, rulebook_layer=_project_is_rulebook(project_dir))
+        if errors:
+            found.append((own_path, errors))
+    return found
+
+
 def _validate_project_fields(project_dir: Path) -> None:
     """Exit with the validation errors of every contributing ``fields.yaml``.
 
     Local only — run it before any engine call, because guidance added earlier
     in a run accumulates on the project and a failed retry would duplicate it.
     """
-    # Fail fast on a malformed vocabulary before we mutate server state. Validate
-    # each contributing file's RAW list so duplicate keys *within a file* surface
-    # — the merged map would silently collapse them. A key shared between the
-    # rulebook and the ruleset is intentional (rulebook wins), not a duplicate.
-    rb_dir = _parent_rulebook_dir(project_dir)
-    contributing = [project_dir / "fields" / "fields.yaml"]
-    if rb_dir is not None:
-        contributing.insert(0, rb_dir / "fields" / "fields.yaml")
-    for path in contributing:
-        if not path.exists():
-            continue
-        errors = validate_fields_list(_load_yaml_file(path).get("fields") or [])
-        if errors:
-            console.print(f"[red]{path} is invalid:[/red]")
-            for e in errors:
-                console.print(f"  [red]✗[/red] {e}")
-            raise typer.Exit(code=1)
+    # Fail fast on a malformed vocabulary before we mutate server state.
+    for path, errors in _field_layer_errors(project_dir)[:1]:
+        console.print(f"[red]{path} is invalid:[/red]")
+        for e in errors:
+            console.print(f"  [red]✗[/red] {e}")
+        raise typer.Exit(code=1)
+
+
+def check_collection_support(client: AethisClient, fields: list[dict]) -> None:
+    """Refuse a project that declares ``items`` or ``computed`` to an engine that may drop them.
+
+    An engine that does not model them accepts the upload and discards them, so
+    the published schema silently loses the collection. Unlike the older display
+    metadata checked in :func:`check_display_metadata_support`, an engine whose
+    schema cannot be read — unreachable, a non-2xx answer, or no field-spec
+    model in it — is refused too: there is no evidence it keeps them. A project
+    declaring neither is untouched and the engine is never queried.
+
+    Run it before the first write of a run; it is read-only.
+    """
+    declared = sorted({k for f in fields if isinstance(f, dict) for k in ("items", "computed") if k in f})
+    if not declared:
+        return
+    advertised = client.expected_field_spec_properties(strict=True)
+    if not isinstance(advertised, set):  # unreadable or malformed: fail CLOSED, unlike check_display_metadata_support
+        console.print(
+            f"[red]Could not read the engine's field-spec schema ({client.base_url}), so it is unknown whether it "
+            f"keeps {', '.join(declared)}.[/red]"
+        )
+        console.print(
+            "[red]Stopping before anything is uploaded: an engine that does not model them accepts the upload and "
+            "discards them silently. Retry once the engine's schema is readable.[/red]"
+        )
+        raise typer.Exit(code=1)
+    absent = [k for k in declared if k not in advertised]
+    if absent:
+        console.print(f"[red]This engine does not carry {', '.join(absent)} on a field spec ({client.base_url}).[/red]")
+        console.print(
+            "[red]Stopping before anything is uploaded: the upload would succeed and the authored values would be "
+            "dropped. Upgrade the engine, or remove those keys from fields.yaml.[/red]"
+        )
+        raise typer.Exit(code=1)
 
 
 def _push_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) -> None:
     field_map = _merged_field_map(project_dir)
     if not field_map:
         return
+
+    # Also run at the head of `_run_generate`, before any write; repeated here
+    # so a direct caller can never reach a value-space sync or the spec push
+    # ahead of it. The engine's schema is probed once per client.
+    check_collection_support(client, list(field_map.values()))
 
     expected_fields: list[dict] = []
     guidance_lines: list[str] = []
@@ -1190,10 +1459,12 @@ def _push_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) ->
         # engine went to the trouble of preserving. Explicit `null` is accepted
         # too (both properties are nullable on the engine's model), and it is
         # likewise transmitted as authored rather than silently discarded.
+        # Each value is deep-copied: ``items`` and ``computed`` nest member
+        # lists, and the payload must not share structure with the parsed file.
         for prop in _ENGINE_GATED_FIELD_KEYS:
             if prop in field:
                 value = field[prop]
-                spec[prop] = dict(value) if isinstance(value, dict) else value
+                spec[prop] = copy.deepcopy(value)
         # In fields.yaml, omitting a question on a declared non-applicant fact
         # is intentional: there is no applicant question. Make that absence
         # explicit on the wire so a model-invented question is cleared rather
@@ -1261,6 +1532,24 @@ def check_display_metadata_support(client: AethisClient, fields: list[dict], *, 
         "those keys from fields.yaml.[/red]"
     )
     raise typer.Exit(code=1)
+
+
+def rulebook_collection_row_errors(fields: list) -> list[str]:
+    """Refuse a rulebook vocabulary row that is a collection or carries ``items``/``computed``.
+
+    Collection and computed fields are declared on the ruleset, not the
+    rulebook. The row is posted as authored, so this refuses locally — by
+    ``sort`` or ``type`` spelling — rather than letting the engine's rejection
+    be the first anyone hears of it. Every other row is left entirely alone.
+
+    Not covered, because it needs the ruleset's context: a plain row that
+    overrides a key a ruleset computes. The engine enforces that.
+    """
+    return [
+        _RULEBOOK_ROW_REFUSAL.format(key=row.get("key"))
+        for row in fields
+        if isinstance(row, dict) and _is_collection_row(row)
+    ]
 
 
 def _upload_rulebook_guidance(client: AethisClient, pid: str, project_dir: Path) -> None:
@@ -1397,6 +1686,11 @@ def _run_generate(
         # Local field validation first: nothing below may reach the engine
         # (guidance accumulates on the project) for a vocabulary that is invalid.
         _validate_project_fields(project_dir)
+        # Read-only engine capability check for items/computed, ahead of every
+        # write below (project creation, sources, guidance, value spaces, the
+        # field spec, tests): an engine that cannot keep them is refused before
+        # anything is created, so a retry accumulates nothing.
+        check_collection_support(client, list(_merged_field_map(project_dir).values()))
         # Parse, validate, canonicalise and capability-check the complete test
         # plan before project creation, guidance, source, field or test writes.
         # The frozen snapshot is the payload uploaded later in this run.
@@ -1631,6 +1925,28 @@ def _upload_prepared_test_cases(
     )
 
 
+def _produced_members(schema_field: dict) -> set:
+    """The member set a ``/schema`` field row publishes.
+
+    An enum carries its members at the top level (``enum_values``); a
+    collection publishes them under ``items.enum_values`` and has no top-level
+    ``enum_values``, so reading only the top level reported every collection as
+    having dropped all of its members.
+    """
+    if str(schema_field.get("field_type") or "").strip().lower() == "collection":
+        items = schema_field.get("items")
+        return set((items.get("enum_values") if isinstance(items, dict) else None) or [])
+    return set(schema_field.get("enum_values") or [])
+
+
+def _pinned_members(field: dict) -> set:
+    """The inline member set a ``fields.yaml`` entry pins (a collection's are its ``items.enum_values``)."""
+    if _field_type(field) == "collection":
+        items = field.get("items")
+        return set((items.get("enum_values") if isinstance(items, dict) else None) or [])
+    return set(field.get("enum_values") or [])
+
+
 def _report_field_diff(
     client: AethisClient,
     ruleset_id: Optional[str],
@@ -1695,7 +2011,7 @@ def _report_field_diff(
         return
     schema_fields = schema.get("fields", []) or []
     produced = {f.get("field_id") for f in schema_fields if f.get("field_id")}
-    produced_members = {f["field_id"]: set(f.get("enum_values") or []) for f in schema_fields if f.get("field_id")}
+    produced_members = {f["field_id"]: _produced_members(f) for f in schema_fields if f.get("field_id")}
 
     missing = sorted(pinned - produced)
     extra = sorted(produced - pinned)
@@ -1761,7 +2077,7 @@ def _report_field_diff(
                     (key, sorted(actual_members - expected_members), sorted(expected_members - actual_members))
                 )
             continue
-        pinned_members = set(field.get("enum_values") or [])
+        pinned_members = _pinned_members(field)
         if not pinned_members or key not in produced_members:
             continue
         actual_members = produced_members[key]

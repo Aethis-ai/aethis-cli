@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.48.0 (2026-10-07)
+
+- `fields.yaml` now accepts a `collection` field type and a `computed` declaration, and `aethis generate` carries both to the engine exactly as written. Previously the CLI rejected `collection` as an unknown type and did not send `items` or `computed`. Needs an engine that models them (0.68.0 or later). A collection is a multi-select over a closed set of members; a computed field is a yes/no fact derived from one collection rather than asked:
+
+  ```yaml
+  - key: crew.certifications_held
+    type: collection
+    question: Which certifications do you hold?
+    items:
+      sort: Enum
+      enum_values: [zero_g_operations, eva_basic, medical_officer]
+      max_items: 50
+      completion_question: Any other certifications?
+  - key: crew.holds_accepted_certification
+    type: bool
+    computed:
+      op: any_in
+      collection: crew.certifications_held
+      values: [eva_basic, medical_officer]
+  ```
+
+  The members may instead be a named `value_space` on the collection field, in which case `items.enum_values` can be left out. A collection may have at most one computed field reading it. Declare a collection and the computed field that reads it together, in the ruleset's own `fields.yaml`: the engine needs both in the same set of fields.
+- If the target engine does not model `items` or `computed`, or its schema cannot be read, `aethis generate` and `aethis refine` stop and name the problem, rather than letting the engine accept the upload and drop them. The check reads the engine's schema (it changes nothing) and runs after the local checks and before the project, sources, guidance, value spaces, field spec or tests are created or uploaded. Projects that declare neither are uploaded unchanged and the engine is not queried.
+- `aethis fields validate` and `aethis generate` check these declarations locally: a collection needs `items` (with a `sort`) and a source of members, `items` belongs only on a collection, `computed` belongs only on a yes/no field, an explicit `null` for either is refused, a computed field must read a collection declared in the same file and have at least one value to match, and no two computed fields may read the same collection. Which operators exist, and whether the values match the members, are left to the engine.
+- `enum_labels` are accepted on a collection. Where `items.enum_values` is written inline a label may only name one of those members; with a `value_space` only the shape of the labels is checked.
+- After a generation, the field report compares a collection's members (`items.enum_values`) with what was pinned, or with the value space it names, instead of reporting every member as dropped.
+- **Not supported in this version, and refused rather than guessed.** Collection and computed fields are declared on the ruleset, not the rulebook. A `fields.yaml` that belongs to a rulebook (the parent of the ruleset, or the rulebook project itself) may not hold a collection row or carry `items` / `computed`, and may not hold any row for a key the ruleset declares as a collection or computed field; `aethis generate` and `aethis fields validate` refuse it before anything is uploaded, and `aethis rulebooks set-fields` refuses a row that is a collection or carries `items` / `computed`. The CLI cannot tell, without the ruleset beside it, that a plain row in a rulebook overrides a computed field of some ruleset; the engine rejects that.
+- **Not supported in this version:** `aethis fields pull` cannot write these declarations, because the engine does not publish a computed field's declaration and a collection's members would be copied over a `value_space` reference. A key already declared as a collection or with `computed` in your `fields.yaml` is left exactly as written. If the schema has a collection or computed field that your `fields.yaml` does not declare, `pull` stops before changing anything, sends nothing to the engine, names the keys, and asks you to author them in `fields.yaml`.
+- Field discovery does not report collection or computed declarations; author them in `fields.yaml`, and discovery will not overwrite ones already there.
+- The malformed-schema check for `items` and `computed` is strict: the engine's field-spec schema must list its properties as a mapping, otherwise the upload is refused.
+
 ## 0.47.0 (2026-10-06)
 
 - Add `--thinking` to `aethis generate` and `aethis refine`. Explicit values

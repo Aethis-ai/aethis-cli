@@ -38,7 +38,7 @@ from rich.table import Table
 from aethis_cli import contract
 from aethis_cli.auth_helpers import resolve_cached_key
 from aethis_cli.client import make_anonymous_client
-from aethis_cli.commands.generate_cmd import check_display_metadata_support
+from aethis_cli.commands.generate_cmd import check_display_metadata_support, rulebook_collection_row_errors
 from aethis_cli.config import load_client_or_fallback, resolve_base_url_with_source
 from aethis_cli.decision_view import print_blocking_errors, print_identity
 from aethis_cli.errors import AethisAPIError
@@ -359,6 +359,14 @@ def set_fields(
         fields = payload
     if not isinstance(fields, list) or not fields:
         raise typer.BadParameter(f"{file} must contain a non-empty list of field specs.")
+
+    # A collection or computed key may appear here with only key and sort; the
+    # engine refuses a rulebook that overrides anything else about it.
+    row_errors = rulebook_collection_row_errors(fields)
+    if row_errors:
+        for message in row_errors:
+            console.print(f"[red]{message}[/red]")
+        raise typer.Exit(code=1)
 
     _cfg, client = load_client_or_fallback()
     # The file is posted as authored, so a property this engine does not model

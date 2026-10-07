@@ -411,6 +411,64 @@ A project file describes the project, not your credentials: it cannot choose whi
 server a key is sent to or which environment variable is read as a key. See
 [Which keys are read, and where they go](#which-keys-are-read-and-where-they-go).
 
+### fields.yaml
+
+`fields/fields.yaml` declares the field vocabulary. Each entry has a `key` and a
+`type`: `int`, `bool`, `string`, `enum`, `date`, `duration` or `collection`. An
+`enum` lists its members inline (`enum_values`) or names a registry
+`value_space`.
+
+A `collection` lets the applicant pick several members of a closed set. Declare
+its members under `items`, and derive a yes/no fact from it with a `computed`
+field on a `bool`:
+
+```yaml
+fields:
+  - key: crew.certifications_held
+    type: collection
+    question: Which certifications do you hold?
+    items:
+      sort: Enum
+      enum_values: [zero_g_operations, eva_basic, medical_officer]
+      max_items: 50                       # optional
+      completion_question: Any other certifications?   # optional
+  - key: crew.holds_accepted_certification
+    type: bool
+    computed:
+      op: any_in
+      collection: crew.certifications_held
+      values: [eva_basic, medical_officer]
+```
+
+Both are sent to the engine exactly as written, and `aethis generate` stops
+before creating or uploading anything if the engine does not support them or
+its schema cannot be read. Declare a collection and its computed field together
+in the ruleset's own `fields.yaml`. A collection may name a `value_space`
+instead of listing `items.enum_values`, may carry `enum_labels`, and has at most
+one computed field. Run `aethis fields validate` to check the file locally; the
+engine checks what the declarations mean.
+
+Two things are refused in this version. A rulebook's `fields.yaml` may not hold
+a collection row, `items` or `computed`, nor any row for a key a ruleset
+declares as one; `aethis rulebooks set-fields` refuses a row that is a
+collection or carries `items` or `computed`, but it cannot see a ruleset, so a
+plain row there that overrides a key a ruleset computes is posted and rejected
+by the engine. And `aethis fields pull` stops, changing nothing and sending
+nothing to the engine, if the schema has a collection or computed field your
+`fields.yaml` does not declare, because the engine does not publish these
+declarations in full: author them in `fields.yaml`. An entry you already
+declared as a collection or with `computed` is left exactly as written by
+`pull`.
+
+Two limits of the engine check: it confirms that the engine's published
+field-spec names `items` and `computed` as properties, not that their schemas
+are well formed; and field discovery cannot tell a collection or a computed
+field from a plain one, so a discovered key you have not declared is written
+as its plain type.
+
+Field discovery does not report collection or computed declarations; author
+them in `fields.yaml`, and discovery will not overwrite ones already there.
+
 ### scenarios.yaml
 
 ```yaml

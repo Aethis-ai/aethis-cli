@@ -401,7 +401,7 @@ class AethisClient:
         self._test_acceptance_contract_support = answer
         return answer
 
-    def _schema_properties(self, model: str) -> Optional[set[str]]:
+    def _schema_properties(self, model: str, *, strict: bool = False) -> Optional[set[str]]:
         """The property names this engine advertises on ``model``.
 
         Answered from the engine's own published schema —
@@ -415,9 +415,15 @@ class AethisClient:
         does not model a property ignores it rather than rejecting it, so a
         caller that treats an unreadable schema as a "no" would refuse uploads
         that would have worked.
+
+        ``strict`` accepts the answer only when ``properties`` is a mapping, as
+        a published schema's is; a list, string or anything else answers
+        ``None``. The default converts any iterable to names, which is how the
+        older callers have always read it.
         """
-        if model in self._field_spec_properties:
-            return self._field_spec_properties[model]
+        cache_key = f"{model}#strict" if strict else model
+        if cache_key in self._field_spec_properties:
+            return self._field_spec_properties[cache_key]
         answer: Optional[set[str]]
         try:
             resp = self._client.get("/openapi.json", timeout=15.0)
@@ -425,15 +431,20 @@ class AethisClient:
                 answer = None
             else:
                 schemas = resp.json()["components"]["schemas"]
-                answer = set(schemas[model]["properties"])
+                properties = schemas[model]["properties"]
+                answer = set(properties) if isinstance(properties, dict) or not strict else None
         except (httpx.HTTPError, ValueError, KeyError, TypeError):
             answer = None
-        self._field_spec_properties[model] = answer
+        self._field_spec_properties[cache_key] = answer
         return answer
 
-    def expected_field_spec_properties(self) -> Optional[set[str]]:
-        """What a *project* field pin may carry — the generation upload path."""
-        return self._schema_properties("ExpectedFieldSpec")
+    def expected_field_spec_properties(self, *, strict: bool = False) -> Optional[set[str]]:
+        """What a *project* field pin may carry — the generation upload path.
+
+        ``strict=True`` is for a caller that must refuse on a malformed
+        advertisement rather than read whatever it can out of it.
+        """
+        return self._schema_properties("ExpectedFieldSpec", strict=strict)
 
     def rulebook_field_spec_properties(self) -> Optional[set[str]]:
         """What a *rulebook* field entry may carry — ``rulebooks set-fields``.

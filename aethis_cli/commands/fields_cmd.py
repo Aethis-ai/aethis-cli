@@ -16,13 +16,14 @@ import typer
 from rich.table import Table
 
 from aethis_cli.commands.generate_cmd import (
+    _field_layer_errors,
+    _is_collection_or_computed,
     _load_yaml_file,
     _parse_fields_yaml,
     _resolve_or_create_project,
     _safe_field_type,
     _upload_sources,
     _write_fields_yaml,
-    validate_fields_list,
 )
 from aethis_cli.config import (
     load_client_or_anon,
@@ -40,6 +41,37 @@ fields_app = typer.Typer(
     help="Inspect a ruleset's fields and manage the local fields/fields.yaml vocabulary.",
     no_args_is_help=False,
 )
+
+
+def _is_collection_or_computed_row(row: dict) -> bool:
+    """Whether a server field row is a collection (any case) or a computed field (``computed_from``)."""
+    return str(row.get("field_type") or "").strip().lower() == "collection" or bool(row.get("computed_from"))
+
+
+def _refuse_unauthored_collections(server_keys: list[str], field_map: dict) -> None:
+    """Exit before ``fields pull`` writes if the schema holds a collection or computed field fields.yaml does not declare.
+
+    The only engine call that precedes this is the read of the ruleset schema,
+    so on refusal neither fields.yaml nor the engine has been written. The
+    engine publishes a collection's ``items`` and a computed field's
+    ``computed_from`` on ``/schema`` but never the full ``{op, collection,
+    values}`` declaration, so these cannot be written faithfully from server
+    data. A key already declared locally as one is left exactly as authored and
+    is not counted here.
+    """
+    unsupported = [k for k in server_keys if not _is_collection_or_computed(field_map.get(k, {}))]
+    if not unsupported:
+        return
+    console.print(
+        f"[red]Cannot pull: the server has collection or computed field(s) fields.yaml does not declare: "
+        f"{', '.join(unsupported)}.[/red]"
+    )
+    console.print(
+        "[red]These declarations are not published in full, so they are not supported here; fields.yaml was not "
+        "changed and nothing was sent to the engine. Author them in fields.yaml (type: collection with items, and "
+        "computed on a bool), then run again.[/red]"
+    )
+    raise typer.Exit(code=1)
 
 
 def _show_fields(ruleset_id: Optional[str]) -> None:
@@ -224,6 +256,11 @@ def pull(
     fields_path = cfg.config_path / "fields" / "fields.yaml"
     field_map = _parse_fields_yaml(fields_path) if fields_path.exists() else {}
 
+    _refuse_unauthored_collections(
+        [sf["field_id"] for sf in server_fields if sf.get("field_id") and _is_collection_or_computed_row(sf)],
+        field_map,
+    )
+
     server_keys = set()
     added = updated = 0
     for sf in server_fields:
@@ -231,6 +268,10 @@ def pull(
         if not key:
             continue
         server_keys.add(key)
+        if _is_collection_or_computed(field_map.get(key, {})):
+            # Declared locally as a collection or computed field: left exactly
+            # as authored. The server's rows for it are not the full declaration.
+            continue
         entry = dict(field_map.get(key, {}))  # preserve local label/hints
         existed = key in field_map
         entry["key"] = key
@@ -274,13 +315,13 @@ def validate() -> None:
         console.print(f"[red]{fields_path} not found. Run 'aethis init' or 'aethis fields discover' first.[/red]")
         raise typer.Exit(code=1)
 
-    # Validate the raw list (not the de-duplicated map) so duplicate keys surface.
-    raw_fields = _load_yaml_file(fields_path).get("fields") or []
-    errors = validate_fields_list(raw_fields)
-    if errors:
-        console.print(f"[red]{fields_path} is invalid:[/red]")
+    # Validate the raw lists (not the de-duplicated map) so duplicate keys
+    # surface, and the enclosing rulebook's rows against this ruleset's keys.
+    for path, errors in _field_layer_errors(cfg.config_path)[:1]:
+        console.print(f"[red]{path} is invalid:[/red]")
         for e in errors:
             console.print(f"  [red]✗[/red] {e}")
         raise typer.Exit(code=1)
 
+    raw_fields = _load_yaml_file(fields_path).get("fields") or []
     success(f"fields.yaml is valid ({len(raw_fields)} field(s)).")

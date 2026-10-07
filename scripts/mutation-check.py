@@ -251,7 +251,7 @@ MUTATIONS: List[Mutation] = [
         "        for prop in _ENGINE_GATED_FIELD_KEYS:\n"
         "            if prop in field:\n"
         "                value = field[prop]\n"
-        "                spec[prop] = dict(value) if isinstance(value, dict) else value\n",
+        "                spec[prop] = copy.deepcopy(value)\n",
         "",
         "authored wording and the storage-key pairing never reach the engine",
         detects=("tests/test_field_display_metadata_transport.py::test_upload_transmits_labels_and_canonical_field",),
@@ -367,7 +367,7 @@ MUTATIONS: List[Mutation] = [
     Mutation(
         "enum-labels-non-enum-check-dropped",
         "aethis_cli/commands/generate_cmd.py",
-        '            if ftype != "enum":',
+        "            if ftype not in _VALUE_SPACE_TYPES:",
         "            if False:",
         "member wording is accepted on a field that has no members",
         detects=("tests/test_field_display_metadata_transport.py::test_validate_rejects_labels_on_a_non_enum_field",),
@@ -420,7 +420,7 @@ MUTATIONS: List[Mutation] = [
     Mutation(
         "field-spec-properties-probe-answers-a-fixed-set",
         "aethis_cli/client.py",
-        '                answer = set(schemas[model]["properties"])',
+        "                answer = set(properties) if isinstance(properties, dict) or not strict else None",
         '                answer = {"key", "sort"}',
         "the probe stops reporting what the engine actually advertises",
         detects=(
@@ -454,6 +454,263 @@ MUTATIONS: List[Mutation] = [
         "both paths ask about the project pin, whatever they actually post",
         detects=(
             "tests/test_field_display_metadata_transport.py::test_set_fields_asks_about_the_rulebook_model_not_the_project_one",
+        ),
+    ),
+    # -- collection fields and computed declarations -------------------------
+    Mutation(
+        "items-not-carried-to-the-engine",
+        "aethis_cli/commands/generate_cmd.py",
+        '    "items",\n    # ``{op, collection, values}``',
+        "    # ``{op, collection, values}``",
+        "generate stops carrying a collection's authored items to the engine",
+        detects=("tests/test_collection_and_computed_fields.py::test_upload_carries_items_and_computed_as_authored",),
+    ),
+    Mutation(
+        "computed-not-carried-to-the-engine",
+        "aethis_cli/commands/generate_cmd.py",
+        '    "computed",\n    "enum_labels",',
+        '    "enum_labels",',
+        "generate stops carrying a computed declaration to the engine",
+        detects=("tests/test_collection_and_computed_fields.py::test_upload_carries_items_and_computed_as_authored",),
+    ),
+    Mutation(
+        "payload-shares-structure-with-the-parsed-file",
+        "aethis_cli/commands/generate_cmd.py",
+        "                spec[prop] = copy.deepcopy(value)",
+        "                spec[prop] = value",
+        "the uploaded items/computed alias the parsed fields.yaml structure",
+        detects=("tests/test_collection_and_computed_fields.py::test_the_payload_is_a_copy_not_the_parsed_structure",),
+    ),
+    Mutation(
+        "items-computed-missing-from-canonical-key-order",
+        "aethis_cli/commands/generate_cmd.py",
+        '    "items",\n    "computed",\n    "enum_values",',
+        '    "enum_values",',
+        "a pull moves the declarations out of their modelled place in fields.yaml",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_write_back_keeps_both_declarations_in_their_modelled_place",
+        ),
+    ),
+    Mutation(
+        "collection-type-not-accepted",
+        "aethis_cli/commands/generate_cmd.py",
+        'VALID_FIELD_TYPES = {"int", "bool", "string", "enum", "date", "duration", "collection"}',
+        'VALID_FIELD_TYPES = {"int", "bool", "string", "enum", "date", "duration"}',
+        "a collection field is rejected as an unknown type again",
+        detects=("tests/test_collection_and_computed_fields.py::test_collection_is_an_accepted_field_type",),
+    ),
+    Mutation(
+        "collection-without-items-accepted",
+        "aethis_cli/commands/generate_cmd.py",
+        '        if "items" not in f:\n'
+        "            errors.append(f\"Field {key!r} is type 'collection' but declares no items.\")\n"
+        "        elif items is None:",
+        '        if "items" not in f:\n            pass\n        elif items is None:',
+        "a collection with no items declaration reaches the engine",
+        detects=("tests/test_collection_and_computed_fields.py::test_a_collection_without_items_is_rejected",),
+    ),
+    Mutation(
+        "computed-target-type-unchecked",
+        "aethis_cli/commands/generate_cmd.py",
+        '            if target_type != "collection":',
+        "            if False:",
+        "a computed field may read a field that is not a collection",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_computed_naming_a_field_that_is_not_a_collection_is_rejected",
+        ),
+    ),
+    Mutation(
+        "second-computed-reader-accepted",
+        "aethis_cli/commands/generate_cmd.py",
+        "        if len(readers_of) > 1 and key != readers_of[0]:",
+        "        if False:",
+        "two computed fields may read one collection",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_two_computed_fields_over_one_collection_are_rejected",
+        ),
+    ),
+    Mutation(
+        "rulebook-collection-row-accepted",
+        "aethis_cli/commands/generate_cmd.py",
+        "            if _is_collection_row(f):\n                errors.append(_RULEBOOK_ROW_REFUSAL.format(key=key))",
+        "            if False:\n                errors.append(_RULEBOOK_ROW_REFUSAL.format(key=key))",
+        "a rulebook-level collection or computed row is accepted instead of refused",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_a_parent_rulebook_row_that_is_a_collection_or_carries_items_or_computed_is_refused[row0]",
+            "tests/test_collection_and_computed_fields.py::test_a_rulebook_project_root_may_not_hold_a_collection_row",
+        ),
+    ),
+    Mutation(
+        "rulebook-row-for-a-ruleset-collection-key-accepted",
+        "aethis_cli/commands/generate_cmd.py",
+        "validate_fields_list(rb_raw, rulebook_layer=True) + _rulebook_key_errors(own_raw, rb_raw)",
+        "validate_fields_list(rb_raw, rulebook_layer=True)",
+        "a rulebook row for a key the ruleset declares as a collection or computed field is merged over it",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_a_rulebook_row_for_a_key_the_ruleset_computes_is_refused[row0]",
+            "tests/test_collection_and_computed_fields.py::test_a_rulebook_row_for_a_key_the_ruleset_declares_a_collection_is_refused[row0]",
+        ),
+    ),
+    Mutation(
+        "rulebook-root-validated-as-a-ruleset",
+        "aethis_cli/commands/generate_cmd.py",
+        "rulebook_layer=_project_is_rulebook(project_dir)",
+        "rulebook_layer=False",
+        "a rulebook project's own fields.yaml may hold a collection or computed row",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_a_rulebook_project_root_may_not_hold_a_collection_row",
+        ),
+    ),
+    Mutation(
+        "merge-picks-a-winner-for-a-collection-key",
+        "aethis_cli/commands/generate_cmd.py",
+        "        conflicts = _rulebook_conflicts(own, rb_map)\n        if conflicts:",
+        "        conflicts = []\n        if conflicts:",
+        "the merge quietly lets a rulebook row replace a collection or computed key when validation was skipped",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_the_merge_itself_refuses_a_conflict_that_validation_should_have_caught",
+        ),
+    ),
+    Mutation(
+        "collection-labels-checked-against-no-members",
+        "aethis_cli/commands/generate_cmd.py",
+        "            if ftype == \"collection\":\n                # A collection's members are its items' members.",
+        "            if False:\n                # A collection's members are its items' members.",
+        "a label for a member a collection does not have is accepted",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_a_label_for_a_member_a_collection_does_not_have_is_refused",
+        ),
+    ),
+    Mutation(
+        "collection-support-gate-fails-open",
+        "aethis_cli/commands/generate_cmd.py",
+        "    advertised = client.expected_field_spec_properties(strict=True)\n    if not isinstance(advertised, set):",
+        "    advertised = client.expected_field_spec_properties(strict=True)\n    if not isinstance(advertised, set):\n        return\n    if False:",
+        "an unreadable engine schema lets items/computed be sent to an engine that may drop them",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_an_unreadable_engine_schema_refuses_a_collection_project[404]",
+            "tests/test_collection_and_computed_fields.py::test_an_unreadable_engine_schema_refuses_a_collection_project[schema-without-the-model]",
+        ),
+    ),
+    Mutation(
+        "collection-support-gate-runs-after-the-writes",
+        "aethis_cli/commands/generate_cmd.py",
+        "        check_collection_support(client, list(_merged_field_map(project_dir).values()))\n",
+        "",
+        "an engine that cannot keep items/computed is refused only after project, sources and guidance are written",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_a_refused_engine_is_refused_before_anything_is_created_or_uploaded[existing-project]",
+            "tests/test_collection_and_computed_fields.py::test_a_refused_engine_is_refused_before_anything_is_created_or_uploaded[no-project-yet]",
+        ),
+    ),
+    Mutation(
+        "null-computed-accepted",
+        "aethis_cli/commands/generate_cmd.py",
+        '        errors.append(f"Field {key!r} declares computed: null',
+        '        pass  # f"Field {key!r} declares computed: null',
+        "an explicit `computed: null` is treated as an absence",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_an_explicit_null_declaration_is_an_error_not_an_absence[field1-computed]",
+        ),
+    ),
+    Mutation(
+        "items-sort-unchecked",
+        "aethis_cli/commands/generate_cmd.py",
+        "            if not isinstance(sort, str) or not sort.strip():",
+        "            if False:",
+        "a collection's items without the sort the engine requires reach it",
+        detects=("tests/test_collection_and_computed_fields.py::test_items_must_carry_its_sort_as_text[items0]",),
+    ),
+    Mutation(
+        "collection-row-alias-by-type-not-refused",
+        "aethis_cli/commands/generate_cmd.py",
+        '    spelled = (str(row.get(k) or "").strip().lower() for k in ("sort", "type"))',
+        '    spelled = (str(row.get(k) or "").strip().lower() for k in ("sort",))',
+        "a rulebook row spelling the collection as `type` slips past the refusal",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_set_fields_refuses_any_collection_or_computed_row[row2]",
+        ),
+    ),
+    Mutation(
+        "pull-writes-server-collections",
+        "aethis_cli/commands/fields_cmd.py",
+        "    if not unsupported:\n        return\n",
+        "    return\n",
+        "pull writes a collection or computed field it cannot reconstruct",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_a_pull_refuses_collection_and_computed_fields_it_cannot_author_and_writes_nothing",
+            "tests/test_collection_and_computed_fields.py::test_a_refused_pull_has_made_no_engine_write_and_says_exactly_that",
+        ),
+    ),
+    Mutation(
+        "discover-overwrites-an-authored-key",
+        "aethis_cli/commands/fields_cmd.py",
+        "        if not key or key in field_map:\n            continue\n        ftype = _safe_field_type(df.get",
+        "        if not key:\n            continue\n        ftype = _safe_field_type(df.get",
+        "discovery replaces a collection or computed entry authored locally with a scalar",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_discover_does_not_overwrite_a_collection_or_computed_entry_already_authored",
+        ),
+    ),
+    Mutation(
+        "labels-membership-checked-despite-a-value-space",
+        "aethis_cli/commands/generate_cmd.py",
+        '            if not f.get("value_space") and isinstance(members, list):',
+        "            if isinstance(members, list):",
+        "a label for a registry member is refused because an inline list is empty or stale",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_labels_on_a_value_space_collection_are_never_membership_checked_locally[empty-inline-list]",
+        ),
+    ),
+    Mutation(
+        "gate-accepts-a-malformed-advertisement",
+        "aethis_cli/commands/generate_cmd.py",
+        "    advertised = client.expected_field_spec_properties(strict=True)",
+        "    advertised = client.expected_field_spec_properties()",
+        "a list-shaped ExpectedFieldSpec.properties is read as capability evidence",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_a_malformed_field_spec_advertisement_is_not_capability_evidence[list]",
+        ),
+    ),
+    Mutation(
+        "pull-rewrites-a-locally-declared-collection",
+        "aethis_cli/commands/fields_cmd.py",
+        "        if _is_collection_or_computed(field_map.get(key, {})):",
+        "        if False:",
+        "a pull overwrites the type and members of a collection or computed entry authored locally",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_a_pull_leaves_locally_declared_collection_and_computed_entries_exactly_as_authored",
+        ),
+    ),
+    Mutation(
+        "diff-reads-no-members-for-a-produced-collection",
+        "aethis_cli/commands/generate_cmd.py",
+        '    if str(schema_field.get("field_type") or "").strip().lower() == "collection":',
+        "    if False:",
+        "the post-generation diff reports every produced collection member as dropped",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_a_value_space_collection_whose_items_equal_the_space_is_verified_not_flagged",
+        ),
+    ),
+    Mutation(
+        "diff-reads-no-members-for-a-pinned-collection",
+        "aethis_cli/commands/generate_cmd.py",
+        '    if _field_type(field) == "collection":\n        items = field.get("items")',
+        '    if False:\n        items = field.get("items")',
+        "an inline collection pin opts out of the member diff, so a padded member set goes unreported",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_an_inline_collection_that_grew_a_member_still_warns",
+        ),
+    ),
+    Mutation(
+        "set-fields-skips-the-collection-row-check",
+        "aethis_cli/commands/rulebooks_cmd.py",
+        "    row_errors = rulebook_collection_row_errors(fields)\n",
+        "    row_errors = []\n",
+        "set-fields posts a collection/computed row the engine will refuse",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_set_fields_refuses_any_collection_or_computed_row[row0]",
+            "tests/test_collection_and_computed_fields.py::test_set_fields_refuses_any_collection_or_computed_row[row5]",
         ),
     ),
 ]
