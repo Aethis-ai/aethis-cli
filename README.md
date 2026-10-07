@@ -441,10 +441,15 @@ fields:
 ```
 
 Both are sent to the engine exactly as written, and `aethis generate` stops
-before uploading if the engine does not support them. A collection may name a
-`value_space` instead of listing `items.enum_values`, and has at most one
-computed field. Run `aethis fields validate` to check the file locally; the
-engine checks what the declarations mean.
+before creating or uploading anything if the engine does not support them or
+its schema cannot be read. Declare a collection and its computed field together
+in the ruleset's own `fields.yaml`; a rulebook's `fields.yaml` may mention such
+a key only by `key` and `type`. A collection may name a `value_space` instead
+of listing `items.enum_values`, and has at most one computed field. Run
+`aethis fields validate` to check the file locally; the engine checks what the
+declarations mean. `aethis fields pull` writes a collection with its `items`,
+but the engine does not publish a computed field's declaration, so author it
+locally.
 
 ### scenarios.yaml
 

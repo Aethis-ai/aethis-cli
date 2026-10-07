@@ -10,20 +10,20 @@ for public rulesets). The subcommands manage the local ``fields/fields.yaml``:
 
 from __future__ import annotations
 
+import copy
 from typing import Optional
 
 import typer
 from rich.table import Table
 
 from aethis_cli.commands.generate_cmd import (
+    _field_layer_errors,
     _load_yaml_file,
     _parse_fields_yaml,
     _resolve_or_create_project,
     _safe_field_type,
     _upload_sources,
     _write_fields_yaml,
-    enclosing_rulebook_fields,
-    validate_fields_list,
 )
 from aethis_cli.config import (
     load_client_or_anon,
@@ -227,6 +227,7 @@ def pull(
 
     server_keys = set()
     added = updated = 0
+    needs_computed: list[str] = []
     for sf in server_fields:
         key = sf.get("field_id")
         if not key:
@@ -246,6 +247,19 @@ def pull(
             entry["enum_values"] = sf["enum_values"]
         else:
             entry.pop("enum_values", None)
+        if entry["type"] == "collection":
+            # The engine publishes a collection's ``items`` object, so the
+            # server is authoritative for it. A row that carries none keeps
+            # whatever is authored locally.
+            if isinstance(sf.get("items"), dict):
+                entry["items"] = copy.deepcopy(sf["items"])
+        else:
+            entry.pop("items", None)
+        if sf.get("computed_from") and "computed" not in entry:
+            # The engine publishes only which collection a computed field reads
+            # (``computed_from``), never its ``{op, collection, values}``. It
+            # cannot be reconstructed, so none is guessed.
+            needs_computed.append(key)
         if sf.get("question"):
             entry["question"] = sf["question"]
         field_map[key] = entry
@@ -254,6 +268,12 @@ def pull(
 
     _write_fields_yaml(fields_path, field_map)
     success(f"Pulled {len(server_fields)} field(s): {added} added, {updated} updated.")
+    if needs_computed:
+        console.print(
+            f"[yellow]Computed from a collection, but the engine does not publish the declaration "
+            f"(op, collection, values): {', '.join(needs_computed)}. Its computed declaration must be authored "
+            f"locally in fields.yaml; until then the field is written as a plain bool.[/yellow]"
+        )
 
     local_only = sorted(set(field_map) - server_keys)
     if local_only:
@@ -275,13 +295,13 @@ def validate() -> None:
         console.print(f"[red]{fields_path} not found. Run 'aethis init' or 'aethis fields discover' first.[/red]")
         raise typer.Exit(code=1)
 
-    # Validate the raw list (not the de-duplicated map) so duplicate keys surface.
-    raw_fields = _load_yaml_file(fields_path).get("fields") or []
-    errors = validate_fields_list(raw_fields, external_fields=enclosing_rulebook_fields(cfg.config_path))
-    if errors:
-        console.print(f"[red]{fields_path} is invalid:[/red]")
+    # Validate the raw lists (not the de-duplicated map) so duplicate keys
+    # surface, and the enclosing rulebook's rows against this ruleset's keys.
+    for path, errors in _field_layer_errors(cfg.config_path)[:1]:
+        console.print(f"[red]{path} is invalid:[/red]")
         for e in errors:
             console.print(f"  [red]✗[/red] {e}")
         raise typer.Exit(code=1)
 
+    raw_fields = _load_yaml_file(fields_path).get("fields") or []
     success(f"fields.yaml is valid ({len(raw_fields)} field(s)).")
