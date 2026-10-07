@@ -22,6 +22,7 @@ from aethis_cli.commands.generate_cmd import (
     _safe_field_type,
     _upload_sources,
     _write_fields_yaml,
+    enclosing_rulebook_fields,
     validate_fields_list,
 )
 from aethis_cli.config import (
@@ -276,7 +277,7 @@ def validate() -> None:
 
     # Validate the raw list (not the de-duplicated map) so duplicate keys surface.
     raw_fields = _load_yaml_file(fields_path).get("fields") or []
-    errors = validate_fields_list(raw_fields)
+    errors = validate_fields_list(raw_fields, external_fields=enclosing_rulebook_fields(cfg.config_path))
     if errors:
         console.print(f"[red]{fields_path} is invalid:[/red]")
         for e in errors:

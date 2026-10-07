@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.48.0 (2026-10-07)
+
+- `fields.yaml` now accepts a `collection` field type and a `computed` declaration, and `aethis generate` carries both to the engine exactly as written. Previously the CLI rejected `collection` as an unknown type and did not send `items` or `computed`. Needs an engine that models them (0.68.0 or later). A collection is a multi-select over a closed set of members; a computed field is a yes/no fact derived from one collection rather than asked:
+
+  ```yaml
+  - key: crew.certifications_held
+    type: collection
+    question: Which certifications do you hold?
+    items:
+      sort: Enum
+      enum_values: [zero_g_operations, eva_basic, medical_officer]
+      max_items: 50
+      completion_question: Any other certifications?
+  - key: crew.holds_accepted_certification
+    type: bool
+    computed:
+      op: any_in
+      collection: crew.certifications_held
+      values: [eva_basic, medical_officer]
+  ```
+
+  The members may instead be a named `value_space` on the collection field, in which case `items.enum_values` can be left out. A collection may have at most one computed field reading it.
+- If the target engine does not model `items` or `computed`, `aethis generate` stops before uploading anything and names the missing property, rather than letting the engine accept the upload and drop it. Projects that declare neither are uploaded unchanged and the engine is not queried.
+- `aethis fields validate` and `aethis generate` check these declarations locally: a collection needs `items` and a source of members, `items` belongs only on a collection, `computed` belongs only on a yes/no field, must read a declared collection, must have at least one value to match, and no two computed fields may read the same collection. In a rulebook, a ruleset's computed field may read a collection the rulebook declares. Which operators exist, and whether the values match the members, are left to the engine.
+- `aethis fields pull` keeps `items` and `computed` as authored, and writes a server `Collection` back as `type: collection`.
+- `aethis rulebooks set-fields` refuses, before posting, a vocabulary row for a collection that carries anything beyond `key` and `sort`, and any row carrying `items` or `computed`. The engine does not accept a rulebook overriding those keys; declare them on the ruleset's own `fields.yaml`.
+
 ## 0.47.0 (2026-10-06)
 
 - Add `--thinking` to `aethis generate` and `aethis refine`. Explicit values

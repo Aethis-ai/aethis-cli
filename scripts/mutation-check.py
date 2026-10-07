@@ -251,7 +251,7 @@ MUTATIONS: List[Mutation] = [
         "        for prop in _ENGINE_GATED_FIELD_KEYS:\n"
         "            if prop in field:\n"
         "                value = field[prop]\n"
-        "                spec[prop] = dict(value) if isinstance(value, dict) else value\n",
+        "                spec[prop] = copy.deepcopy(value)\n",
         "",
         "authored wording and the storage-key pairing never reach the engine",
         detects=("tests/test_field_display_metadata_transport.py::test_upload_transmits_labels_and_canonical_field",),
@@ -454,6 +454,117 @@ MUTATIONS: List[Mutation] = [
         "both paths ask about the project pin, whatever they actually post",
         detects=(
             "tests/test_field_display_metadata_transport.py::test_set_fields_asks_about_the_rulebook_model_not_the_project_one",
+        ),
+    ),
+    # -- collection fields and computed declarations -------------------------
+    Mutation(
+        "items-not-carried-to-the-engine",
+        "aethis_cli/commands/generate_cmd.py",
+        '    "items",\n    # ``{op, collection, values}``',
+        "    # ``{op, collection, values}``",
+        "generate stops carrying a collection's authored items to the engine",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_upload_carries_items_and_computed_as_authored",
+            "tests/test_collection_and_computed_fields.py::test_an_engine_that_does_not_model_a_declaration_is_refused_before_the_push[items]",
+        ),
+    ),
+    Mutation(
+        "computed-not-carried-to-the-engine",
+        "aethis_cli/commands/generate_cmd.py",
+        '    "computed",\n    "enum_labels",',
+        '    "enum_labels",',
+        "generate stops carrying a computed declaration to the engine",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_upload_carries_items_and_computed_as_authored",
+            "tests/test_collection_and_computed_fields.py::test_an_engine_that_does_not_model_a_declaration_is_refused_before_the_push[computed]",
+        ),
+    ),
+    Mutation(
+        "payload-shares-structure-with-the-parsed-file",
+        "aethis_cli/commands/generate_cmd.py",
+        "                spec[prop] = copy.deepcopy(value)",
+        "                spec[prop] = value",
+        "the uploaded items/computed alias the parsed fields.yaml structure",
+        detects=("tests/test_collection_and_computed_fields.py::test_the_payload_is_a_copy_not_the_parsed_structure",),
+    ),
+    Mutation(
+        "items-computed-missing-from-canonical-key-order",
+        "aethis_cli/commands/generate_cmd.py",
+        '    "items",\n    "computed",\n    "enum_values",',
+        '    "enum_values",',
+        "a pull moves the declarations out of their modelled place in fields.yaml",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_write_back_keeps_both_declarations_in_their_modelled_place",
+        ),
+    ),
+    Mutation(
+        "collection-type-not-accepted",
+        "aethis_cli/commands/generate_cmd.py",
+        'VALID_FIELD_TYPES = {"int", "bool", "string", "enum", "date", "duration", "collection"}',
+        'VALID_FIELD_TYPES = {"int", "bool", "string", "enum", "date", "duration"}',
+        "a collection field is rejected as an unknown type again",
+        detects=("tests/test_collection_and_computed_fields.py::test_collection_is_an_accepted_field_type",),
+    ),
+    Mutation(
+        "collection-without-items-accepted",
+        "aethis_cli/commands/generate_cmd.py",
+        "        if items is None:\n"
+        "            errors.append(f\"Field {key!r} is type 'collection' but declares no items.\")\n"
+        "        elif not isinstance(items, dict):",
+        "        if items is None:\n            pass\n        elif not isinstance(items, dict):",
+        "a collection with no items declaration reaches the engine",
+        detects=("tests/test_collection_and_computed_fields.py::test_a_collection_without_items_is_rejected",),
+    ),
+    Mutation(
+        "computed-target-type-unchecked",
+        "aethis_cli/commands/generate_cmd.py",
+        '            if target_type != "collection":',
+        "            if False:",
+        "a computed field may read a field that is not a collection",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_computed_naming_a_field_that_is_not_a_collection_is_rejected",
+        ),
+    ),
+    Mutation(
+        "second-computed-reader-accepted",
+        "aethis_cli/commands/generate_cmd.py",
+        "        if len(readers_of) > 1 and key != readers_of[0]:",
+        "        if False:",
+        "two computed fields may read one collection",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_two_computed_fields_over_one_collection_are_rejected",
+        ),
+    ),
+    Mutation(
+        "member-validation-ignores-the-enclosing-rulebook",
+        "aethis_cli/commands/generate_cmd.py",
+        "            external_fields=external if path == own_path else None,",
+        "            external_fields=None,",
+        "a member's computed field reading a rulebook collection is refused as undeclared",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_upload_validates_a_member_against_the_rulebook_it_reads_from",
+        ),
+    ),
+    Mutation(
+        "fields-validate-ignores-the-enclosing-rulebook",
+        "aethis_cli/commands/fields_cmd.py",
+        "external_fields=enclosing_rulebook_fields(cfg.config_path)",
+        "external_fields=None",
+        "`aethis fields validate` refuses a member for reading a rulebook collection",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_fields_validate_resolves_a_collection_declared_in_the_enclosing_rulebook",
+        ),
+    ),
+    Mutation(
+        "set-fields-skips-the-collection-row-check",
+        "aethis_cli/commands/rulebooks_cmd.py",
+        "    row_errors = rulebook_collection_row_errors(fields)\n",
+        "    row_errors = []\n",
+        "set-fields posts a collection/computed row the engine will refuse",
+        detects=(
+            "tests/test_collection_and_computed_fields.py::test_set_fields_refuses_a_row_that_says_more_about_a_collection_or_computed_key[row0-items]",
+            "tests/test_collection_and_computed_fields.py::test_set_fields_refuses_a_row_that_says_more_about_a_collection_or_computed_key[row1-computed]",
+            "tests/test_collection_and_computed_fields.py::test_set_fields_refuses_a_row_that_says_more_about_a_collection_or_computed_key[row2-enum_values]",
         ),
     ),
 ]
