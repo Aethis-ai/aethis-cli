@@ -1,0 +1,103 @@
+name: Mutation
+
+# Narrowed 2026-10-08 (owner decision). The `contract oracle (mutation)` job
+# used to live in ci.yml and ran on every CI run; measured at ~12.8 minutes
+# against under a minute for every other job. It now runs:
+#
+#   - on pull requests and pushes to main that change a file it guards (the
+#     `paths:` lists below);
+#   - nightly on main, in full, whatever changed (the `schedule:` trigger);
+#   - on manual dispatch.
+#
+# Why this is a separate workflow rather than a path condition inside ci.yml:
+# a `schedule:` trigger at workflow level would start every job in ci.yml
+# nightly, and the other jobs there must not change. This job is not a
+# required status check and nothing `needs:` it, so a pull request that does
+# not touch the paths simply has no mutation run (no pending/blocked check).
+# The job keeps its old name, `contract oracle (mutation)`.
+#
+# How the path list was derived: scripts/mutation-check.py copies the WHOLE
+# working tree (excluding .git, .venv, build output and caches), mutates one
+# source file per run, and runs the entire tests/ directory against the copy.
+# So the result can depend on anything the tests or the harness read:
+#   aethis_cli/**           the code under mutation (and everything it imports)
+#   tests/**                the oracle being measured, and its fixtures
+#   scripts/**              the harness itself, plus helpers the tests invoke
+#   examples/**             fixture projects the tests load
+#   pyproject.toml          dependency ranges (there is no lockfile) and the
+#                           pytest configuration
+#   README.md, .gitignore   read by tests (documented-commands, init)
+#   this workflow file      the definition of the job
+# The list errs on the side of inclusion. Deliberately NOT listed: CHANGELOG.md,
+# CLAUDE.md, LICENSE, Makefile and the other workflow files, none of which the
+# suite reads.
+#
+# What this leaves unchecked until the nightly run: a change OUTSIDE that list
+# which alters the mutation result. In practice that is a dependency release
+# (pyproject.toml pins ranges only, so a newly published dependency can change
+# behaviour with no file here changing) and any file read by the suite that is
+# missing from the list above.
+#
+# To restore the old behaviour (run on every change): delete the `paths:` keys
+# under `push` and `pull_request`.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "aethis_cli/**"
+      - "tests/**"
+      - "scripts/**"
+      - "examples/**"
+      - "pyproject.toml"
+      - "README.md"
+      - ".gitignore"
+      - ".github/workflows/mutation.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "aethis_cli/**"
+      - "tests/**"
+      - "scripts/**"
+      - "examples/**"
+      - "pyproject.toml"
+      - "README.md"
+      - ".gitignore"
+      - ".github/workflows/mutation.yml"
+  schedule:
+    # 04:17 UTC nightly, off-peak; the schedule always runs on the default
+    # branch, and the job below has no path condition, so it runs in full.
+    - cron: "17 4 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  mutation:
+    # The contract tests are the only thing standing between a rejected input
+    # and a green exit status, so their ability to fail is itself gated: each
+    # mutation breaks the contract on purpose and must turn the suite red.
+    # A survivor is a hole in the oracle, and fails this job.
+    name: contract oracle (mutation)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Mutation check
+        run: uv run python scripts/mutation-check.py --output mutation.json
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mutation-report
+          path: mutation.json
