@@ -521,17 +521,31 @@ class AethisClient:
         model: Optional[GenerationModel] = None,
         deepseek_key: Optional[str] = None,
         thinking: str | None | object = _UNSET,
+        name: Optional[str] = None,
     ) -> dict:
         """Trigger generation. ``mode="refine"`` seeds from the section's active
         ruleset and makes the minimal edit to fix failing tests; omitting ``mode``
         (or ``mode="fresh"``) authors from scratch. A no-arg call sends no body, so
         it stays backwards-compatible against engines without the ``mode`` parameter.
+
+        ``name`` sets the human-readable ruleset name at generation time. An
+        engine that does not advertise it would silently drop it, so it is
+        capability-checked and refused rather than sent blind.
         """
         body: dict = {}
         if mode is not None:
             body["mode"] = mode
         if seed_ruleset_id is not None:
             body["seed_ruleset_id"] = seed_ruleset_id
+        if name is not None:
+            properties = self.generation_mode_request_properties(refresh=True)
+            if properties is None:
+                raise ValueError("The generation control schema could not be read; no generation was started")
+            if "name" not in properties:
+                raise ValueError(
+                    "This engine does not accept a ruleset name at generation time; no generation was started"
+                )
+            body["name"] = name
         if model is not None:
             body["model"] = GenerationModel(model).value
         # Presence matters: JSON null inherits the engine setting; an explicit
