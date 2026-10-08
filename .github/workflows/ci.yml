@@ -82,33 +82,13 @@ jobs:
             integrity-*.json
             hermetic-*.json
 
-  mutation:
-    # The contract tests are the only thing standing between a rejected input
-    # and a green exit status, so their ability to fail is itself gated: each
-    # mutation breaks the contract on purpose and must turn the suite red.
-    # A survivor is a hole in the oracle, and fails this job.
-    name: contract oracle (mutation)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.1.0
-
-      - name: Set up Python
-        run: uv python install 3.12
-
-      - name: Install dependencies
-        run: uv sync --extra dev
-
-      - name: Mutation check
-        run: uv run python scripts/mutation-check.py --output mutation.json
-
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: mutation-report
-          path: mutation.json
+  # The `contract oracle (mutation)` job no longer lives in this file. It takes
+  # ~12.8 minutes (every other job here is under a minute), so as of 2026-10-08
+  # it runs from .github/workflows/mutation.yml: on pull requests / pushes to
+  # main that touch the files it guards, nightly on main, and on manual
+  # dispatch. It lives in its own workflow because a `schedule:` trigger here
+  # would also start every job above nightly. See that file for the path list
+  # and how to restore the old behaviour.
 
   lint:
     runs-on: ubuntu-latest
