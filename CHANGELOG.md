@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.48.0 (unreleased)
+
+- `aethis generate` and `aethis refine` now send the optional `display_name:` key from `aethis.yaml` as the ruleset's name, not only `aethis publish`. A ruleset generated with `--no-publish` now carries its authored name instead of the default derived from the project id. Before any project change, the CLI checks the engine accepts a name at generation time, and stops with an error if it does not, rather than letting the name be silently dropped. When `display_name` is not set, the request is unchanged.
+
 ## 0.47.0 (2026-10-06)
 
 - Add `--thinking` to `aethis generate` and `aethis refine`. Explicit values

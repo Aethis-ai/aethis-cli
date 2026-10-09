@@ -64,7 +64,7 @@ class ProjectConfig:
     config_path: Path = field(default_factory=lambda: Path.cwd())
     deepseek_key_env: str = "DEEPSEEK_API_KEY"
     project_base_url: Optional[str] = None  # the project file's own value, exactly as written
-    display_name: Optional[str] = None  # optional human-readable ruleset name, sent on publish
+    display_name: Optional[str] = None  # optional human-readable ruleset name, sent on generate and publish
 
 
 def resolve_base_url_with_source() -> tuple[str, str]:

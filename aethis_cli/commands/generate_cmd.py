@@ -1380,6 +1380,20 @@ def _run_generate(
             )
             raise typer.Exit(code=1)
 
+    # The authored display_name (aethis.yaml) is sent on generate as well as on
+    # publish, so a ruleset generated with --no-publish still carries it. An
+    # engine without the control would silently drop it: refuse up front, before
+    # any project mutation, rather than generate a ruleset with the wrong name.
+    display_name = getattr(cfg, "display_name", None)
+    if display_name is not None:
+        properties = client.generation_mode_request_properties()
+        if properties is None or "name" not in properties:
+            console.print(
+                "[red]aethis.yaml sets display_name, but the target engine does not accept a ruleset name "
+                "at generation time. Stopping before any project, source, guidance, field, or test mutation.[/red]"
+            )
+            raise typer.Exit(code=1)
+
     # Fail-fast on empty sources: generation without any source documents wastes
     # 60-120s on the server and produces a cryptic LLM failure.
     if not _collect_source_files(project_dir):
@@ -1462,6 +1476,8 @@ def _run_generate(
             generation_options["deepseek_key"] = deepseek_key
         if thinking is not None:
             generation_options["thinking"] = thinking
+        if display_name is not None:
+            generation_options["name"] = display_name
         try:
             job = client.generate(pid, mode=mode, seed_ruleset_id=seed_ruleset_id, **generation_options)
         except ValueError as exc:
