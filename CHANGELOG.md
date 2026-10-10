@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.49.0 (unreleased)
+
+- Accept Collection authoring fields with inline item members or named value spaces, preserve their complete `items` declaration and item labels, and reject engines that cannot retain collection pins before generation mutations.
+
+- Preserve authored `computed` declarations on field-spec uploads, including `any_true` boolean aggregates and existing `any_in` computations. Refuse computation uploads unless the configured engine advertises the requested operation, including when its schema cannot be read.
+
 ## 0.48.0 (unreleased)
 
 - `aethis generate` and `aethis refine` now send the optional `display_name:` key from `aethis.yaml` as the ruleset's name, not only `aethis publish`. A ruleset generated with `--no-publish` now carries its authored name instead of the default derived from the project id. Before any project change, the CLI checks the engine accepts a name at generation time, and stops with an error if it does not, rather than letting the name be silently dropped. When `display_name` is not set, the request is unchanged.
