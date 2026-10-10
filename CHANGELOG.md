@@ -2,6 +2,8 @@
 
 ## 0.49.0 (unreleased)
 
+- Accept Collection authoring fields with inline item members or named value spaces, preserve their complete `items` declaration and item labels, and reject engines that cannot retain collection pins before generation mutations.
+
 - Preserve authored `computed` declarations on field-spec uploads, including `any_true` boolean aggregates and existing `any_in` computations. Refuse computation uploads unless the configured engine advertises the requested operation, including when its schema cannot be read.
 
 ## 0.48.0 (unreleased)

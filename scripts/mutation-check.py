@@ -367,7 +367,7 @@ MUTATIONS: List[Mutation] = [
     Mutation(
         "enum-labels-non-enum-check-dropped",
         "aethis_cli/commands/generate_cmd.py",
-        '            if ftype != "enum":',
+        '            if ftype not in {"enum", "collection"}:',
         "            if False:",
         "member wording is accepted on a field that has no members",
         detects=("tests/test_field_display_metadata_transport.py::test_validate_rejects_labels_on_a_non_enum_field",),
@@ -383,16 +383,16 @@ MUTATIONS: List[Mutation] = [
     Mutation(
         "metadata-missing-from-canonical-key-order",
         "aethis_cli/commands/generate_cmd.py",
-        '    "value_space",\n    "enum_labels",\n    "canonical_field",\n    "options_by",\n    "weight",',
-        '    "value_space",\n    "options_by",\n    "weight",',
+        '    "value_space",\n    "enum_labels",\n    "canonical_field",\n    "items",\n    "computed",\n    "options_by",\n    "weight",',
+        '    "value_space",\n    "items",\n    "computed",\n    "options_by",\n    "weight",',
         "a pull rewrites the metadata out of its modelled place in fields.yaml",
         detects=("tests/test_field_display_metadata_transport.py::test_fields_yaml_write_back_preserves_the_metadata",),
     ),
     Mutation(
         "options-by-missing-from-canonical-key-order",
         "aethis_cli/commands/generate_cmd.py",
-        '    "canonical_field",\n    "options_by",\n    "weight",',
-        '    "canonical_field",\n    "weight",',
+        '    "canonical_field",\n    "items",\n    "computed",\n    "options_by",\n    "weight",',
+        '    "canonical_field",\n    "items",\n    "computed",\n    "weight",',
         "a pull drops an explicitly empty options_by and moves it out of its modelled place",
         detects=(
             "tests/test_field_dependency_and_identity_transport.py::test_options_by_is_written_back_by_presence_next_to_the_display_metadata[value1]",

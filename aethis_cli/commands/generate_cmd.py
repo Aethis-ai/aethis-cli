@@ -655,7 +655,7 @@ def _field_guidance_lines(key: str, field: dict) -> list[str]:
 
 # The set of value types a ``fields.yaml`` entry may declare. Mirrors the
 # engine's accepted sorts (it normalises case + the long forms below).
-VALID_FIELD_TYPES = {"int", "bool", "string", "enum", "date", "duration"}
+VALID_FIELD_TYPES = {"int", "bool", "string", "enum", "date", "duration", "collection"}
 
 # The server speaks the long, public-facing type names; ``fields.yaml`` uses the
 # short canonical forms. Map server → on-disk so a pulled/discovered field reads
@@ -678,6 +678,7 @@ _FIELD_KEY_ORDER = (
     "value_space",
     "enum_labels",
     "canonical_field",
+    "items",
     "computed",
     "options_by",
     "weight",
@@ -696,6 +697,7 @@ _FIELD_KEY_ORDER = (
 _ENGINE_GATED_FIELD_KEYS = (
     "enum_labels",
     "canonical_field",
+    "items",
     "computed",
     # ``{field, map}``: narrows this enum field's suggested options by the
     # answer to an earlier field. Opaque to the CLI; the engine validates it.
@@ -780,10 +782,31 @@ def validate_fields_list(fields: list) -> list[str]:
                 f"mutually exclusive; the named reference is authoritative, so drop the "
                 f"inline members."
             )
-        if f.get("value_space") and ftype != "enum":
-            errors.append(f"Field {key!r} declares value_space but is type {ftype!r} — only enum fields may.")
+        if f.get("value_space") and ftype not in {"enum", "collection"}:
+            errors.append(
+                f"Field {key!r} declares value_space but is type {ftype!r} — only enum or collection fields may."
+            )
         if ftype == "enum" and not f.get("enum_values") and not f.get("value_space"):
             errors.append(f"Field {key!r} is type 'enum' but declares no enum_values (or value_space).")
+        items = f.get("items")
+        if ftype == "collection":
+            if not isinstance(items, dict) or str(items.get("sort", "")).lower() != "enum":
+                errors.append(f"Field {key!r} requires items with sort Enum.")
+            else:
+                members = items.get("enum_values")
+                if f.get("enum_values"):
+                    errors.append(f"Field {key!r} must declare collection members in items.enum_values.")
+                if f.get("value_space") and members:
+                    errors.append(f"Field {key!r} declares both value_space and items.enum_values.")
+                if not f.get("value_space") and not members:
+                    errors.append(f"Field {key!r} requires items.enum_values or a value_space.")
+                if members is not None and (
+                    not isinstance(members, list)
+                    or any(not isinstance(member, str) or not member for member in members)
+                ):
+                    errors.append(f"Field {key!r} items.enum_values must be a list of nonempty strings.")
+        elif items is not None:
+            errors.append(f"Field {key!r} declares items but is not a collection.")
         errors.extend(_validate_display_metadata(key, f, ftype))
         errors.extend(_validate_field_notes(key, f))
     return errors
@@ -812,8 +835,10 @@ def _validate_display_metadata(key: str, f: dict, ftype: str) -> list[str]:
         else:
             # An empty map is a legitimate declaration — the engine keeps it —
             # so the checks below simply have nothing to say about it.
-            if ftype != "enum":
-                errors.append(f"Field {key!r} declares enum_labels but is type {ftype!r} — only enum fields may.")
+            if ftype not in {"enum", "collection"}:
+                errors.append(
+                    f"Field {key!r} declares enum_labels but is type {ftype!r} — only enum or collection fields may."
+                )
             # Members are compared as text, so a non-text key can never match
             # one and is reported as its own fault rather than as a member the
             # field does not declare.
@@ -825,7 +850,11 @@ def _validate_display_metadata(key: str, f: dict, ftype: str) -> list[str]:
             )
             if bad:
                 errors.append(f"Field {key!r} has empty or non-text enum_labels for: {', '.join(bad)}.")
-            members = f.get("enum_values")
+            members = (
+                (f.get("items") or {}).get("enum_values")
+                if ftype == "collection" and isinstance(f.get("items"), dict)
+                else f.get("enum_values")
+            )
             if isinstance(members, list):
                 unknown = sorted(m for m in labels if isinstance(m, str) and m not in members)
                 if unknown:
@@ -1206,6 +1235,7 @@ def _push_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) ->
         guidance_lines.extend(_field_guidance_lines(key, field))
 
     _check_computation_support(client, expected_fields)
+    _check_collection_support(client, expected_fields)
 
     # Registry sync BEFORE spec-set (aethis-core#424, design note DX-6): the
     # engine resolves a value_space reference at the spec-set boundary, so
@@ -1223,6 +1253,16 @@ def _push_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) ->
     for line in guidance_lines:
         client.add_guidance(pid, line)
     info(f"Set field spec ({len(expected_fields)} field(s))")
+
+
+def _check_collection_support(client: AethisClient, fields: list[dict]) -> None:
+    """Refuse collection pins before mutation unless their shape can be retained."""
+    if not any(str(field.get("type") or field.get("sort")).lower() == "collection" for field in fields):
+        return
+    properties = client.expected_field_spec_properties()
+    if properties is None or "items" not in properties:
+        console.print("[red]Stopping before the push: the engine has not advertised collection items support.[/red]")
+        raise typer.Exit(code=1)
 
 
 def _check_computation_support(client: AethisClient, fields: list[dict]) -> None:
@@ -1435,6 +1475,7 @@ def _run_generate(
         # (guidance accumulates on the project) for a vocabulary that is invalid.
         _validate_project_fields(project_dir)
         _check_computation_support(client, list(_merged_field_map(project_dir).values()))
+        _check_collection_support(client, list(_merged_field_map(project_dir).values()))
         # Parse, validate, canonicalise and capability-check the complete test
         # plan before project creation, guidance, source, field or test writes.
         # The frozen snapshot is the payload uploaded later in this run.
