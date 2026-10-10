@@ -192,6 +192,26 @@ def test_collection_label_must_name_inline_item() -> None:
     )
 
 
+@pytest.mark.parametrize("item_sort", ["enum", "ENUM", " Enum "])
+def test_generate_refuses_noncanonical_collection_item_sort_before_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, item_sort: str
+) -> None:
+    from tests.test_generate_no_publish import _project, _engine, _wire, SUCCESS
+
+    _project(tmp_path)
+    fields = [{"key": "craft.parts", "type": "collection", "items": {"sort": item_sort, "enum_values": ["ion"]}}]
+    (tmp_path / "fields" / "fields.yaml").write_text(yaml.safe_dump({"fields": fields}))
+    client = _engine(SUCCESS)
+    client.expected_field_spec_properties.return_value = {"items"}
+    _wire(monkeypatch, tmp_path, client)
+    with pytest.raises(typer.Exit):
+        generate_cmd._run_generate(
+            project_id="p", mode="refine", extra_hint="Refine", poll=False, timeout=30, no_publish=True
+        )
+    for method in ("upload_sources", "add_guidance", "create_project", "set_field_spec", "generate"):
+        getattr(client, method).assert_not_called()
+
+
 @pytest.mark.parametrize("properties", [None, {"computed", "enum_labels"}])
 def test_generate_refuses_collection_before_mutation_when_items_not_supported(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, properties: set[str] | None

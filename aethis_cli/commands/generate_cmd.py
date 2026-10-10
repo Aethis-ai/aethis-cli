@@ -790,7 +790,7 @@ def validate_fields_list(fields: list) -> list[str]:
             errors.append(f"Field {key!r} is type 'enum' but declares no enum_values (or value_space).")
         items = f.get("items")
         if ftype == "collection":
-            if not isinstance(items, dict) or str(items.get("sort", "")).lower() != "enum":
+            if not isinstance(items, dict) or items.get("sort") != "Enum":
                 errors.append(f"Field {key!r} requires items with sort Enum.")
             else:
                 members = items.get("enum_values")
