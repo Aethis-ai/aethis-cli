@@ -678,6 +678,7 @@ _FIELD_KEY_ORDER = (
     "value_space",
     "enum_labels",
     "canonical_field",
+    "computed",
     "options_by",
     "weight",
     "elicitation_owner",
@@ -695,6 +696,7 @@ _FIELD_KEY_ORDER = (
 _ENGINE_GATED_FIELD_KEYS = (
     "enum_labels",
     "canonical_field",
+    "computed",
     # ``{field, map}``: narrows this enum field's suggested options by the
     # answer to an earlier field. Opaque to the CLI; the engine validates it.
     "options_by",
@@ -1203,6 +1205,8 @@ def _push_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) ->
         expected_fields.append(spec)
         guidance_lines.extend(_field_guidance_lines(key, field))
 
+    _check_computation_support(client, expected_fields)
+
     # Registry sync BEFORE spec-set (aethis-core#424, design note DX-6): the
     # engine resolves a value_space reference at the spec-set boundary, so
     # every locally-authored space must exist there first — and a pre-#424
@@ -1219,6 +1223,25 @@ def _push_field_vocabulary(client: AethisClient, pid: str, project_dir: Path) ->
     for line in guidance_lines:
         client.add_guidance(pid, line)
     info(f"Set field spec ({len(expected_fields)} field(s))")
+
+
+def _check_computation_support(client: AethisClient, fields: list[dict]) -> None:
+    """Require positive engine capability evidence before uploading computations."""
+    declarations = [f["computed"] for f in fields if f.get("computed") is not None]
+    if not declarations:
+        return
+    if any(not isinstance(value, dict) or not isinstance(value.get("op"), str) for value in declarations):
+        console.print("[red]Each computed declaration must be a mapping with a text op.[/red]")
+        raise typer.Exit(code=1)
+    operations = {value["op"] for value in declarations}
+    supported = client.expected_field_computation_operations()
+    if supported is None or not operations.issubset(supported):
+        console.print(
+            "[red]Stopping before the push: this engine has not advertised support for "
+            f"the authored computations ({', '.join(sorted(operations))}). "
+            "Check engine availability and upgrade it before retrying.[/red]"
+        )
+        raise typer.Exit(code=1)
 
 
 def check_display_metadata_support(client: AethisClient, fields: list[dict], *, rulebook: bool = False) -> None:
@@ -1411,6 +1434,7 @@ def _run_generate(
         # Local field validation first: nothing below may reach the engine
         # (guidance accumulates on the project) for a vocabulary that is invalid.
         _validate_project_fields(project_dir)
+        _check_computation_support(client, list(_merged_field_map(project_dir).values()))
         # Parse, validate, canonicalise and capability-check the complete test
         # plan before project creation, guidance, source, field or test writes.
         # The frozen snapshot is the payload uploaded later in this run.

@@ -431,6 +431,50 @@ class AethisClient:
         self._field_spec_properties[model] = answer
         return answer
 
+    def expected_field_computation_operations(self) -> Optional[set[str]]:
+        """Operations reachable from the project pin's computed OpenAPI property.
+
+        A pre-aggregate engine already advertises ``computed``; checking only
+        that property's presence would silently accept an unsupported operation.
+        Unreadable or malformed capability evidence returns unknown.
+        """
+        try:
+            response = self._client.get("/openapi.json", timeout=15.0)
+            response.raise_for_status()
+            schemas = response.json()["components"]["schemas"]
+            computed = schemas["ExpectedFieldSpec"]["properties"].get("computed")
+            if computed is None:
+                return set()
+            operations: set[str] = set()
+            visited: set[str] = set()
+
+            def visit(node: dict) -> None:
+                if not isinstance(node, dict):
+                    raise ValueError("Malformed computation schema")
+                reference = node.get("$ref")
+                if reference is not None:
+                    prefix = "#/components/schemas/"
+                    if not isinstance(reference, str) or not reference.startswith(prefix):
+                        raise ValueError("Unsupported computation reference")
+                    if reference not in visited:
+                        visited.add(reference)
+                        visit(schemas[reference[len(prefix) :]])
+                operation = node.get("properties", {}).get("op", {})
+                literals = operation.get("enum", [])
+                if "const" in operation:
+                    literals = [*literals, operation["const"]]
+                if not isinstance(literals, list) or any(not isinstance(value, str) for value in literals):
+                    raise ValueError("Malformed operation literals")
+                operations.update(literals)
+                for keyword in ("anyOf", "oneOf", "allOf"):
+                    for child in node.get(keyword, []):
+                        visit(child)
+
+            visit(computed)
+            return operations
+        except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError):
+            return None
+
     def expected_field_spec_properties(self) -> Optional[set[str]]:
         """What a *project* field pin may carry — the generation upload path."""
         return self._schema_properties("ExpectedFieldSpec")
