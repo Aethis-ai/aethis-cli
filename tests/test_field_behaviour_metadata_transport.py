@@ -194,3 +194,31 @@ fields:
         generate_cmd._upload_field_vocabulary(client, "proj_1", project)
 
     client.set_field_spec.assert_not_called()
+
+
+@pytest.mark.parametrize("supported", [False, True])
+def test_question_prerequisite_transported_or_refused_before_mutation(tmp_path, supported):
+    from aethis_cli.client import AethisClient
+
+    client = MagicMock(spec=AethisClient)
+    client.expected_field_spec_properties.return_value = SUPPORTED | ({"question_prerequisite"} if supported else set())
+    client.base_url = "https://engine.example"
+    project = _project(
+        tmp_path,
+        """fields:
+  - key: equipment.installed
+    type: bool
+  - key: equipment.serial
+    type: string
+    question_prerequisite: {field: equipment.installed, equals: true}
+""",
+    )
+    if supported:
+        generate_cmd._upload_field_vocabulary(client, "proj_1", project)
+        fields = client.set_field_spec.call_args.args[1]
+        assert fields[1]["question_prerequisite"] == {"field": "equipment.installed", "equals": True}
+    else:
+        with pytest.raises(typer.Exit):
+            generate_cmd._upload_field_vocabulary(client, "proj_1", project)
+        client.set_field_spec.assert_not_called()
+        client.add_guidance.assert_not_called()

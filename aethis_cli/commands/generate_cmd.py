@@ -679,6 +679,7 @@ _FIELD_KEY_ORDER = (
     "enum_labels",
     "canonical_field",
     "options_by",
+    "question_prerequisite",
     "weight",
     "elicitation_owner",
     "injection_source",
@@ -698,6 +699,7 @@ _ENGINE_GATED_FIELD_KEYS = (
     # ``{field, map}``: narrows this enum field's suggested options by the
     # answer to an earlier field. Opaque to the CLI; the engine validates it.
     "options_by",
+    "question_prerequisite",
     "label",
     "question",
     "weight",
