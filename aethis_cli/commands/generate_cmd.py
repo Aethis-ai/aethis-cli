@@ -685,6 +685,7 @@ _FIELD_KEY_ORDER = (
     "injection_phase",
     "recoverable_from",
     "x_ui_widget",
+    "route_label",
     "notes",
     "hints",
 )
@@ -706,6 +707,9 @@ _ENGINE_GATED_FIELD_KEYS = (
     "injection_phase",
     "recoverable_from",
     "x_ui_widget",
+    # An applicant-facing name for the way of meeting a requirement that this
+    # field opens. Opaque to the CLI; carried to the published schema.
+    "route_label",
     "notes",
 )
 
