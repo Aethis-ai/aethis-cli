@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.49.0 (unreleased)
+
+- `aethis generate` and `aethis refine` now send an optional `route_label:` declared on a field in `fields.yaml`: a short applicant-facing name for the way of meeting a requirement that the field opens (for example, `route_label: I passed an approved English test`). Before any project change, the CLI checks the engine accepts it, and stops with an error if it does not, rather than letting the label be silently dropped. Fields without `route_label` are sent exactly as before.
+
 ## 0.48.0 (unreleased)
 
 - `aethis generate` and `aethis refine` now send the optional `display_name:` key from `aethis.yaml` as the ruleset's name, not only `aethis publish`. A ruleset generated with `--no-publish` now carries its authored name instead of the default derived from the project id. Before any project change, the CLI checks the engine accepts a name at generation time, and stops with an error if it does not, rather than letting the name be silently dropped. When `display_name` is not set, the request is unchanged.
