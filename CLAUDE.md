@@ -64,8 +64,8 @@ Global flags:
 ## Architecture
 
 - [aethis_cli/commands/](aethis_cli/commands/) — one file per command group, Typer-based
-- [aethis_cli/state.py](aethis_cli/state.py) — reads/writes `.aethis/state.json` to keep the current `project_id`, last generation job, and published slug between invocations
-- All HTTP calls go through [aethis_cli/api.py](aethis_cli/api.py) against the configured `AETHIS_BASE_URL`. No direct Mongo access.
+- [aethis_cli/config.py](aethis_cli/config.py) — reads/writes `.aethis/state.json` to keep the current `project_id`, last generation job, and published slug between invocations
+- All HTTP calls go through [aethis_cli/client.py](aethis_cli/client.py) against the configured `AETHIS_BASE_URL`. No direct Mongo access.
 
 ## Gotchas
 

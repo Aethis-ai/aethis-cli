@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.49.1 (2026-10-15)
+
+- Correct the agent guide’s links to the configuration and HTTP client modules.
+
 ## 0.49.0 (unreleased)
 
 - `aethis generate` and `aethis refine` now send an optional `route_label:` declared on a field in `fields.yaml`: a short applicant-facing name for the way of meeting a requirement that the field opens (for example, `route_label: I passed an approved English test`). Before any project change, the CLI checks the engine accepts it, and stops with an error if it does not, rather than letting the label be silently dropped. Fields without `route_label` are sent exactly as before.
