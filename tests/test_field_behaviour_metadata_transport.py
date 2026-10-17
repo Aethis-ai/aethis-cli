@@ -216,3 +216,25 @@ fields:
         with pytest.raises(typer.Exit):
             generate_cmd._upload_field_vocabulary(client, "proj_1", project)
         client.set_field_spec.assert_not_called()
+
+
+@pytest.mark.parametrize("supported", [False, True])
+def test_route_met_label_transported_or_refused_before_mutation(tmp_path, supported):
+    client = _client(SUPPORTED | ({"route_met_label"} if supported else set()))
+    project = _project(
+        tmp_path,
+        """\
+fields:
+  - key: equipment.installed
+    type: bool
+    route_met_label: by having the equipment installed
+""",
+    )
+    if supported:
+        generate_cmd._upload_field_vocabulary(client, "proj_1", project)
+        fields = client.set_field_spec.call_args.args[1]
+        assert fields[0]["route_met_label"] == "by having the equipment installed"
+    else:
+        with pytest.raises(typer.Exit):
+            generate_cmd._upload_field_vocabulary(client, "proj_1", project)
+        client.set_field_spec.assert_not_called()

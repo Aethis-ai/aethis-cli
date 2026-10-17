@@ -686,6 +686,7 @@ _FIELD_KEY_ORDER = (
     "recoverable_from",
     "x_ui_widget",
     "route_label",
+    "route_met_label",
     "notes",
     "hints",
 )
@@ -710,6 +711,7 @@ _ENGINE_GATED_FIELD_KEYS = (
     # An applicant-facing name for the way of meeting a requirement that this
     # field opens. Opaque to the CLI; carried to the published schema.
     "route_label",
+    "route_met_label",
     "notes",
 )
 
