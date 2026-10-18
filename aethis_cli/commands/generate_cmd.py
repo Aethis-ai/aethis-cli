@@ -655,7 +655,17 @@ def _field_guidance_lines(key: str, field: dict) -> list[str]:
 
 # The set of value types a ``fields.yaml`` entry may declare. Mirrors the
 # engine's accepted sorts (it normalises case + the long forms below).
-VALID_FIELD_TYPES = {"int", "bool", "string", "enum", "date", "duration"}
+VALID_FIELD_TYPES = {"int", "bool", "string", "enum", "date", "duration", "collection"}
+
+# Types whose members come from ``enum_values`` / a named ``value_space`` and so
+# may carry ``enum_labels``. A collection's members are its items' members.
+_MEMBERED_FIELD_TYPES = {"enum", "collection"}
+
+# Structured declarations whose shape the ENGINE owns and validates (it
+# advertises each on the field-spec schema). The CLI checks only that each is a
+# mapping and sends it unchanged; a second copy of the engine's schema here
+# would drift from it and reject declarations the engine accepts.
+_ENGINE_SHAPED_FIELD_KEYS = ("items", "computed", "question_prerequisite")
 
 # The server speaks the long, public-facing type names; ``fields.yaml`` uses the
 # short canonical forms. Map server → on-disk so a pulled/discovered field reads
@@ -679,6 +689,9 @@ _FIELD_KEY_ORDER = (
     "enum_labels",
     "canonical_field",
     "options_by",
+    "items",
+    "computed",
+    "question_prerequisite",
     "weight",
     "elicitation_owner",
     "injection_source",
@@ -700,6 +713,12 @@ _ENGINE_GATED_FIELD_KEYS = (
     # ``{field, map}``: narrows this enum field's suggested options by the
     # answer to an earlier field. Opaque to the CLI; the engine validates it.
     "options_by",
+    # Collection item shape, engine-computed Bool declarations and the Boolean
+    # fact a question waits for. Shapes are the engine's; see
+    # ``_ENGINE_SHAPED_FIELD_KEYS``.
+    "items",
+    "computed",
+    "question_prerequisite",
     "label",
     "question",
     "weight",
@@ -740,7 +759,10 @@ def _safe_field_type(raw_type: Optional[str], enum_values: Optional[list]) -> st
     values (not a representable enum on disk). Both fall back to ``string``.
     """
     t = _normalise_field_type(raw_type)
-    if t not in VALID_FIELD_TYPES:
+    # A pulled/discovered row carries no ``items``, and a collection without
+    # them is not a valid fields.yaml entry, so it falls back like any other
+    # type the file could not round-trip (unchanged from before collections).
+    if t not in VALID_FIELD_TYPES or t == "collection":
         return "string"
     if t == "enum" and not enum_values:
         return "string"
@@ -784,10 +806,19 @@ def validate_fields_list(fields: list) -> list[str]:
                 f"mutually exclusive; the named reference is authoritative, so drop the "
                 f"inline members."
             )
-        if f.get("value_space") and ftype != "enum":
-            errors.append(f"Field {key!r} declares value_space but is type {ftype!r} — only enum fields may.")
+        if f.get("value_space") and ftype not in _MEMBERED_FIELD_TYPES:
+            errors.append(
+                f"Field {key!r} declares value_space but is type {ftype!r} — only enum and collection fields may."
+            )
         if ftype == "enum" and not f.get("enum_values") and not f.get("value_space"):
             errors.append(f"Field {key!r} is type 'enum' but declares no enum_values (or value_space).")
+        for prop in _ENGINE_SHAPED_FIELD_KEYS:
+            if prop in f and f[prop] is not None and not isinstance(f[prop], dict):
+                errors.append(f"Field {key!r} declares {prop} but it is not a mapping.")
+        if ftype == "collection" and not isinstance(f.get("items"), dict):
+            errors.append(f"Field {key!r} is type 'collection' but declares no items mapping.")
+        if f.get("items") is not None and ftype != "collection":
+            errors.append(f"Field {key!r} declares items but is type {ftype!r} — only collection fields may.")
         errors.extend(_validate_display_metadata(key, f, ftype))
         errors.extend(_validate_field_notes(key, f))
     return errors
@@ -816,8 +847,10 @@ def _validate_display_metadata(key: str, f: dict, ftype: str) -> list[str]:
         else:
             # An empty map is a legitimate declaration — the engine keeps it —
             # so the checks below simply have nothing to say about it.
-            if ftype != "enum":
-                errors.append(f"Field {key!r} declares enum_labels but is type {ftype!r} — only enum fields may.")
+            if ftype not in _MEMBERED_FIELD_TYPES:
+                errors.append(
+                    f"Field {key!r} declares enum_labels but is type {ftype!r} — only enum and collection fields may."
+                )
             # Members are compared as text, so a non-text key can never match
             # one and is reported as its own fault rather than as a member the
             # field does not declare.
@@ -1717,7 +1750,17 @@ def _report_field_diff(
         return
     schema_fields = schema.get("fields", []) or []
     produced = {f.get("field_id") for f in schema_fields if f.get("field_id")}
-    produced_members = {f["field_id"]: set(f.get("enum_values") or []) for f in schema_fields if f.get("field_id")}
+    # A collection's members are its items' members; the engine never sets a
+    # top-level enum_values on one.
+    produced_members = {
+        f["field_id"]: set(
+            f.get("enum_values")
+            or ((f.get("items") or {}).get("enum_values") if isinstance(f.get("items"), dict) else None)
+            or []
+        )
+        for f in schema_fields
+        if f.get("field_id")
+    }
 
     missing = sorted(pinned - produced)
     extra = sorted(produced - pinned)
