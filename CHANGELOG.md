@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.50.0 (unreleased)
+
+- `aethis generate` and `aethis refine` accept three field declarations the engine already supports, and send them exactly as written in `fields.yaml`:
+  - `type: collection` with an `items:` mapping (for example `items: {sort: Enum, min_items: 1}`). A collection may name a `value_space:` and carry `enum_labels:` for its item members.
+  - `computed:` on a Bool field, for a value the engine works out from other fields (for example `computed: {op: any_true, fields: [a.flag, b.flag]}`).
+  - `question_prerequisite:`, the Boolean fact a question waits for (for example `question_prerequisite: {field: owner.has_vehicles, equals: true}`).
+- The engine owns and checks the shape of all three; the CLI checks only that each is a mapping and that a collection declares `items`. As with other field metadata, the CLI stops before any project change if the engine does not accept a declared property. Fields without them are sent exactly as before. `aethis fields pull` keeps a collection already declared in `fields.yaml` as written, because a pulled field carries no item shape; a collection that exists only on the engine is still written as `string`. The check after generation reads a collection's members from its `items`.
+
 ## 0.49.2 (unreleased)
 
 - `aethis generate` and `aethis refine` now also send an optional `route_met_label:` declared on a field in `fields.yaml`, beside `route_label:`: a short phrase saying how the requirement is met on that route (for example, `route_met_label: by passing an approved test`). The same engine check applies: the CLI stops before any project change if the engine does not accept it. Fields without it are sent exactly as before.

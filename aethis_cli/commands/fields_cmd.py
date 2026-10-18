@@ -234,7 +234,12 @@ def pull(
         entry = dict(field_map.get(key, {}))  # preserve local label/hints
         existed = key in field_map
         entry["key"] = key
-        entry["type"] = _safe_field_type(sf.get("field_type"), sf.get("enum_values"))
+        if (entry.get("type") or "").strip().lower() == "collection" and isinstance(entry.get("items"), dict):
+            # A pulled row carries no item shape, so it cannot express a
+            # collection; keep the locally authored declaration intact.
+            pass
+        else:
+            entry["type"] = _safe_field_type(sf.get("field_type"), sf.get("enum_values"))
         if entry.get("value_space"):
             # A field pinned to a named value space keeps the reference and
             # NEVER materialises members locally — writing the server's
