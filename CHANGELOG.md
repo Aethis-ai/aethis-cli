@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.52.0 (2026-10-20)
+
+- `aethis generate` and `aethis refine` now pass an authored `presence_default_basis:` field key through to the engine. It records why a field's unanswered reading is meant to be the generous one, citing a source key, so that the engine's publish check can accept that default instead of refusing it:
+
+  ```yaml
+  - key: review.no_concern_recorded
+    type: bool
+    presence_default_basis:
+      reason: "Treated as met unless a reviewer records a concern."
+      source: "handbook#4.2"
+  ```
+
+  The CLI sends it exactly as written, and the engine checks its shape. Before any project change, the CLI checks that the engine accepts `presence_default_basis`, and stops with an error if it does not. Fields without it are sent exactly as before. `aethis fields pull` keeps the key in its place in `fields.yaml`.
+
 ## 0.51.0 (2026-10-20)
 
 - `aethis generate` and `aethis refine` now pass an authored `fact_links:` field key through to the engine. Previously the CLI dropped it without warning, so the published schema lacked the links. `fact_links` is a list of `{relation, field, why?}` entries that relate a field to another field recording a related fact:

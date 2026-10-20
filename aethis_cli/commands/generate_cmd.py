@@ -701,6 +701,7 @@ _FIELD_KEY_ORDER = (
     "route_label",
     "route_met_label",
     "fact_links",
+    "presence_default_basis",
     "notes",
     "hints",
 )
@@ -735,6 +736,10 @@ _ENGINE_GATED_FIELD_KEYS = (
     # ``[{relation, field, why?}]``: links this field to another field that
     # records a related fact. Opaque to the CLI; the engine validates it.
     "fact_links",
+    # ``{reason, source}``: why this field's unanswered reading is meant to be
+    # the generous one, citing a source key. Opaque to the CLI; the engine
+    # validates it.
+    "presence_default_basis",
     "notes",
 )
 

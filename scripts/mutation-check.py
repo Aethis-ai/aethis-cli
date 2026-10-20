@@ -409,10 +409,18 @@ MUTATIONS: List[Mutation] = [
     Mutation(
         "fact-links-not-projected-onto-the-pin",
         "aethis_cli/commands/generate_cmd.py",
-        '    "fact_links",\n    "notes",\n)',
-        '    "notes",\n)',
+        '    "fact_links",\n    # ``{reason, source}``',
+        "    # ``{reason, source}``",
         "generate stops carrying the authored fact_links to the engine",
         detects=("tests/test_fact_links_transport.py::test_fact_links_are_projected_onto_the_pin",),
+    ),
+    Mutation(
+        "presence-default-basis-not-projected-onto-the-pin",
+        "aethis_cli/commands/generate_cmd.py",
+        '    "presence_default_basis",\n    "notes",\n)',
+        '    "notes",\n)',
+        "generate stops carrying the authored presence_default_basis to the engine",
+        detects=("tests/test_presence_default_basis_transport.py::test_the_basis_is_projected_onto_the_pin",),
     ),
     Mutation(
         "structured-declarations-not-projected-onto-the-pin",
