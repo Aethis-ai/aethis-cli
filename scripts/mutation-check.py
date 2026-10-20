@@ -407,6 +407,14 @@ MUTATIONS: List[Mutation] = [
         detects=("tests/test_field_dependency_and_identity_transport.py::test_options_by_is_projected_onto_the_pin",),
     ),
     Mutation(
+        "fact-links-not-projected-onto-the-pin",
+        "aethis_cli/commands/generate_cmd.py",
+        '    "fact_links",\n    "notes",\n)',
+        '    "notes",\n)',
+        "generate stops carrying the authored fact_links to the engine",
+        detects=("tests/test_fact_links_transport.py::test_fact_links_are_projected_onto_the_pin",),
+    ),
+    Mutation(
         "structured-declarations-not-projected-onto-the-pin",
         "aethis_cli/commands/generate_cmd.py",
         '    "items",\n    "computed",\n    "question_prerequisite",\n    "label",',

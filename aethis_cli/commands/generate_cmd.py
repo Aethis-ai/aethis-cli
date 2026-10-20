@@ -700,6 +700,7 @@ _FIELD_KEY_ORDER = (
     "x_ui_widget",
     "route_label",
     "route_met_label",
+    "fact_links",
     "notes",
     "hints",
 )
@@ -731,6 +732,9 @@ _ENGINE_GATED_FIELD_KEYS = (
     # field opens. Opaque to the CLI; carried to the published schema.
     "route_label",
     "route_met_label",
+    # ``[{relation, field, why?}]``: links this field to another field that
+    # records a related fact. Opaque to the CLI; the engine validates it.
+    "fact_links",
     "notes",
 )
 
