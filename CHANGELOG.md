@@ -15,7 +15,7 @@
 
   The CLI sends the list exactly as written; the engine checks its shape. Before any project change, the CLI checks that the engine accepts `fact_links`, and stops with an error if it does not. Fields without `fact_links` are sent exactly as before. `aethis fields pull` keeps the key in its place in `fields.yaml`.
 
-## 0.50.0 (unreleased)
+## 0.50.0 (2026-10-18)
 
 - `aethis generate` and `aethis refine` accept three field declarations the engine already supports, and send them exactly as written in `fields.yaml`:
   - `type: collection` with an `items:` mapping (for example `items: {sort: Enum, min_items: 1}`). A collection may name a `value_space:` and carry `enum_labels:` for its item members.
