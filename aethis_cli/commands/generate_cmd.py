@@ -20,7 +20,7 @@ from rich.markup import escape
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 
 from aethis_cli._terminal_safe import safe_text
-from aethis_cli.client import AethisClient, GenerationModel, normalize_thinking
+from aethis_cli.client import DEEPSEEK_MODEL, AethisClient, normalize_thinking
 from aethis_cli.config import (
     load_project_config,
     make_authed_client,
@@ -1333,7 +1333,9 @@ def _upload_rulebook_guidance(client: AethisClient, pid: str, project_dir: Path)
 
 
 def generate(
-    model: Optional[GenerationModel] = typer.Option(None, "--model", help="Authoring model (default: claude-sonnet-5)"),
+    model: Optional[str] = typer.Option(
+        None, "--model", help="Authoring model id (default: the engine's choice; the engine validates it)"
+    ),
     thinking: Optional[str] = typer.Option(
         None, "--thinking", help="Per-generation thinking: disabled, adaptive, or enabled:N"
     ),
@@ -1384,7 +1386,7 @@ def _run_generate(
     seed_ruleset_id: Optional[str] = None,
     extra_hint: Optional[str] = None,
     no_publish: bool = False,
-    model: Optional[GenerationModel] = None,
+    model: Optional[str] = None,
     acceptance_contract: Optional[Path] = None,
     thinking: Optional[str] = None,
 ) -> None:
@@ -1401,17 +1403,11 @@ def _run_generate(
     except ValueError as e:
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(code=2) from None
-    if model is not None:
-        try:
-            model = GenerationModel(model)
-        except ValueError:
-            console.print("[red]Unsupported authoring model. Use claude-sonnet-5 or deepseek-flash.[/red]")
-            raise typer.Exit(code=2) from None
     try:
         cfg = load_project_config()
         api_key = resolve_api_key(cfg)
-        anthropic_key = None if model == GenerationModel.deepseek else resolve_anthropic_key(cfg)
-        deepseek_key = resolve_deepseek_key(cfg) if model == GenerationModel.deepseek else None
+        anthropic_key = None if model == DEEPSEEK_MODEL else resolve_anthropic_key(cfg)
+        deepseek_key = resolve_deepseek_key(cfg) if model == DEEPSEEK_MODEL else None
     except ConfigError as e:
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(code=1)

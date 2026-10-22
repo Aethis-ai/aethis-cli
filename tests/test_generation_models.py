@@ -10,7 +10,7 @@ import pytest
 import respx
 from typer.testing import CliRunner
 
-from aethis_cli.client import AethisClient, GenerationModel, normalize_thinking
+from aethis_cli.client import DEEPSEEK_MODEL, AethisClient, normalize_thinking
 from aethis_cli.commands import generate_cmd, refine_cmd
 from aethis_cli.config import load_project_config, resolve_deepseek_key
 from aethis_cli.main import app
@@ -25,7 +25,7 @@ def test_deepseek_generation_header_is_request_scoped(mode: str) -> None:
     discover = respx.post(f"{BASE}/api/v1/public/projects/p/fields/discover").respond(200, json={})
     review = respx.post(f"{BASE}/api/v1/public/projects/p/review").respond(200, json={})
     with AethisClient("ak", BASE) as client:
-        client.generate("p", mode=mode, model=GenerationModel.deepseek, deepseek_key="secret")
+        client.generate("p", mode=mode, model=DEEPSEEK_MODEL, deepseek_key="secret")
         client.discover_fields("p")
         client.review("p", coach=True)
     request = generate.calls.last.request
@@ -40,8 +40,8 @@ def test_deepseek_generation_header_is_request_scoped(mode: str) -> None:
 def test_explicit_sonnet_keeps_anthropic_transport() -> None:
     route = respx.post(f"{BASE}/api/v1/public/projects/p/generate").respond(202, json={})
     with AethisClient("ak", BASE, anthropic_key="anthropic") as client:
-        client.generate("p", model=GenerationModel.sonnet)
-    assert json.loads(route.calls.last.request.content) == {"model": "claude-sonnet-5"}
+        client.generate("p", model="claude-sonnet-5-5")
+    assert json.loads(route.calls.last.request.content) == {"model": "claude-sonnet-5-5"}
     assert route.calls.last.request.headers["X-Anthropic-Key"] == "anthropic"
     assert "X-DeepSeek-Key" not in route.calls.last.request.headers
 
@@ -49,7 +49,7 @@ def test_explicit_sonnet_keeps_anthropic_transport() -> None:
 def test_client_rejects_provider_key_mix() -> None:
     with AethisClient("ak", BASE, anthropic_key="anthropic") as client:
         with pytest.raises(ValueError, match="without an Anthropic"):
-            client.generate("p", model=GenerationModel.deepseek, deepseek_key="secret")
+            client.generate("p", model=DEEPSEEK_MODEL, deepseek_key="secret")
     with AethisClient("ak", BASE) as client:
         with pytest.raises(ValueError, match="requires model"):
             client.generate("p", deepseek_key="secret")
@@ -86,10 +86,12 @@ def test_flags_forward_model(command: str, monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(module, "_run_generate", run)
     result = CliRunner().invoke(app, [command, "--model", "deepseek-flash", "--no-poll"])
     assert result.exit_code == 0, result.output
-    assert run.call_args.kwargs["model"] == GenerationModel.deepseek
-    invalid = CliRunner().invoke(app, [command, "--model", "unknown"])
-    assert invalid.exit_code == 2
-    assert run.call_count == 1
+    assert run.call_args.kwargs["model"] == DEEPSEEK_MODEL
+    # Not a client-side list: any id is passed through for the engine to judge.
+    passthrough = CliRunner().invoke(app, [command, "--model", "claude-sonnet-5-5", "--no-poll"])
+    assert passthrough.exit_code == 0, passthrough.output
+    assert run.call_args.kwargs["model"] == "claude-sonnet-5-5"
+    assert run.call_count == 2
 
 
 @pytest.mark.parametrize("command", ["generate", "refine"])
@@ -139,7 +141,7 @@ def test_configurable_deepseek_env(tmp_path, monkeypatch: pytest.MonkeyPatch) ->
     assert resolve_deepseek_key(load_project_config(config)) == "default-secret"
 
 
-@pytest.mark.parametrize("model", [None, GenerationModel.sonnet, GenerationModel.deepseek])
+@pytest.mark.parametrize("model", [None, "claude-sonnet-5-5", DEEPSEEK_MODEL])
 def test_generation_resolves_only_selected_provider(model, tmp_path, monkeypatch) -> None:
     from tests.test_generate_no_publish import SUCCESS, _engine, _project, _wire
 
@@ -153,7 +155,7 @@ def test_generation_resolves_only_selected_provider(model, tmp_path, monkeypatch
     monkeypatch.setattr(generate_cmd, "resolve_deepseek_key", deepseek)
     monkeypatch.setattr(generate_cmd, "make_authed_client", factory)
     generate_cmd._run_generate(project_id="p", poll=False, timeout=30, model=model)
-    if model == GenerationModel.deepseek:
+    if model == DEEPSEEK_MODEL:
         anthropic.assert_not_called()
         deepseek.assert_called_once()
         assert factory.call_args.kwargs["anthropic_key"] is None
@@ -167,16 +169,6 @@ def test_generation_resolves_only_selected_provider(model, tmp_path, monkeypatch
         assert "model" not in client.generate.call_args.kwargs
     else:
         assert client.generate.call_args.kwargs["model"] == model
-
-
-def test_invalid_model_stops_before_project_loading(monkeypatch: pytest.MonkeyPatch) -> None:
-    import typer
-
-    load = MagicMock()
-    monkeypatch.setattr(generate_cmd, "load_project_config", load)
-    with pytest.raises(typer.Exit):
-        generate_cmd._run_generate(project_id="p", poll=False, timeout=30, model="typo")
-    load.assert_not_called()
 
 
 def test_project_config_preserves_positional_arguments(tmp_path) -> None:

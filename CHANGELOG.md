@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.53.0 (2026-10-23)
+
+- `aethis generate --model` and `aethis refine --model` no longer check the model name inside the CLI. The value is sent to the engine, which owns the list of allowed models and answers with the allowed values if it rejects one. Without `--model` the engine chooses its default. `claude-sonnet-5` is no longer offered; use the model ids your engine accepts (for example `claude-sonnet-5-5` or `deepseek-flash`).
+
 ## 0.52.0 (2026-10-20)
 
 - `aethis generate` and `aethis refine` now pass an authored `presence_default_basis:` field key through to the engine. It records why a field's unanswered reading is meant to be the generous one, citing a source key, so that the engine's publish check can accept that default instead of refusing it:

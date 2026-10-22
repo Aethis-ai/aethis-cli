@@ -121,8 +121,9 @@ aethis decide -i '{"space.crew.species": "Human", "space.crew.age": 35, "space.c
 
 See the example's [README](https://github.com/Aethis-ai/aethis-examples/blob/main/spacecraft-crew-certification/README.md) for what each scenario covers.
 
-Generation and refinement accept `--model claude-sonnet-5` (the default) or
-`--model deepseek-flash`. For DeepSeek, set `DEEPSEEK_API_KEY`; to use another
+Generation and refinement accept `--model <id>`. The engine owns the list of
+allowed models and rejects an unknown one with the allowed values; without
+`--model` the engine picks its default. For `--model deepseek-flash`, set `DEEPSEEK_API_KEY`; to use another
 environment variable, name it yourself with `AETHIS_DEEPSEEK_KEY_ENV` (see
 [Which keys are read, and where they go](#which-keys-are-read-and-where-they-go)).
 The DeepSeek credential is sent only with generation.

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -50,11 +49,10 @@ def normalize_thinking(thinking: str | None | object = _UNSET) -> str | None | o
     return f"enabled:{canonical}"
 
 
-class GenerationModel(str, Enum):
-    """Supported per-generation authoring models."""
-
-    sonnet = "claude-sonnet-5"
-    deepseek = "deepseek-flash"
+# The CLI does not own the list of authoring models: the engine validates
+# ``model`` and answers 422 with the allowed values. This constant exists only
+# to pick the credential transport (DeepSeek key header vs Anthropic key).
+DEEPSEEK_MODEL = "deepseek-flash"
 
 
 class AethisClient:
@@ -518,7 +516,7 @@ class AethisClient:
         mode: Optional[str] = None,
         seed_ruleset_id: Optional[str] = None,
         *,
-        model: Optional[GenerationModel] = None,
+        model: Optional[str] = None,
         deepseek_key: Optional[str] = None,
         thinking: str | None | object = _UNSET,
         name: Optional[str] = None,
@@ -547,7 +545,7 @@ class AethisClient:
                 )
             body["name"] = name
         if model is not None:
-            body["model"] = GenerationModel(model).value
+            body["model"] = model
         # Presence matters: JSON null inherits the engine setting; an explicit
         # string is validated by the engine before it admits the job.
         thinking = normalize_thinking(thinking)
@@ -560,10 +558,10 @@ class AethisClient:
                     "This engine does not advertise per-generation thinking controls; no generation was started"
                 )
             body["thinking"] = thinking
-        if deepseek_key and model != GenerationModel.deepseek:
+        if deepseek_key and model != DEEPSEEK_MODEL:
             raise ValueError("A DeepSeek key requires model=deepseek-flash")
         kwargs: dict[str, Any] = {"json": body} if body else {}
-        if model == GenerationModel.deepseek:
+        if model == DEEPSEEK_MODEL:
             if self._client.headers.get("X-Anthropic-Key"):
                 raise ValueError("Use a client without an Anthropic key for DeepSeek generation")
             if deepseek_key:

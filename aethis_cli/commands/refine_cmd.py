@@ -8,12 +8,13 @@ from pathlib import Path
 
 import typer
 
-from aethis_cli.client import GenerationModel
 from aethis_cli.commands.generate_cmd import _run_generate
 
 
 def refine(
-    model: Optional[GenerationModel] = typer.Option(None, "--model", help="Authoring model (default: claude-sonnet-5)"),
+    model: Optional[str] = typer.Option(
+        None, "--model", help="Authoring model id (default: the engine's choice; the engine validates it)"
+    ),
     thinking: Optional[str] = typer.Option(
         None, "--thinking", help="Per-generation thinking: disabled, adaptive, or enabled:N"
     ),
