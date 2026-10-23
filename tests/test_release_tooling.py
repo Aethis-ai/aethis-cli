@@ -248,3 +248,47 @@ def test_fetch_other_http_errors_still_raise(monkeypatch):
     monkeypatch.setattr(verify_published.urllib.request, "urlopen", boom)
     with pytest.raises(urllib.error.HTTPError):
         verify_published.fetch_files("1.0.0")
+
+
+# ---------------------------------------------------------------------------
+# Hermetic registry install (index lags an upload)
+# ---------------------------------------------------------------------------
+
+_LAG = "  x No solution found when resolving dependencies:\n  `-> there is no version of aethis-cli==1.0.0"
+
+
+def _install_run(results, retry_lag=True, attempts=4):
+    import subprocess
+
+    calls, sleeps = [], []
+
+    def run(argv, env, timeout=0):
+        calls.append(argv)
+        rc, err = results[min(len(calls), len(results)) - 1]
+        return subprocess.CompletedProcess(argv, rc, "", err)
+
+    out = hermetic._install(
+        ["uv"], {}, version="1.0.0", retry_lag=retry_lag, run=run, sleep=sleeps.append, attempts=attempts
+    )
+    return out, len(calls), sleeps
+
+
+def test_install_retries_registry_lag_then_passes():
+    out, calls, sleeps = _install_run([(1, _LAG), (1, _LAG), (0, "")])
+    assert out.returncode == 0 and calls == 3 and len(sleeps) == 2
+
+
+def test_install_registry_lag_forever_fails_after_the_bound():
+    out, calls, sleeps = _install_run([(1, _LAG)], attempts=4)
+    assert out.returncode == 1 and calls == 4 and len(sleeps) == 3
+
+
+def test_install_other_errors_fail_immediately():
+    conflict = "No solution found: aethis-cli==1.0.0 depends on httpx>=9, which cannot be satisfied"
+    out, calls, sleeps = _install_run([(1, conflict)])
+    assert out.returncode == 1 and calls == 1 and sleeps == []
+
+
+def test_install_from_dist_never_retries():
+    out, calls, sleeps = _install_run([(1, _LAG)], retry_lag=False)
+    assert calls == 1 and sleeps == []
