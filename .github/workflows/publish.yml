@@ -132,6 +132,7 @@ jobs:
           sparse-checkout: scripts/verify-published-digests.py
           sparse-checkout-cone-mode: false
           path: verifier
+          persist-credentials: false
 
       - name: Verify the published files match the built distribution
         # Same version string is not the same artefact. Compare the sha256 the

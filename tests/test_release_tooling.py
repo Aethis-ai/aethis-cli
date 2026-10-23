@@ -224,3 +224,29 @@ def test_verify_missing_forever_fails_after_the_bound():
     failures, calls, sleeps = _run([[]], attempts=4)
     assert calls == 4 and len(sleeps) == 3
     assert sorted(failures) == ["sdist missing from the registry", "wheel missing from the registry"]
+
+
+def test_verify_empty_distribution_fails_closed():
+    assert verify_published.verify("1.0.0", {}, fetch=lambda v: _files(), sleep=lambda d: None)
+
+
+@pytest.mark.parametrize("code", [429, 500, 503])
+def test_fetch_treats_transient_http_errors_as_retryable(monkeypatch, code):
+    import urllib.error
+
+    def boom(*a, **k):
+        raise urllib.error.HTTPError("u", code, "x", None, None)
+
+    monkeypatch.setattr(verify_published.urllib.request, "urlopen", boom)
+    assert verify_published.fetch_files("1.0.0") == []
+
+
+def test_fetch_other_http_errors_still_raise(monkeypatch):
+    import urllib.error
+
+    def boom(*a, **k):
+        raise urllib.error.HTTPError("u", 403, "x", None, None)
+
+    monkeypatch.setattr(verify_published.urllib.request, "urlopen", boom)
+    with pytest.raises(urllib.error.HTTPError):
+        verify_published.fetch_files("1.0.0")

@@ -33,9 +33,11 @@ def fetch_files(version: str) -> list[dict]:
         with urllib.request.urlopen(URL.format(version=version), timeout=REQUEST_TIMEOUT) as fh:
             return json.load(fh).get("urls", [])
     except urllib.error.HTTPError as err:
-        if err.code == 404:  # version not indexed yet
-            return []
+        if err.code == 404 or err.code == 429 or err.code >= 500:
+            return []  # not indexed yet, or a transient registry error: retry
         raise
+    except (urllib.error.URLError, TimeoutError):
+        return []  # transient network error: retry within the bound
 
 
 def check(built: dict, published: list[dict]) -> tuple[list[str], list[str]]:
@@ -67,6 +69,8 @@ def verify(
     max_delay: float = 40.0,
 ) -> list[str]:
     """Failures after polling; empty means every built file matches."""
+    if not built:
+        return ["no built distribution files in the evidence; nothing to verify"]
     delay = 5.0
     failures: list[str] = []
     for attempt in range(1, attempts + 1):
