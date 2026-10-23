@@ -42,7 +42,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 REPO = Path(__file__).resolve().parent.parent
 INSTALL_TIMEOUT = 600
@@ -108,6 +108,43 @@ def _install_spec(source: str, version: str, dist: Path) -> str:
     if not candidates:
         raise CheckFailed(f"no wheel for {version} in {dist} -- run `uv build` first")
     return str(candidates[0])
+
+
+def _not_yet_indexed(stderr: str, version: str) -> bool:
+    """True only for "the registry does not list this version yet".
+
+    Right after an upload the simple index lags, so uv reports that no
+    `aethis-cli==<version>` exists. Dependency conflicts, build errors and
+    network failures read differently and are never treated as lag.
+    """
+    return f"there is no version of aethis-cli=={version}" in stderr
+
+
+def _install(
+    argv: List[str],
+    env: Dict[str, str],
+    *,
+    version: str,
+    retry_lag: bool,
+    run: Callable[..., subprocess.CompletedProcess] = _run,
+    sleep: Callable[[float], None] = time.sleep,
+    attempts: int = 12,
+    max_delay: float = 40.0,
+) -> subprocess.CompletedProcess:
+    """Run the install; retry only the registry-lag failure, within a bound."""
+    delay = 5.0
+    for attempt in range(1, attempts + 1):
+        result = run(argv, env, timeout=INSTALL_TIMEOUT)
+        if result.returncode == 0 or not retry_lag or not _not_yet_indexed(result.stderr, version):
+            return result
+        if attempt < attempts:
+            print(
+                f"hermetic: attempt {attempt}/{attempts}: {version} not in the registry index yet; retrying in {delay:.0f}s",
+                file=sys.stderr,
+            )
+            sleep(delay)
+            delay = min(delay * 2, max_delay)
+    return result
 
 
 def _poison(root: Path, env: Dict[str, str]) -> None:
@@ -191,11 +228,10 @@ def run_check(
         spec = _install_spec(source, version, dist)
         record["install_spec"] = spec
         install_started = time.monotonic()
-        installed = _run(
-            [uv, "pip", "install", "--no-cache", "--python", str(venv / "bin" / "python"), spec],
-            env,
-            timeout=INSTALL_TIMEOUT,
-        )
+        install_argv = [uv, "pip", "install", "--no-cache", "--python", str(venv / "bin" / "python"), spec]
+        if source == "registry":
+            install_argv.insert(3, "--refresh")  # re-query the index, never reuse a cached miss
+        installed = _install(install_argv, env, version=version, retry_lag=source == "registry")
         record["install_seconds"] = round(time.monotonic() - install_started, 2)
         if installed.returncode != 0:
             raise CheckFailed(f"install failed: {installed.stderr.strip()[:2000]}")
