@@ -596,7 +596,7 @@ class AethisClient:
                 )
             body["thinking"] = thinking
         if deepseek_key and not is_deepseek_model(model):
-            raise ValueError("A DeepSeek key requires a deepseek-* model")
+            raise ValueError("A DeepSeek key requires model=deepseek-*")
         kwargs: dict[str, Any] = {"json": body} if body else {}
         if is_deepseek_model(model):
             if self._client.headers.get("X-Anthropic-Key"):
