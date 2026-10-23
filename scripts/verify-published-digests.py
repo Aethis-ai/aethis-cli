@@ -51,8 +51,7 @@ def check(built: dict, published: list[dict]) -> tuple[list[str], list[str]]:
             missing.append(f"{kind} missing from the registry")
         elif remote["digests"]["sha256"] != local["sha256"]:
             mismatched.append(
-                f"{kind} digest mismatch: built {local['sha256']}, registry "
-                f"{remote['digests']['sha256']}"
+                f"{kind} digest mismatch: built {local['sha256']}, registry {remote['digests']['sha256']}"
             )
         else:
             print(f"{kind}: {remote['filename']} sha256={local['sha256']} matches the build")

@@ -202,9 +202,7 @@ def _run(readings, attempts=4):
         calls.append(version)
         return readings[min(len(calls), len(readings)) - 1]
 
-    failures = verify_published.verify(
-        "1.0.0", _BUILT, fetch=fetch, sleep=sleeps.append, attempts=attempts
-    )
+    failures = verify_published.verify("1.0.0", _BUILT, fetch=fetch, sleep=sleeps.append, attempts=attempts)
     return failures, len(calls), sleeps
 
 
