@@ -1433,7 +1433,7 @@ def _run_generate(
             raise typer.Exit(code=1)
         if model not in allowed:
             console.print(
-                f"[red]Unsupported authoring model {escape(safe_text(model))!r}. "
+                f"[red]Unsupported authoring model {escape(repr(safe_text(model)))}. "
                 f"This engine accepts: {', '.join(sorted(allowed))}.[/red]"
             )
             raise typer.Exit(code=2)

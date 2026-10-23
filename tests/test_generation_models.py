@@ -313,3 +313,18 @@ def test_deepseek_prefix_routes_credentials() -> None:
     assert is_deepseek_model(" deepseek-next ")
     assert not is_deepseek_model("claude-sonnet-5-5")
     assert not is_deepseek_model(None)
+
+
+def test_unknown_model_with_markup_is_rendered_literally(tmp_path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    import typer
+
+    from tests.test_generate_no_publish import SUCCESS, _engine, _project, _wire
+
+    _project(tmp_path)
+    client = _engine(SUCCESS)
+    client.generation_models.return_value = MODELS
+    _wire(monkeypatch, tmp_path, client)
+    with pytest.raises(typer.Exit) as stopped:
+        generate_cmd._run_generate(project_id="p", poll=False, timeout=30, model="evil[/red]")
+    assert stopped.value.exit_code == 2
+    assert "evil[/red]" in capsys.readouterr().out
