@@ -177,3 +177,50 @@ def test_scripts_emit_machine_readable_records(tmp_path):
     (dist / f"aethis_cli-{version}-py3-none-any.whl").write_bytes(b"y")
     record = integrity.build_record(dist, verify_registry=False)
     assert json.loads(json.dumps(record)) == record
+
+
+# ---------------------------------------------------------------------------
+# Published-digest verification (registry index lags an upload)
+# ---------------------------------------------------------------------------
+
+verify_published = _load("verify_published_digests", "verify-published-digests.py")
+
+_BUILT = {"wheel": {"sha256": "aaa"}, "sdist": {"sha256": "bbb"}}
+
+
+def _files(wheel="aaa", sdist="bbb"):
+    return [
+        {"packagetype": "bdist_wheel", "filename": "w.whl", "digests": {"sha256": wheel}},
+        {"packagetype": "sdist", "filename": "s.tar.gz", "digests": {"sha256": sdist}},
+    ]
+
+
+def _run(readings, attempts=4):
+    calls, sleeps = [], []
+
+    def fetch(version):
+        calls.append(version)
+        return readings[min(len(calls), len(readings)) - 1]
+
+    failures = verify_published.verify(
+        "1.0.0", _BUILT, fetch=fetch, sleep=sleeps.append, attempts=attempts
+    )
+    return failures, len(calls), sleeps
+
+
+def test_verify_retries_until_files_appear():
+    failures, calls, sleeps = _run([[], _files()[:1], _files()])
+    assert failures == []
+    assert calls == 3 and len(sleeps) == 2
+
+
+def test_verify_digest_mismatch_fails_immediately():
+    failures, calls, sleeps = _run([_files(sdist="evil")])
+    assert calls == 1 and sleeps == []
+    assert failures and "sdist digest mismatch" in failures[0]
+
+
+def test_verify_missing_forever_fails_after_the_bound():
+    failures, calls, sleeps = _run([[]], attempts=4)
+    assert calls == 4 and len(sleeps) == 3
+    assert sorted(failures) == ["sdist missing from the registry", "wheel missing from the registry"]
