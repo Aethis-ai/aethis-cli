@@ -12,6 +12,7 @@ import typer
 
 from aethis_cli.commands import generate_cmd
 from aethis_cli.config import read_state, write_state
+from aethis_cli.errors import AethisAPIError
 
 
 # --- helpers ---------------------------------------------------------------
@@ -321,6 +322,87 @@ def test_changed_source_is_superseded_then_linked_to_replacement(tmp_path):
         (("proj_1", "src_old"), {"status": "superseded"}),
         (("proj_1", "src_old"), {"status": "superseded", "superseded_by": "src_new"}),
     ]
+
+
+@pytest.mark.parametrize("legacy_row", [{"raw_sha256": None}, {}], ids=["raw-none", "raw-absent"])
+def test_active_source_without_raw_digest_is_uploaded_not_superseded(tmp_path, legacy_row):
+    # aethis-core#572: a source uploaded before the engine kept raw digests has
+    # no raw_sha256. That means "unknown", not "changed": upload it as normal so
+    # the engine can reuse the same source id, never supersede it first.
+    src = tmp_path / "sources"
+    src.mkdir()
+    (src / "law.md").write_text("same law")
+    client = MagicMock()
+    client.list_sources.return_value = {
+        "sources": [{"source_id": "src_july", "filename": "law.md", "status": "active", **legacy_row}]
+    }
+    client.upload_sources.return_value = {
+        "new": 0,
+        "reused": 1,
+        "sources": [{"source_id": "src_july", "filename": "law.md", "reused": True}],
+    }
+
+    summary = generate_cmd._upload_sources(client, "proj_1", tmp_path)
+
+    assert summary == generate_cmd.UploadSummary(new=0, reused=1)
+    client.update_source.assert_not_called()
+    assert client.upload_sources.call_count == 1
+    [(_, sent), _] = client.upload_sources.call_args
+    assert [p.name for p in sent] == ["law.md"]
+
+
+def test_changed_source_without_raw_digest_falls_back_to_replacement(tmp_path):
+    # No recorded digest and the file really changed: the engine refuses the
+    # ordinary upload with 409, and the CLI then replaces the source as before.
+    src = tmp_path / "sources"
+    src.mkdir()
+    (src / "law.md").write_text("edited law")
+    client = MagicMock()
+    client.list_sources.return_value = {
+        "sources": [{"source_id": "src_july", "filename": "law.md", "status": "active", "raw_sha256": None}]
+    }
+    refusal = AethisAPIError(
+        409,
+        {"error": "conflict", "reason_code": "active_filename_has_changed_content", "source_id": "src_july"},
+    )
+    client.upload_sources.side_effect = [
+        refusal,
+        {"new": 1, "reused": 0, "sources": [{"source_id": "src_new", "filename": "law.md", "reused": False}]},
+    ]
+
+    summary = generate_cmd._upload_sources(client, "proj_1", tmp_path)
+
+    assert summary == generate_cmd.UploadSummary(new=1, reused=0)
+    assert client.upload_sources.call_count == 2
+    assert client.update_source.call_args_list == [
+        (("proj_1", "src_july"), {"status": "superseded"}),
+        (("proj_1", "src_july"), {"status": "superseded", "superseded_by": "src_new"}),
+    ]
+
+
+@pytest.mark.parametrize(
+    "refusal",
+    [
+        AethisAPIError(409, {"reason_code": "source_reactivation_required"}),
+        AethisAPIError(500, {"reason_code": "active_filename_has_changed_content"}),
+        AethisAPIError(409, "plain text conflict"),
+    ],
+    ids=["other-409", "not-409", "unstructured"],
+)
+def test_other_errors_on_digestless_upload_are_raised_without_superseding(tmp_path, refusal):
+    src = tmp_path / "sources"
+    src.mkdir()
+    (src / "law.md").write_text("law")
+    client = MagicMock()
+    client.list_sources.return_value = {
+        "sources": [{"source_id": "src_july", "filename": "law.md", "status": "active"}]
+    }
+    client.upload_sources.side_effect = refusal
+
+    with pytest.raises(AethisAPIError):
+        generate_cmd._upload_sources(client, "proj_1", tmp_path)
+
+    client.update_source.assert_not_called()
 
 
 def test_failed_replacement_upload_reactivates_old_source(tmp_path):

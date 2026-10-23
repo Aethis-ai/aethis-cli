@@ -543,10 +543,18 @@ def _upload_sources(client: AethisClient, pid: str, project_dir: Path) -> Upload
     }
     replacements: list[tuple[Path, dict]] = []
     ordinary: list[Path] = []
+    unknown: list[tuple[Path, dict]] = []
     for path in to_upload:
         active = active_by_filename.get(path.name)
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        if active and active.get("raw_sha256") != digest:
+        if not active:
+            ordinary.append(path)
+        elif active.get("raw_sha256") is None:
+            # Uploaded before the engine recorded file digests, so whether the
+            # file changed is unknown. Upload it normally first so the engine
+            # can keep the same source id when it is the same file.
+            unknown.append((path, active))
+        elif active["raw_sha256"] != digest:
             replacements.append((path, active))
         else:
             ordinary.append(path)
@@ -554,6 +562,21 @@ def _upload_sources(client: AethisClient, pid: str, project_dir: Path) -> Upload
     summary = UploadSummary(new=0, reused=0)
     for batch in _chunks(ordinary, 5):
         counts = _upload_counts(client.upload_sources(pid, batch) or {})
+        summary = UploadSummary(new=summary.new + counts.new, reused=summary.reused + counts.reused)
+
+    # One at a time, so a refusal names exactly one file. Only the engine's
+    # "this name already holds different content" refusal means the file did
+    # change; that one goes through the replacement flow below.
+    for path, prior in unknown:
+        try:
+            response = client.upload_sources(pid, [path]) or {}
+        except AethisAPIError as exc:
+            detail = exc.detail if isinstance(exc.detail, Mapping) else {}
+            if exc.status_code == 409 and detail.get("reason_code") == "active_filename_has_changed_content":
+                replacements.append((path, prior))
+                continue
+            raise
+        counts = _upload_counts(response)
         summary = UploadSummary(new=summary.new + counts.new, reused=summary.reused + counts.reused)
 
     for path, prior in replacements:
