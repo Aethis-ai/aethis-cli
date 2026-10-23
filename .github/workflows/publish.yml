@@ -125,40 +125,27 @@ jobs:
           done
           exit 1
 
+      - name: Check out the verifier script at the release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          sparse-checkout: scripts/verify-published-digests.py
+          sparse-checkout-cone-mode: false
+          path: verifier
+          persist-credentials: false
+
       - name: Verify the published files match the built distribution
         # Same version string is not the same artefact. Compare the sha256 the
         # registry serves against the digests recorded when these bytes were
-        # built, so a substituted file cannot pass as this release.
+        # built, so a substituted file cannot pass as this release. The
+        # registry index lags an upload, so absence is retried within a bound;
+        # a digest mismatch fails at once.
         env:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
-          VERSION="${RELEASE_TAG#v}" python3 - <<'PY'
-          import json, os, sys, urllib.request
-
-          version = os.environ["VERSION"]
-          built = json.load(open("evidence/release-integrity.json"))["distribution"]
-          with urllib.request.urlopen("https://pypi.org/pypi/aethis-cli/json", timeout=30) as fh:
-              published = json.load(fh)["releases"].get(version, [])
-
-          by_kind = {
-              "wheel" if f["packagetype"] == "bdist_wheel" else "sdist": f for f in published
-          }
-          failures = []
-          for kind, local in built.items():
-              remote = by_kind.get(kind)
-              if remote is None:
-                  failures.append(f"{kind} missing from the registry")
-              elif remote["digests"]["sha256"] != local["sha256"]:
-                  failures.append(
-                      f"{kind} digest mismatch: built {local['sha256']}, registry "
-                      f"{remote['digests']['sha256']}"
-                  )
-              else:
-                  print(f"{kind}: {remote['filename']} sha256={local['sha256']} matches the build")
-          if failures:
-              sys.exit("; ".join(failures))
-          PY
+          python3 verifier/scripts/verify-published-digests.py \
+            --version "${RELEASE_TAG#v}" --evidence evidence/release-integrity.json
 
       - name: Check out repo at the published tag (for CHANGELOG.md)
         uses: actions/checkout@v6
