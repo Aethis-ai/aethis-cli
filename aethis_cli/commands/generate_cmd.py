@@ -546,7 +546,12 @@ def _upload_sources(client: AethisClient, pid: str, project_dir: Path) -> Upload
     for path in to_upload:
         active = active_by_filename.get(path.name)
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        if active and active.get("raw_sha256") != digest:
+        # A source uploaded before the engine recorded raw digests has none.
+        # That is "unknown", not "changed": upload it normally and let the
+        # engine decide whether it is the same file (it then keeps the same
+        # source id). Only a recorded digest that differs is a replacement.
+        known_digest = active.get("raw_sha256") if active else None
+        if active and known_digest is not None and known_digest != digest:
             replacements.append((path, active))
         else:
             ordinary.append(path)

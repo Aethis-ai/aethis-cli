@@ -323,6 +323,33 @@ def test_changed_source_is_superseded_then_linked_to_replacement(tmp_path):
     ]
 
 
+@pytest.mark.parametrize("legacy_row", [{"raw_sha256": None}, {}], ids=["raw-none", "raw-absent"])
+def test_active_source_without_raw_digest_is_uploaded_not_superseded(tmp_path, legacy_row):
+    # aethis-core#572: a source uploaded before the engine kept raw digests has
+    # no raw_sha256. That means "unknown", not "changed": upload it as normal so
+    # the engine can reuse the same source id, never supersede it first.
+    src = tmp_path / "sources"
+    src.mkdir()
+    (src / "law.md").write_text("same law")
+    client = MagicMock()
+    client.list_sources.return_value = {
+        "sources": [{"source_id": "src_july", "filename": "law.md", "status": "active", **legacy_row}]
+    }
+    client.upload_sources.return_value = {
+        "new": 0,
+        "reused": 1,
+        "sources": [{"source_id": "src_july", "filename": "law.md", "reused": True}],
+    }
+
+    summary = generate_cmd._upload_sources(client, "proj_1", tmp_path)
+
+    assert summary == generate_cmd.UploadSummary(new=0, reused=1)
+    client.update_source.assert_not_called()
+    assert client.upload_sources.call_count == 1
+    [(_, sent), _] = client.upload_sources.call_args
+    assert [p.name for p in sent] == ["law.md"]
+
+
 def test_failed_replacement_upload_reactivates_old_source(tmp_path):
     src = tmp_path / "sources"
     src.mkdir()

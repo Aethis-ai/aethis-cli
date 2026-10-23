@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.53.1 (2026-10-23)
+
+- `aethis generate` and `aethis refine` no longer replace an unchanged source that was uploaded before the engine recorded file digests. The CLI treated the missing digest as a change: it marked the old source superseded and uploaded the file as a new source with a new source id, so citation keys that named the old source stopped matching. A source with no recorded digest is now uploaded normally and the engine decides whether it is the same file. A source whose recorded digest differs from the local file is still replaced as before.
+- Needs an engine release that reuses such sources (aethis-core#572). On an older engine, the upload of an unchanged legacy source is refused with HTTP 409 `active_filename_has_changed_content` instead of being replaced silently; nothing is superseded. If you need the old behaviour there, mark the source superseded yourself and upload again.
+
 ## 0.53.0 (2026-10-23)
 
 - `aethis generate --model` and `aethis refine --model` now check the model name against the list the engine publishes, before any project is created or anything is uploaded; an unknown id stops with exit 2 and lists the accepted ids. If the engine's list cannot be read, the command stops instead of guessing. Without `--model` the engine chooses its default. The ids a current engine accepts are `claude-sonnet-5-5` and `deepseek-flash`; `claude-sonnet-5` is retired and the engine maps it to `claude-sonnet-5-5`. Any `deepseek-*` model uses the DeepSeek key.
