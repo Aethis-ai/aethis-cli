@@ -20,7 +20,7 @@ from rich.markup import escape
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 
 from aethis_cli._terminal_safe import safe_text
-from aethis_cli.client import DEEPSEEK_MODEL, AethisClient, normalize_thinking
+from aethis_cli.client import AethisClient, is_deepseek_model, normalize_thinking
 from aethis_cli.config import (
     load_project_config,
     make_authed_client,
@@ -1403,17 +1403,40 @@ def _run_generate(
     except ValueError as e:
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(code=2) from None
+    if model is not None:
+        model = model.strip()
+        if not model:
+            console.print("[red]--model must not be empty.[/red]")
+            raise typer.Exit(code=2)
     try:
         cfg = load_project_config()
         api_key = resolve_api_key(cfg)
-        anthropic_key = None if model == DEEPSEEK_MODEL else resolve_anthropic_key(cfg)
-        deepseek_key = resolve_deepseek_key(cfg) if model == DEEPSEEK_MODEL else None
+        anthropic_key = None if is_deepseek_model(model) else resolve_anthropic_key(cfg)
+        deepseek_key = resolve_deepseek_key(cfg) if is_deepseek_model(model) else None
     except ConfigError as e:
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(code=1)
 
     client = make_authed_client(api_key, cfg.base_url, anthropic_key=anthropic_key)
     project_dir = cfg.config_path
+
+    if model is not None:
+        # The engine owns the list of authoring models. Check it before any
+        # project, source, guidance, field or test mutation; fail closed if
+        # the engine does not publish it.
+        allowed = client.generation_models()
+        if allowed is None:
+            console.print(
+                "[red]Could not read the engine's list of authoring models, so --model cannot be checked. "
+                "Stopping before any project, source, guidance, field, or test mutation.[/red]"
+            )
+            raise typer.Exit(code=1)
+        if model not in allowed:
+            console.print(
+                f"[red]Unsupported authoring model {escape(safe_text(model))!r}. "
+                f"This engine accepts: {', '.join(sorted(allowed))}.[/red]"
+            )
+            raise typer.Exit(code=2)
 
     if thinking is not None:
         properties = client.generation_mode_request_properties()

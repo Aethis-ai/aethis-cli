@@ -10,12 +10,14 @@ import pytest
 import respx
 from typer.testing import CliRunner
 
-from aethis_cli.client import DEEPSEEK_MODEL, AethisClient, normalize_thinking
+from aethis_cli.client import AethisClient, normalize_thinking
 from aethis_cli.commands import generate_cmd, refine_cmd
 from aethis_cli.config import load_project_config, resolve_deepseek_key
 from aethis_cli.main import app
 
 BASE = "https://test.local"
+DEEPSEEK_MODEL = "deepseek-flash"
+MODELS = {"claude-sonnet-5-5", "deepseek-flash"}
 
 
 @pytest.mark.parametrize("mode", ["fresh", "refine"])
@@ -87,7 +89,7 @@ def test_flags_forward_model(command: str, monkeypatch: pytest.MonkeyPatch) -> N
     result = CliRunner().invoke(app, [command, "--model", "deepseek-flash", "--no-poll"])
     assert result.exit_code == 0, result.output
     assert run.call_args.kwargs["model"] == DEEPSEEK_MODEL
-    # Not a client-side list: any id is passed through for the engine to judge.
+    # No client-side list: any id is passed on; the run checks it against the engine.
     passthrough = CliRunner().invoke(app, [command, "--model", "claude-sonnet-5-5", "--no-poll"])
     assert passthrough.exit_code == 0, passthrough.output
     assert run.call_args.kwargs["model"] == "claude-sonnet-5-5"
@@ -147,6 +149,7 @@ def test_generation_resolves_only_selected_provider(model, tmp_path, monkeypatch
 
     _project(tmp_path)
     client = _engine(SUCCESS)
+    client.generation_models.return_value = MODELS
     _wire(monkeypatch, tmp_path, client)
     anthropic = MagicMock(return_value="anthropic-secret")
     deepseek = MagicMock(return_value="deepseek-secret")
@@ -258,3 +261,55 @@ def test_unreadable_generation_control_schema_refuses_without_post():
         with pytest.raises(ValueError, match="schema could not be read"):
             client.generate("p", thinking="disabled")
     assert not post.called
+
+
+def _openapi(enum):
+    return {
+        "components": {
+            "schemas": {
+                "GenerationModeRequest": {
+                    "properties": {"model": {"anyOf": [{"enum": enum, "type": "string"}, {"type": "null"}]}}
+                }
+            }
+        }
+    }
+
+
+@respx.mock
+def test_generation_models_read_from_engine_schema() -> None:
+    respx.get(f"{BASE}/openapi.json").respond(200, json=_openapi(["claude-sonnet-5-5", "deepseek-flash"]))
+    with AethisClient("ak", BASE) as client:
+        assert client.generation_models() == MODELS
+
+
+@respx.mock
+def test_generation_models_unreadable_is_none() -> None:
+    respx.get(f"{BASE}/openapi.json").respond(500, json={})
+    with AethisClient("ak", BASE) as client:
+        assert client.generation_models() is None
+
+
+@pytest.mark.parametrize("allowed", [{"claude-sonnet-5-5"}, None])
+def test_unknown_model_stops_before_any_mutation(allowed, tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import typer
+
+    from tests.test_generate_no_publish import SUCCESS, _engine, _project, _wire
+
+    _project(tmp_path)
+    client = _engine(SUCCESS)
+    client.generation_models.return_value = allowed
+    _wire(monkeypatch, tmp_path, client)
+    with pytest.raises(typer.Exit) as stopped:
+        generate_cmd._run_generate(project_id="p", poll=False, timeout=30, model="typo")
+    assert stopped.value.exit_code == (2 if allowed else 1)
+    client.get_project.assert_not_called()
+    client.create_project.assert_not_called()
+    client.generate.assert_not_called()
+
+
+def test_deepseek_prefix_routes_credentials() -> None:
+    from aethis_cli.client import is_deepseek_model
+
+    assert is_deepseek_model(" deepseek-next ")
+    assert not is_deepseek_model("claude-sonnet-5-5")
+    assert not is_deepseek_model(None)
