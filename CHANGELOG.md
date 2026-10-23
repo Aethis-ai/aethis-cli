@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.53.0 (2026-10-23)
+
+- `aethis generate --model` and `aethis refine --model` now check the model name against the list the engine publishes, before any project is created or anything is uploaded; an unknown id stops with exit 2 and lists the accepted ids. If the engine's list cannot be read, the command stops instead of guessing. Without `--model` the engine chooses its default. The ids a current engine accepts are `claude-sonnet-5-5` and `deepseek-flash`; `claude-sonnet-5` is retired and the engine maps it to `claude-sonnet-5-5`. Any `deepseek-*` model uses the DeepSeek key.
+- Breaking (Python API): `aethis_cli.client.GenerationModel` is removed. `AethisClient.generate(model=...)` takes a plain string; use `AethisClient.generation_models()` to read the accepted ids.
+
 ## 0.52.0 (2026-10-20)
 
 - `aethis generate` and `aethis refine` now pass an authored `presence_default_basis:` field key through to the engine. It records why a field's unanswered reading is meant to be the generous one, citing a source key, so that the engine's publish check can accept that default instead of refusing it:

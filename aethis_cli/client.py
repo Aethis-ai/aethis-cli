@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -50,11 +49,30 @@ def normalize_thinking(thinking: str | None | object = _UNSET) -> str | None | o
     return f"enabled:{canonical}"
 
 
-class GenerationModel(str, Enum):
-    """Supported per-generation authoring models."""
+# The CLI does not own the list of authoring models: the allowed ids are read
+# from the engine's published schema. The prefix below only picks the
+# credential transport (DeepSeek key header vs Anthropic key).
+_DEEPSEEK_PREFIX = "deepseek-"
 
-    sonnet = "claude-sonnet-5"
-    deepseek = "deepseek-flash"
+
+def is_deepseek_model(model: Optional[str]) -> bool:
+    """True when ``model`` is served by DeepSeek (credential routing only)."""
+    return bool(model) and str(model).strip().startswith(_DEEPSEEK_PREFIX)
+
+
+def _collect_enum(node: Any, schemas: dict, out: set[str], depth: int = 0) -> None:
+    if depth > 6 or not isinstance(node, dict):
+        return
+    ref = node.get("$ref")
+    if isinstance(ref, str):
+        _collect_enum(schemas.get(ref.rsplit("/", 1)[-1]), schemas, out, depth + 1)
+    if isinstance(node.get("enum"), list):
+        out.update(v for v in node["enum"] if isinstance(v, str))
+    if "const" in node and isinstance(node["const"], str):
+        out.add(node["const"])
+    for key in ("anyOf", "oneOf", "allOf"):
+        for sub in node.get(key) or []:
+            _collect_enum(sub, schemas, out, depth + 1)
 
 
 class AethisClient:
@@ -431,6 +449,23 @@ class AethisClient:
         self._field_spec_properties[model] = answer
         return answer
 
+    def generation_models(self) -> Optional[set[str]]:
+        """Authoring model ids the engine accepts, from ``GenerationModeRequest.model``.
+
+        ``None`` when the schema cannot be read or advertises no enum; callers
+        fail closed rather than guess.
+        """
+        try:
+            resp = self._client.get("/openapi.json", timeout=15.0)
+            if resp.status_code >= 400:
+                return None
+            schemas = resp.json()["components"]["schemas"]
+            found: set[str] = set()
+            _collect_enum(schemas["GenerationModeRequest"]["properties"]["model"], schemas, found)
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            return None
+        return found or None
+
     def expected_field_spec_properties(self) -> Optional[set[str]]:
         """What a *project* field pin may carry — the generation upload path."""
         return self._schema_properties("ExpectedFieldSpec")
@@ -518,7 +553,7 @@ class AethisClient:
         mode: Optional[str] = None,
         seed_ruleset_id: Optional[str] = None,
         *,
-        model: Optional[GenerationModel] = None,
+        model: Optional[str] = None,
         deepseek_key: Optional[str] = None,
         thinking: str | None | object = _UNSET,
         name: Optional[str] = None,
@@ -547,7 +582,7 @@ class AethisClient:
                 )
             body["name"] = name
         if model is not None:
-            body["model"] = GenerationModel(model).value
+            body["model"] = model.strip()
         # Presence matters: JSON null inherits the engine setting; an explicit
         # string is validated by the engine before it admits the job.
         thinking = normalize_thinking(thinking)
@@ -560,10 +595,10 @@ class AethisClient:
                     "This engine does not advertise per-generation thinking controls; no generation was started"
                 )
             body["thinking"] = thinking
-        if deepseek_key and model != GenerationModel.deepseek:
-            raise ValueError("A DeepSeek key requires model=deepseek-flash")
+        if deepseek_key and not is_deepseek_model(model):
+            raise ValueError("A DeepSeek key requires model=deepseek-*")
         kwargs: dict[str, Any] = {"json": body} if body else {}
-        if model == GenerationModel.deepseek:
+        if is_deepseek_model(model):
             if self._client.headers.get("X-Anthropic-Key"):
                 raise ValueError("Use a client without an Anthropic key for DeepSeek generation")
             if deepseek_key:

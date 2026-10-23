@@ -20,7 +20,7 @@ from rich.markup import escape
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 
 from aethis_cli._terminal_safe import safe_text
-from aethis_cli.client import AethisClient, GenerationModel, normalize_thinking
+from aethis_cli.client import AethisClient, is_deepseek_model, normalize_thinking
 from aethis_cli.config import (
     load_project_config,
     make_authed_client,
@@ -1333,7 +1333,9 @@ def _upload_rulebook_guidance(client: AethisClient, pid: str, project_dir: Path)
 
 
 def generate(
-    model: Optional[GenerationModel] = typer.Option(None, "--model", help="Authoring model (default: claude-sonnet-5)"),
+    model: Optional[str] = typer.Option(
+        None, "--model", help="Authoring model id (default: the engine's choice; the engine validates it)"
+    ),
     thinking: Optional[str] = typer.Option(
         None, "--thinking", help="Per-generation thinking: disabled, adaptive, or enabled:N"
     ),
@@ -1384,7 +1386,7 @@ def _run_generate(
     seed_ruleset_id: Optional[str] = None,
     extra_hint: Optional[str] = None,
     no_publish: bool = False,
-    model: Optional[GenerationModel] = None,
+    model: Optional[str] = None,
     acceptance_contract: Optional[Path] = None,
     thinking: Optional[str] = None,
 ) -> None:
@@ -1402,22 +1404,39 @@ def _run_generate(
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(code=2) from None
     if model is not None:
-        try:
-            model = GenerationModel(model)
-        except ValueError:
-            console.print("[red]Unsupported authoring model. Use claude-sonnet-5 or deepseek-flash.[/red]")
-            raise typer.Exit(code=2) from None
+        model = model.strip()
+        if not model:
+            console.print("[red]--model must not be empty.[/red]")
+            raise typer.Exit(code=2)
     try:
         cfg = load_project_config()
         api_key = resolve_api_key(cfg)
-        anthropic_key = None if model == GenerationModel.deepseek else resolve_anthropic_key(cfg)
-        deepseek_key = resolve_deepseek_key(cfg) if model == GenerationModel.deepseek else None
+        anthropic_key = None if is_deepseek_model(model) else resolve_anthropic_key(cfg)
+        deepseek_key = resolve_deepseek_key(cfg) if is_deepseek_model(model) else None
     except ConfigError as e:
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(code=1)
 
     client = make_authed_client(api_key, cfg.base_url, anthropic_key=anthropic_key)
     project_dir = cfg.config_path
+
+    if model is not None:
+        # The engine owns the list of authoring models. Check it before any
+        # project, source, guidance, field or test mutation; fail closed if
+        # the engine does not publish it.
+        allowed = client.generation_models()
+        if allowed is None:
+            console.print(
+                "[red]Could not read the engine's list of authoring models, so --model cannot be checked. "
+                "Stopping before any project, source, guidance, field, or test mutation.[/red]"
+            )
+            raise typer.Exit(code=1)
+        if model not in allowed:
+            console.print(
+                f"[red]Unsupported authoring model {escape(repr(safe_text(model)))}. "
+                f"This engine accepts: {', '.join(sorted(allowed))}.[/red]"
+            )
+            raise typer.Exit(code=2)
 
     if thinking is not None:
         properties = client.generation_mode_request_properties()
