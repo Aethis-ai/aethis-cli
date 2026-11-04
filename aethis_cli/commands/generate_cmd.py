@@ -801,7 +801,7 @@ def _safe_field_type(raw_type: Optional[str], enum_values: Optional[list]) -> st
     return t
 
 
-def validate_fields_list(fields: list) -> list[str]:
+def validate_fields_list(fields: list, items_required_for: Optional[set] = None) -> list[str]:
     """Return human-readable validation errors for a ``fields.yaml`` field list.
 
     Checks: every entry has a key, no duplicate keys, the ``type`` is one of
@@ -812,6 +812,12 @@ def validate_fields_list(fields: list) -> list[str]:
     the field does not have — a mislabelled key is silently inert on the
     engine, so it is caught here. ``canonical_field`` must be a non-empty
     string. An empty return means the list is valid.
+
+    ``items_required_for`` limits the "a collection needs ``items``" check to
+    those keys. ``None`` (the default) checks every collection. A member
+    section passes its own keys when validating its rulebook's file: the
+    rulebook may hold collection rows whose items its release step fills in,
+    and a section never sends a rulebook-only row.
     """
     errors: list[str] = []
     seen: set[str] = set()
@@ -847,7 +853,8 @@ def validate_fields_list(fields: list) -> list[str]:
         for prop in _ENGINE_SHAPED_FIELD_KEYS:
             if prop in f and f[prop] is not None and not isinstance(f[prop], dict):
                 errors.append(f"Field {key!r} declares {prop} but it is not a mapping.")
-        if ftype == "collection" and not isinstance(f.get("items"), dict):
+        items_checked = items_required_for is None or key in items_required_for
+        if ftype == "collection" and items_checked and not isinstance(f.get("items"), dict):
             errors.append(f"Field {key!r} is type 'collection' but declares no items mapping.")
         if f.get("items") is not None and ftype != "collection":
             errors.append(f"Field {key!r} declares items but is type {ftype!r} — only collection fields may.")
@@ -1227,14 +1234,19 @@ def _validate_project_fields(project_dir: Path) -> None:
     # each contributing file's RAW list so duplicate keys *within a file* surface
     # — the merged map would silently collapse them. A key shared between the
     # rulebook and the ruleset is intentional (rulebook wins), not a duplicate.
+    # The rulebook's file is checked in full, except that a collection row the
+    # section does not declare (so never sends) may leave ``items`` to the
+    # rulebook's own release step.
+    own_path = project_dir / "fields" / "fields.yaml"
+    contributing: list[tuple[Path, Optional[set]]] = [(own_path, None)]
     rb_dir = _parent_rulebook_dir(project_dir)
-    contributing = [project_dir / "fields" / "fields.yaml"]
     if rb_dir is not None:
-        contributing.insert(0, rb_dir / "fields" / "fields.yaml")
-    for path in contributing:
+        own_keys = set(_parse_fields_yaml(own_path)) if own_path.exists() else set()
+        contributing.insert(0, (rb_dir / "fields" / "fields.yaml", own_keys))
+    for path, items_required_for in contributing:
         if not path.exists():
             continue
-        errors = validate_fields_list(_load_yaml_file(path).get("fields") or [])
+        errors = validate_fields_list(_load_yaml_file(path).get("fields") or [], items_required_for=items_required_for)
         if errors:
             console.print(f"[red]{path} is invalid:[/red]")
             for e in errors:

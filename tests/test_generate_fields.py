@@ -627,6 +627,52 @@ class TestSectionPinIsOwnFields:
         m = _merged_field_map(section)
         assert m["pi.nat"].get("enum_values") == ["canonical"], m
 
+    def test_rulebook_only_collection_without_items_does_not_block_a_section(self, tmp_path):
+        """A rulebook may hold a collection row whose items its own release
+        step fills in. The section never sends that row, so its missing
+        ``items`` must not stop the section's generate."""
+        from aethis_cli.commands.generate_cmd import _validate_project_fields
+
+        section = self._tree(
+            tmp_path,
+            own_fields=[{"key": "ref.x", "type": "Bool"}],
+            rb_fields=[
+                {"key": "app.history", "type": "Collection"},
+                {"key": "ref.x", "type": "Bool"},
+            ],
+        )
+        _validate_project_fields(section)  # must not raise
+
+    def test_shared_collection_without_items_still_blocks_a_section(self, tmp_path):
+        """Negative control: a collection row the section DOES send (a shared
+        key, where the rulebook definition wins) still needs ``items``."""
+        import typer
+
+        from aethis_cli.commands.generate_cmd import _validate_project_fields
+
+        section = self._tree(
+            tmp_path,
+            own_fields=[{"key": "app.history", "type": "Collection", "items": {"sort": "String"}}],
+            rb_fields=[{"key": "app.history", "type": "Collection"}],
+        )
+        with pytest.raises(typer.Exit):
+            _validate_project_fields(section)
+
+    def test_rulebook_only_row_is_still_checked_for_everything_else(self, tmp_path):
+        """Only the missing-items check is scoped; a bad type on a rulebook-only
+        row still fails, as before."""
+        import typer
+
+        from aethis_cli.commands.generate_cmd import _validate_project_fields
+
+        section = self._tree(
+            tmp_path,
+            own_fields=[{"key": "ref.x", "type": "Bool"}],
+            rb_fields=[{"key": "app.other", "type": "Nonsense"}, {"key": "ref.x", "type": "Bool"}],
+        )
+        with pytest.raises(typer.Exit):
+            _validate_project_fields(section)
+
     def test_section_without_own_fields_pins_nothing(self, tmp_path):
         from aethis_cli.commands.generate_cmd import _merged_field_map
 

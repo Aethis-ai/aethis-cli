@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.53.2 (2026-11-04)
+
+- `aethis generate` and `aethis refine` on a member ruleset no longer stop because the enclosing rulebook's `fields.yaml` has a `collection` row with no `items`, when the member does not declare that field itself. A member never sends a rulebook-only row, and a rulebook may leave such a row's items to its own release step. Every other check on the rulebook's file still applies. A collection the member does declare still needs `items`, and so does any collection in a standalone project.
+
 ## 0.53.1 (2026-10-23)
 
 - `aethis generate` and `aethis refine` no longer replace an unchanged source that was uploaded before the engine recorded file digests. The CLI treated the missing digest as a change: it marked the old source superseded and uploaded the file as a new source with a new source id, so citation keys that named the old source stopped matching. A source with no recorded digest is now uploaded normally first. If the engine reports that the file under that name has different content (HTTP 409 `active_filename_has_changed_content`), the CLI replaces the source as before. A source whose recorded digest differs from the local file is replaced as before.
