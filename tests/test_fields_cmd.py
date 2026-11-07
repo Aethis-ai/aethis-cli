@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
 from typer.testing import CliRunner
 
 from aethis_cli.commands import generate_cmd
@@ -177,6 +178,82 @@ def test_fields_discover_missing_llm_key_gives_actionable_error(tmp_path, monkey
 
 
 # --- fields pull -----------------------------------------------------------
+
+
+def test_discovered_declarations_roundtrip_to_field_spec(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    fields_path = tmp_path / "fields" / "fields.yaml"
+    fields_path.parent.mkdir()
+    fields_path.write_text("fields:\n  - key: unchanged\n    type: bool\n    question: Keep this?\n")
+    items = {"sort": "Enum", "enum_values": ["basic", "advanced"], "min_items": 0, "max_items": 2}
+    computed = {"op": "any_in", "collection": "training", "values": ["advanced"]}
+    discovered = [
+        {"key": "unchanged", "field_type": "string", "elicitation_owner": "system"},
+        {"key": "training", "field_type": "collection", "items": items},
+        {
+            "key": "qualified",
+            "field_type": "boolean",
+            "computed": computed,
+            "elicitation_owner": "derived",
+            "description": "Calculated from training",
+        },
+        {"key": "ordinary", "field_type": "integer"},
+    ]
+    client = MagicMock()
+    client.discover_fields.return_value = {"fields": discovered}
+    client.expected_field_spec_properties.return_value = set(generate_cmd._ENGINE_GATED_FIELD_KEYS)
+    with (
+        patch("aethis_cli.commands.fields_cmd.load_project_config", return_value=_cfg(tmp_path)),
+        patch("aethis_cli.commands.fields_cmd.resolve_api_key", return_value="ak"),
+        patch("aethis_cli.commands.fields_cmd.resolve_anthropic_key", return_value="sk"),
+        patch("aethis_cli.commands.fields_cmd.make_authed_client", return_value=client),
+    ):
+        from aethis_cli.main import app
+
+        result = CliRunner().invoke(app, ["fields", "discover"], catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    local = generate_cmd._parse_fields_yaml(fields_path)
+    assert local["unchanged"] == {"key": "unchanged", "type": "bool", "question": "Keep this?"}
+    assert local["training"]["type"] == "collection"
+    assert local["training"]["items"] == items
+    assert "question" not in local["qualified"]
+    assert not ({"items", "computed", "elicitation_owner"} & local["ordinary"].keys())
+    assert generate_cmd.validate_fields_list(list(local.values())) == []
+    # Exercise the existing upload, including capability gating, after the real YAML readback.
+    generate_cmd._upload_field_vocabulary(client, "proj_1", tmp_path)
+    sent = {field["key"]: field for field in client.set_field_spec.call_args.args[1]}
+    assert sent["training"]["items"] == items
+    assert sent["qualified"]["computed"] == computed
+    assert sent["qualified"]["elicitation_owner"] == "derived"
+    assert sent["qualified"]["question"] is None
+    assert sent["unchanged"]["sort"] == "bool"
+
+
+@pytest.mark.parametrize("declaration", [{}, {"items": None}, {"items": []}])
+def test_invalid_discovered_collection_does_not_write_file(tmp_path, declaration):
+    fields_path = tmp_path / "fields" / "fields.yaml"
+    fields_path.parent.mkdir()
+    original = "fields: []\n"
+    fields_path.write_text(original)
+    client = MagicMock()
+    client.discover_fields.return_value = {
+        "fields": [
+            {"key": "ordinary", "field_type": "integer"},
+            {"key": "training", "field_type": "collection", **declaration},
+        ]
+    }
+    with (
+        patch("aethis_cli.commands.fields_cmd.load_project_config", return_value=_cfg(tmp_path)),
+        patch("aethis_cli.commands.fields_cmd.resolve_api_key", return_value="ak"),
+        patch("aethis_cli.commands.fields_cmd.resolve_anthropic_key", return_value="sk"),
+        patch("aethis_cli.commands.fields_cmd.make_authed_client", return_value=client),
+    ):
+        from aethis_cli.main import app
+
+        result = CliRunner().invoke(app, ["fields", "discover"], catch_exceptions=False)
+    assert result.exit_code == 1, result.output
+    assert "written" in result.output.lower()
+    assert fields_path.read_text() == original
 
 
 def test_fields_pull_writes_server_fields_and_keeps_local_annotations(tmp_path, monkeypatch):
