@@ -17,6 +17,7 @@ from rich.table import Table
 
 from aethis_cli.commands.generate_cmd import (
     _load_yaml_file,
+    _normalise_field_type,
     _parse_fields_yaml,
     _resolve_or_create_project,
     _safe_field_type,
@@ -159,9 +160,21 @@ def discover() -> None:
         key = df.get("key")
         if not key or key in field_map:
             continue
-        ftype = _safe_field_type(df.get("field_type"), df.get("enum_values"))
+        ftype = (
+            "collection"
+            if _normalise_field_type(df.get("field_type")) == "collection"
+            else _safe_field_type(df.get("field_type"), df.get("enum_values"))
+        )
         entry: dict = {"key": key, "type": ftype}
-        question = df.get("question") or df.get("description")
+        for prop in ("items", "computed", "elicitation_owner"):
+            if prop in df:
+                if df[prop] is None:
+                    console.print(f"[red]Discovered field {key!r} has null {prop}; no fields were written.[/red]")
+                    raise typer.Exit(code=1)
+                entry[prop] = df[prop]
+        question = df.get("question")
+        if not question and entry.get("elicitation_owner", "applicant") == "applicant":
+            question = df.get("description")
         if question:
             entry["question"] = question
         if ftype == "enum" and df.get("enum_values"):
@@ -169,6 +182,12 @@ def discover() -> None:
         description = df.get("description")
         if description and description != entry.get("question"):
             entry["hints"] = [description]
+        errors = validate_fields_list([entry])
+        if errors:
+            for error in errors:
+                console.print(f"[red]{error}[/red]")
+            console.print("[red]No fields were written.[/red]")
+            raise typer.Exit(code=1)
         field_map[key] = entry
         added += 1
 

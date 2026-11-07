@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.53.3 (2026-11-07)
+
+- `aethis fields discover` preserves collection item declarations, computed fields and elicitation owners in `fields.yaml`, so the existing generation upload carries them to the field specification. Existing local fields remain unchanged. A discovered collection without an item declaration stops before writing the file.
+
 ## 0.53.2 (2026-11-04)
 
 - `aethis generate` and `aethis refine` on a member ruleset no longer stop because the enclosing rulebook's `fields.yaml` has a `collection` row with no `items`, when the member does not declare that field itself. A member never sends a rulebook-only row, and a rulebook may leave such a row's items to its own release step. Every other check on the rulebook's file still applies. A collection the member does declare still needs `items`, and so does any collection in a standalone project.
