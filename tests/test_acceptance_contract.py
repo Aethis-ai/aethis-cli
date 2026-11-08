@@ -62,16 +62,47 @@ class TestCriterionStatuses:
         extra = ["--acceptance-contract", str(path)]
         if shape == "yaml":
             (tmp_path / "tests").mkdir()
-            (tmp_path / "tests" / "scenarios.yaml").write_text(generate_cmd.yaml.safe_dump({"tests": [{"name": "unknown answer", "inputs": {"field": "value"}, "expect": {"outcome": "undetermined", "criterion_statuses": statuses}}]}))
+            (tmp_path / "tests" / "scenarios.yaml").write_text(
+                generate_cmd.yaml.safe_dump(
+                    {
+                        "tests": [
+                            {
+                                "name": "unknown answer",
+                                "inputs": {"field": "value"},
+                                "expect": {"outcome": "undetermined", "criterion_statuses": statuses},
+                            }
+                        ]
+                    }
+                )
+            )
             extra = []
         expected = generate_cmd._load_acceptance_contract(path)
         respx_mock.get("/openapi.json").mock(return_value=httpx.Response(200, json=_openapi(contract=True)))
-        respx_mock.get("/api/v1/public/projects/proj/sources").mock(return_value=httpx.Response(200, json={"sources": []}))
-        respx_mock.post("/api/v1/public/projects/proj/sources").mock(return_value=httpx.Response(200, json={"new": 1, "reused": 0, "sources": []}))
-        upload = respx_mock.post("/api/v1/public/projects/proj/tests").mock(return_value=httpx.Response(200, json={"added": 1, "replaced": 0}))
-        respx_mock.get("/api/v1/public/projects/proj").mock(return_value=httpx.Response(200, json={"authoring_acceptance_contract_version": 1, "expected_review_bindings": None, "authoring_acceptance_contract_digest": generate_cmd._acceptance_contract_digest(expected)}))
-        generation = respx_mock.post("/api/v1/public/projects/proj/generate").mock(return_value=httpx.Response(200, json={"job_id": "job"}))
-        respx_mock.post("/api/v1/public/projects/proj/test-run").mock(return_value=httpx.Response(200, json={"total": 1, "passed": 1, "failed": 0, "results": []}))
+        respx_mock.get("/api/v1/public/projects/proj/sources").mock(
+            return_value=httpx.Response(200, json={"sources": []})
+        )
+        respx_mock.post("/api/v1/public/projects/proj/sources").mock(
+            return_value=httpx.Response(200, json={"new": 1, "reused": 0, "sources": []})
+        )
+        upload = respx_mock.post("/api/v1/public/projects/proj/tests").mock(
+            return_value=httpx.Response(200, json={"added": 1, "replaced": 0})
+        )
+        respx_mock.get("/api/v1/public/projects/proj").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "authoring_acceptance_contract_version": 1,
+                    "expected_review_bindings": None,
+                    "authoring_acceptance_contract_digest": generate_cmd._acceptance_contract_digest(expected),
+                },
+            )
+        )
+        generation = respx_mock.post("/api/v1/public/projects/proj/generate").mock(
+            return_value=httpx.Response(200, json={"job_id": "job"})
+        )
+        respx_mock.post("/api/v1/public/projects/proj/test-run").mock(
+            return_value=httpx.Response(200, json={"total": 1, "passed": 1, "failed": 0, "results": []})
+        )
         with AethisClient("key", BASE) as client:
             _wire_run(monkeypatch, tmp_path, client)
             monkeypatch.setattr(test_cmd, "load_project_config", generate_cmd.load_project_config)
@@ -87,20 +118,31 @@ class TestCriterionStatuses:
 
     @pytest.mark.parametrize("key", ["😀" * 300, "\ufeff", "\x1c", " criterion "])
     def test_id_unicode_boundaries(self, key):
-        assert generate_cmd._normalise_expectations({"criterion_statuses": {key: "pending"}}, "expectations") == {"criterion_statuses": {key: "pending"}}
+        assert generate_cmd._normalise_expectations({"criterion_statuses": {key: "pending"}}, "expectations") == {
+            "criterion_statuses": {key: "pending"}
+        }
 
     def test_map_limit_and_omission(self):
         statuses = {str(i): "pending" for i in range(500)}
-        assert generate_cmd._normalise_expectations({"criterion_statuses": statuses}, "expectations")["criterion_statuses"] == statuses
-        assert "criterion_statuses" not in generate_cmd._normalise_expectations({"useful_unknown_fields": []}, "expectations")
+        assert (
+            generate_cmd._normalise_expectations({"criterion_statuses": statuses}, "expectations")["criterion_statuses"]
+            == statuses
+        )
+        assert "criterion_statuses" not in generate_cmd._normalise_expectations(
+            {"useful_unknown_fields": []}, "expectations"
+        )
 
     def test_duplicate_ids_remain_rejected(self, tmp_path):
         path = tmp_path / "acceptance.json"
-        path.write_text('{"contract_version":1,"test_cases":[{"name":"case","field_values":{},"expected_outcome":"eligible","expectations":{"criterion_statuses":{"id":"pending","id":"satisfied"}}}]}')
+        path.write_text(
+            '{"contract_version":1,"test_cases":[{"name":"case","field_values":{},"expected_outcome":"eligible","expectations":{"criterion_statuses":{"id":"pending","id":"satisfied"}}}]}'
+        )
         with pytest.raises(generate_cmd.AcceptanceContractError, match="duplicate key"):
             generate_cmd._load_acceptance_contract(path)
         with pytest.raises(generate_cmd.yaml.YAMLError, match="duplicate key"):
-            generate_cmd.yaml.load('criterion_statuses:\n  id: pending\n  id: satisfied\n', Loader=generate_cmd._UniqueKeyLoader)
+            generate_cmd.yaml.load(
+                "criterion_statuses:\n  id: pending\n  id: satisfied\n", Loader=generate_cmd._UniqueKeyLoader
+            )
 
     def test_json_and_authored_yaml_preserve_literal_statuses(self, tmp_path):
         statuses = {"criterion.😀": "satisfied", "constructor": "pending", "__proto__": "not_satisfied"}
@@ -109,16 +151,42 @@ class TestCriterionStatuses:
         loaded = generate_cmd._load_acceptance_contract(_write_contract(tmp_path, contract))
         assert loaded["test_cases"][0]["expectations"] == {"criterion_statuses": statuses}
         authored = [{"name": "case", "inputs": {}, "expect": {"outcome": "eligible", "criterion_statuses": statuses}}]
-        assert generate_cmd._normalise_test_cases(authored, "tests", yaml_shape=True)[0]["expectations"] == {"criterion_statuses": statuses}
+        assert generate_cmd._normalise_test_cases(authored, "tests", yaml_shape=True)[0]["expectations"] == {
+            "criterion_statuses": statuses
+        }
 
-    @pytest.mark.parametrize("statuses", [None, {}, [], {"": "pending"}, {" \t": "pending"}, {"\u0085": "pending"}, {"\ud800": "pending"}, {"x" * 301: "pending"}, {"x": "SATISFIED"}, {"x": 1}, {"x": True}, {"x": None}, {str(i): "pending" for i in range(501)}])
+    @pytest.mark.parametrize(
+        "statuses",
+        [
+            None,
+            {},
+            [],
+            {"": "pending"},
+            {" \t": "pending"},
+            {"\u0085": "pending"},
+            {"\ud800": "pending"},
+            {"x" * 301: "pending"},
+            {"x": "SATISFIED"},
+            {"x": 1},
+            {"x": True},
+            {"x": None},
+            {str(i): "pending" for i in range(501)},
+        ],
+    )
     def test_invalid_statuses_rejected_before_writes(self, tmp_path, monkeypatch, statuses):
         client = MagicMock()
         _wire_run(monkeypatch, tmp_path, client)
         contract = _contract()
         contract["test_cases"][0]["expectations"] = {"criterion_statuses": statuses}
         with pytest.raises(typer.Exit):
-            generate_cmd._run_generate(project_id=None, poll=False, timeout=1, mode="refine", extra_hint="correction", acceptance_contract=_write_contract(tmp_path, contract))
+            generate_cmd._run_generate(
+                project_id=None,
+                poll=False,
+                timeout=1,
+                mode="refine",
+                extra_hint="correction",
+                acceptance_contract=_write_contract(tmp_path, contract),
+            )
         assert client.method_calls == []
 
 

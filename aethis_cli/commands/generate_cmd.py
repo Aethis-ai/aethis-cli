@@ -129,13 +129,17 @@ def _normalise_expectations(value: Any, path: str) -> dict[str, Any]:
         if not isinstance(statuses, dict) or not 1 <= len(statuses) <= _MAX_ACCEPTANCE_LIST_LENGTH:
             raise AcceptanceContractError(f"{path}.criterion_statuses must be an object with 1 to 500 entries")
         if any(
-            not isinstance(key, str) or not key.strip(_CRITERION_ID_WHITESPACE)
+            not isinstance(key, str)
+            or not key.strip(_CRITERION_ID_WHITESPACE)
             or len(key) > _MAX_ACCEPTANCE_ID_LENGTH
             or any(0xD800 <= ord(char) <= 0xDFFF for char in key)
-            or not isinstance(status, str) or status not in {"satisfied", "not_satisfied", "pending"}
+            or not isinstance(status, str)
+            or status not in {"satisfied", "not_satisfied", "pending"}
             for key, status in statuses.items()
         ):
-            raise AcceptanceContractError(f"{path}.criterion_statuses requires valid non-empty IDs of at most 300 Unicode code points mapped to satisfied, not_satisfied, or pending")
+            raise AcceptanceContractError(
+                f"{path}.criterion_statuses requires valid non-empty IDs of at most 300 Unicode code points mapped to satisfied, not_satisfied, or pending"
+            )
         out["criterion_statuses"] = statuses
     if "pending_reviews" in value:
         pending = value["pending_reviews"]
@@ -198,13 +202,20 @@ def _normalise_test_cases(cases: Any, path: str, *, yaml_shape: bool) -> list[di
         if yaml_shape:
             values = case.get("inputs", {})
             expect = case.get("expect", {})
-            if not isinstance(expect, dict) or set(expect) - {"outcome", "pending_reviews", "useful_unknown_fields", "criterion_statuses"}:
+            if not isinstance(expect, dict) or set(expect) - {
+                "outcome",
+                "pending_reviews",
+                "useful_unknown_fields",
+                "criterion_statuses",
+            }:
                 raise AcceptanceContractError(
                     f"{case_path}.expect may contain only outcome, pending_reviews, useful_unknown_fields, and criterion_statuses"
                 )
             outcome = expect.get("outcome", "eligible")
             expectations = {
-                key: expect[key] for key in ("pending_reviews", "useful_unknown_fields", "criterion_statuses") if key in expect
+                key: expect[key]
+                for key in ("pending_reviews", "useful_unknown_fields", "criterion_statuses")
+                if key in expect
             } or None
         else:
             values = case.get("field_values")
