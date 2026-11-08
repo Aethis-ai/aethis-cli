@@ -44,6 +44,13 @@ _MAX_ACCEPTANCE_CASES = 500
 _MAX_LEGACY_CASES = 100
 _MAX_ACCEPTANCE_ID_LENGTH = 300
 _MAX_ACCEPTANCE_LIST_LENGTH = 500
+# Core's Unicode White_Space pattern differs from Python str.strip() for
+# U+001C..U+001F. Keep criterion IDs literal while matching that wire contract.
+_CRITERION_ID_WHITESPACE = (
+    "\u0009\u000a\u000b\u000c\u000d\u0020\u0085\u00a0\u1680"
+    "\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a"
+    "\u2028\u2029\u202f\u205f\u3000"
+)
 _KNOWN_CONTRACT_SEMANTIC_KEYS = {
     "contract_version",
     "expected_review_bindings",
@@ -59,6 +66,7 @@ _KNOWN_CONTRACT_SEMANTIC_KEYS = {
     "resolution_fields",
     "unmapped_count",
     "useful_unknown_fields",
+    "criterion_statuses",
 }
 
 
@@ -110,12 +118,29 @@ def _strict_string_list(value: Any, path: str) -> list[str]:
 def _normalise_expectations(value: Any, path: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise AcceptanceContractError(f"{path} must be an object")
-    unknown = set(value) - {"pending_reviews", "useful_unknown_fields"}
+    unknown = set(value) - {"pending_reviews", "useful_unknown_fields", "criterion_statuses"}
     if unknown:
         raise AcceptanceContractError(f"{path} contains unsupported key(s): {', '.join(sorted(unknown))}")
     if not value:
         raise AcceptanceContractError(f"{path} must not be empty")
     out: dict[str, Any] = {}
+    if "criterion_statuses" in value:
+        statuses = value["criterion_statuses"]
+        if not isinstance(statuses, dict) or not 1 <= len(statuses) <= _MAX_ACCEPTANCE_LIST_LENGTH:
+            raise AcceptanceContractError(f"{path}.criterion_statuses must be an object with 1 to 500 entries")
+        if any(
+            not isinstance(key, str)
+            or not key.strip(_CRITERION_ID_WHITESPACE)
+            or len(key) > _MAX_ACCEPTANCE_ID_LENGTH
+            or any(0xD800 <= ord(char) <= 0xDFFF for char in key)
+            or not isinstance(status, str)
+            or status not in {"satisfied", "not_satisfied", "pending"}
+            for key, status in statuses.items()
+        ):
+            raise AcceptanceContractError(
+                f"{path}.criterion_statuses requires valid non-empty IDs of at most 300 Unicode code points mapped to satisfied, not_satisfied, or pending"
+            )
+        out["criterion_statuses"] = statuses
     if "pending_reviews" in value:
         pending = value["pending_reviews"]
         if not isinstance(pending, dict) or set(pending) != {"resolution_fields", "unmapped_count"}:
@@ -177,13 +202,20 @@ def _normalise_test_cases(cases: Any, path: str, *, yaml_shape: bool) -> list[di
         if yaml_shape:
             values = case.get("inputs", {})
             expect = case.get("expect", {})
-            if not isinstance(expect, dict) or set(expect) - {"outcome", "pending_reviews", "useful_unknown_fields"}:
+            if not isinstance(expect, dict) or set(expect) - {
+                "outcome",
+                "pending_reviews",
+                "useful_unknown_fields",
+                "criterion_statuses",
+            }:
                 raise AcceptanceContractError(
-                    f"{case_path}.expect may contain only outcome, pending_reviews, and useful_unknown_fields"
+                    f"{case_path}.expect may contain only outcome, pending_reviews, useful_unknown_fields, and criterion_statuses"
                 )
             outcome = expect.get("outcome", "eligible")
             expectations = {
-                key: expect[key] for key in ("pending_reviews", "useful_unknown_fields") if key in expect
+                key: expect[key]
+                for key in ("pending_reviews", "useful_unknown_fields", "criterion_statuses")
+                if key in expect
             } or None
         else:
             values = case.get("field_values")
