@@ -419,6 +419,12 @@ class AethisClient:
         self._test_acceptance_contract_support = answer
         return answer
 
+    def supports_bundle_contract(self) -> Optional[bool]:
+        return None
+
+    def set_bundle_contract(self, project_id: str, contract: dict) -> dict:
+        return {}
+
     def _schema_properties(self, model: str) -> Optional[set[str]]:
         """The property names this engine advertises on ``model``.
 
