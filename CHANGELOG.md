@@ -20,8 +20,9 @@
 
   An input invariant is a consistency rule across inputs. When every input it references is present and the rule is false, the decision is `undetermined` and your message is returned in `field_errors` for the named fields.
 - The contract is sent after the field spec and before the generation job starts, and the CLI prints the digest the engine reports. When polling, the run fails (and publishes nothing) unless the finished build reports the same digest. With `--no-poll` the digest is printed so you can check it later.
-- The CLI checks only that the file is a mapping with `schema_version: 1` and, if present, a list `input_invariants`; the engine validates the rest and its error is shown if it refuses the contract.
-- If `contracts/bundle.yaml` exists but the engine does not advertise the bundle contract route, the command stops before any upload or job. A file with no invariants (none, null or an empty list) counts as no contract. If the file is absent or has no invariants, the engine supports the route and the project has a stored contract, the stored contract is cleared. If the stored contract cannot be checked, the CLI warns and carries on. A file holding a value that cannot be sent as JSON (such as an unquoted date) or a repeated mapping key is refused locally.
+- The file is checked locally before the project is touched, and the checked JSON is exactly what is sent. The only allowed top-level keys are `schema_version` (the integer `1`) and `input_invariants` (a non-empty list); the engine validates the invariants themselves and its error is shown if it refuses the contract. Anything else is refused with a message naming the file: an unknown or repeated key, an empty or missing `input_invariants`, or a value that cannot be sent as JSON (quote dates, for example `"2000-01-01"`).
+- If `contracts/bundle.yaml` exists but the engine does not advertise the bundle contract route, the command stops before any upload or job.
+- To clear a stored contract, delete the file. If the file is absent, the engine supports the route and the project has a stored contract, the stored contract is cleared and the CLI says so. If the engine's API schema or the project cannot be read, the CLI warns that a stored contract could not be checked and carries on.
 
 ## 0.53.2 (2026-11-04)
 

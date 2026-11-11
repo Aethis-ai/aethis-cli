@@ -1516,10 +1516,6 @@ def _run_generate(
         # The bundle contract is checked before any engine call: a malformed
         # file, or an engine that cannot hold it, must not leave a half-sent run.
         bundle_contract = _load_bundle_contract(project_dir)
-        if bundle_contract is not None and not bundle_contract.get("input_invariants"):
-            # A contract with no invariants means "no contract": the engine
-            # clears on it, so it takes the same path as an absent file.
-            bundle_contract = None
         bundle_advertised: Optional[bool] = None
         if bundle_contract is not None:
             bundle_advertised = client.supports_bundle_contract()
@@ -1685,34 +1681,52 @@ class BundleContractError(Exception):
     """The local bundle contract file cannot safely reach an engine."""
 
 
-def _load_bundle_contract(project_dir: Path) -> Optional[dict[str, Any]]:
-    """Read ``contracts/bundle.yaml``; only its top-level shape is checked here.
+_BUNDLE_CONTRACT_KEYS = ("schema_version", "input_invariants")
 
-    The engine validates the invariants themselves, so the content is passed
-    through unchanged.
+
+def _load_bundle_contract(project_dir: Path) -> Optional[bytes]:
+    """Load, check and serialise ``contracts/bundle.yaml`` in one guarded step.
+
+    Returns the exact JSON bytes to send, or ``None`` when there is no file.
+    Anything that goes wrong while reading, parsing, checking or serialising is
+    one refusal that names the file, so no other encoder can disagree with the
+    body that was checked.  Only the top-level shape is checked here; the engine
+    validates the invariants themselves.
     """
     path = project_dir / "contracts" / "bundle.yaml"
     if not path.is_file():
         return None
     try:
-        raw = yaml.load(path.read_text(encoding="utf-8"), Loader=_UniqueKeyLoader)
-    except (yaml.YAMLError, OSError, UnicodeDecodeError) as e:
-        raise BundleContractError(f"{path} is not readable YAML: {e}") from None
+        return _check_bundle_contract(path)
+    except BundleContractError:
+        raise
+    except Exception as e:  # noqa: BLE001 - every failure here is the same refusal
+        raise BundleContractError(
+            f"{path} could not be read as a bundle contract ({type(e).__name__}: {e}); "
+            'quote dates and other special values, for example "2000-01-01"'
+        ) from None
+
+
+def _check_bundle_contract(path: Path) -> bytes:
+    raw = yaml.load(path.read_text(encoding="utf-8"), Loader=_UniqueKeyLoader)
     if not isinstance(raw, dict):
-        raise BundleContractError(f"{path} must be a YAML mapping with schema_version: 1")
+        raise BundleContractError(f"{path} must be a YAML mapping with schema_version: 1 and input_invariants")
+    unknown = [k for k in raw if k not in _BUNDLE_CONTRACT_KEYS]
+    if unknown:
+        raise BundleContractError(
+            f"{path} has unknown top-level key(s) {', '.join(repr(str(k)) for k in unknown)}; "
+            f"the allowed keys are {', '.join(_BUNDLE_CONTRACT_KEYS)}"
+        )
     version = raw.get("schema_version")
     if type(version) is not int or version != 1:
-        raise BundleContractError(f"{path} must set schema_version: 1")
-    if raw.get("input_invariants") is not None and not isinstance(raw["input_invariants"], list):
-        raise BundleContractError(f"{path}: input_invariants must be a list")
-    try:
-        json.dumps(raw)
-    except (TypeError, ValueError):
+        raise BundleContractError(f"{path} must set schema_version: 1 (an integer)")
+    invariants = raw.get("input_invariants")
+    if not isinstance(invariants, list) or not invariants:
         raise BundleContractError(
-            f"{path} holds a value that cannot be sent as JSON (an unquoted date such as 2000-01-01 "
-            'is read as a date; quote it, for example "2000-01-01")'
-        ) from None
-    return raw
+            f"{path} must set input_invariants to a non-empty list; "
+            "to clear the stored contract, delete the file instead"
+        )
+    return json.dumps(raw, allow_nan=False).encode("utf-8")
 
 
 def _stored_digest(payload: Any) -> Optional[str]:
@@ -1721,9 +1735,9 @@ def _stored_digest(payload: Any) -> Optional[str]:
 
 
 def _send_bundle_contract(
-    client: AethisClient, pid: str, contract: Optional[dict[str, Any]], advertised: Optional[bool]
+    client: AethisClient, pid: str, contract: Optional[bytes], advertised: Optional[bool]
 ) -> Optional[str]:
-    """Send the contract (or clear a stale one); return the digest the engine reported."""
+    """Send the contract (or, with no file, clear a stale one); return the engine's digest."""
     if contract is not None:
         result = client.set_bundle_contract(pid, contract)
         digest = _stored_digest(result)
@@ -1731,16 +1745,18 @@ def _send_bundle_contract(
             raise BundleContractError("the engine did not return a bundle contract digest; stopping before generation")
         info(f"Bundle contract stored ({digest})")
         return digest
+    if advertised is None:
+        warn("A stored bundle contract could not be checked (the engine's API schema could not be read); continuing.")
+        return None
     if advertised is True:
         try:
             stored = _stored_digest(client.get_project(pid))
         except (AethisAPIError, httpx.HTTPError):
             warn("A stored bundle contract could not be checked (the project lookup failed); continuing.")
             return None
-        if stored is None:
-            return None
-        client.set_bundle_contract(pid, {"schema_version": 1})
-        info("No contracts/bundle.yaml: cleared the bundle contract stored on the project")
+        if stored is not None:
+            client.set_bundle_contract(pid, b'{"schema_version": 1}')
+            info("No contracts/bundle.yaml: cleared the bundle contract stored on the project")
     return None
 
 

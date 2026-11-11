@@ -445,9 +445,17 @@ class AethisClient:
         self._bundle_contract_support = answer
         return answer
 
-    def set_bundle_contract(self, project_id: str, contract: dict) -> dict:
-        """Store (or, with no ``input_invariants``, clear) the project's bundle contract."""
-        return self._request("PUT", f"/api/v1/public/projects/{project_id}/bundle-contract", json=contract)
+    def set_bundle_contract(self, project_id: str, contract: bytes) -> dict:
+        """Store the project's bundle contract (``{"schema_version": 1}`` alone clears it).
+
+        ``contract`` is the exact JSON body, already checked by the caller; it is sent as given.
+        """
+        return self._request(
+            "PUT",
+            f"/api/v1/public/projects/{project_id}/bundle-contract",
+            content=contract,
+            headers={"Content-Type": "application/json"},
+        )
 
     def _schema_properties(self, model: str) -> Optional[set[str]]:
         """The property names this engine advertises on ``model``.
