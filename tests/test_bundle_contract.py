@@ -82,7 +82,10 @@ def _engine(*, advertised, stored=None, put_digest=DIGEST, job_digest=DIGEST) ->
     client.get_schema.return_value = {"fields": []}
     client.supports_bundle_contract.return_value = advertised
     client.get_project.return_value = {"bundle_contract_digest": stored}
-    client.set_bundle_contract.return_value = {"bundle_contract_digest": put_digest, "bundle_contract_schema_version": 1}
+    client.set_bundle_contract.return_value = {
+        "bundle_contract_digest": put_digest,
+        "bundle_contract_schema_version": 1,
+    }
     job = {"status": "success", "progress_percent": 100}
     if job_digest is not None:
         job["bundle_contract_digest"] = job_digest
