@@ -21,7 +21,7 @@
   An input invariant is a consistency rule across inputs. When every input it references is present and the rule is false, the decision is `undetermined` and your message is returned in `field_errors` for the named fields.
 - The contract is sent after the field spec and before the generation job starts, and the CLI prints the digest the engine reports. When polling, the run fails (and publishes nothing) unless the finished build reports the same digest. With `--no-poll` the digest is printed so you can check it later.
 - The CLI checks only that the file is a mapping with `schema_version: 1` and, if present, a list `input_invariants`; the engine validates the rest and its error is shown if it refuses the contract.
-- If `contracts/bundle.yaml` exists but the engine does not advertise the bundle contract route, the command stops before any upload or job. If the file is absent and the project has a stored contract, the stored contract is cleared, so a removed file cannot leave a stale contract behind.
+- If `contracts/bundle.yaml` exists but the engine does not advertise the bundle contract route, the command stops before any upload or job. If the file is absent, the engine supports the route and the project has a stored contract, the stored contract is cleared. If the stored contract cannot be checked, the CLI warns and carries on. A file holding a value that cannot be sent as JSON (such as an unquoted date) or a repeated mapping key is refused locally.
 
 ## 0.53.2 (2026-11-04)
 

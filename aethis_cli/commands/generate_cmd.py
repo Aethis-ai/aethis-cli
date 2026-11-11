@@ -1691,7 +1691,7 @@ def _load_bundle_contract(project_dir: Path) -> Optional[dict[str, Any]]:
     if not path.is_file():
         return None
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        raw = yaml.load(path.read_text(encoding="utf-8"), Loader=_UniqueKeyLoader)
     except (yaml.YAMLError, OSError, UnicodeDecodeError) as e:
         raise BundleContractError(f"{path} is not readable YAML: {e}") from None
     if not isinstance(raw, dict):
@@ -1701,6 +1701,13 @@ def _load_bundle_contract(project_dir: Path) -> Optional[dict[str, Any]]:
         raise BundleContractError(f"{path} must set schema_version: 1")
     if "input_invariants" in raw and not isinstance(raw["input_invariants"], list):
         raise BundleContractError(f"{path}: input_invariants must be a list")
+    try:
+        json.dumps(raw)
+    except (TypeError, ValueError):
+        raise BundleContractError(
+            f"{path} holds a value that cannot be sent as JSON (an unquoted date such as 2000-01-01 "
+            'is read as a date; quote it, for example "2000-01-01")'
+        ) from None
     return raw
 
 
@@ -1720,7 +1727,14 @@ def _send_bundle_contract(
             raise BundleContractError("the engine did not return a bundle contract digest; stopping before generation")
         info(f"Bundle contract stored ({digest})")
         return digest
-    if advertised is True and _stored_digest(client.get_project(pid)) is not None:
+    if advertised is True:
+        try:
+            stored = _stored_digest(client.get_project(pid))
+        except (AethisAPIError, httpx.HTTPError):
+            warn("A stored bundle contract could not be checked (the project lookup failed); continuing.")
+            return None
+        if stored is None:
+            return None
         client.set_bundle_contract(pid, {"schema_version": 1})
         info("No contracts/bundle.yaml: cleared the bundle contract stored on the project")
     return None
@@ -2246,7 +2260,7 @@ def _poll_until_done(
                 # the job still have to yield something usable.
                 ruleset_id = _resolved_ruleset_id(result)
                 if expected_bundle_digest is not None:
-                    seen = job.get("bundle_contract_digest", result.get("bundle_contract_digest"))
+                    seen = job.get("bundle_contract_digest")
                     if seen != expected_bundle_digest:
                         console.print()
                         console.print(

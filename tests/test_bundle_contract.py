@@ -321,7 +321,8 @@ def test_unquoted_date_message_tells_the_author_to_quote_dates(tmp_path):
 def test_absent_file_with_unreadable_project_warns_and_continues(tmp_path, monkeypatch, capsys):
     _project(tmp_path)
     client = _engine(advertised=True)
-    client.get_project.side_effect = AethisAPIError(500, "boom")
+    # the first lookup is the project-existence check; the second is the stale-contract check
+    client.get_project.side_effect = [{"project_id": "proj_abc"}, AethisAPIError(500, "boom")]
     _wire(monkeypatch, tmp_path, client)
 
     _run(poll=False)
