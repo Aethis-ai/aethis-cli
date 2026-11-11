@@ -51,6 +51,11 @@ def _flat(capsys) -> str:
     return re.sub(r"\s+", " ", _ANSI.sub("", capsys.readouterr().out))
 
 
+def _squash(capsys) -> str:
+    """All whitespace removed: a long digest can be wrapped mid-token by the console."""
+    return re.sub(r"\s+", "", _ANSI.sub("", capsys.readouterr().out))
+
+
 def _project(tmp_path, contract=None, raw: str | None = None):
     (tmp_path / "sources").mkdir(parents=True, exist_ok=True)
     (tmp_path / "sources" / "a.md").write_text("the source document")
@@ -115,7 +120,7 @@ def test_present_and_advertised_puts_it_before_the_job_and_prints_the_digest(tmp
     client.set_bundle_contract.assert_called_once_with("proj_abc", CONTRACT)
     names = _names(client)
     assert names.index("set_bundle_contract") < names.index("generate")
-    assert DIGEST in _flat(capsys)
+    assert DIGEST in _squash(capsys)
 
 
 @pytest.mark.parametrize("mode", ["fresh", "refine"])
@@ -220,6 +225,23 @@ def test_missing_or_different_job_digest_fails_and_does_not_publish(tmp_path, mo
     assert "bundle contract" in _flat(capsys).lower()
 
 
+def test_top_level_status_digest_is_not_accepted(tmp_path, monkeypatch):
+    _project(tmp_path, CONTRACT)
+    client = _engine(advertised=True, job_digest=None)
+    client.get_status.return_value = {
+        "job": {"status": "success", "progress_percent": 100},
+        "latest_ruleset_id": "rs_new",
+        "bundle_contract_digest": DIGEST,
+    }
+    _wire(monkeypatch, tmp_path, client)
+
+    with pytest.raises(typer.Exit) as exc:
+        _run()
+
+    assert exc.value.exit_code != 0
+    client.publish.assert_not_called()
+
+
 def test_no_poll_prints_the_digest_for_later_checking(tmp_path, monkeypatch, capsys):
     _project(tmp_path, CONTRACT)
     client = _engine(advertised=True)
@@ -228,7 +250,7 @@ def test_no_poll_prints_the_digest_for_later_checking(tmp_path, monkeypatch, cap
     _run(poll=False)
 
     client.get_status.assert_not_called()
-    assert DIGEST in _flat(capsys)
+    assert DIGEST in _squash(capsys)
 
 
 def test_server_response_without_a_digest_stops_before_the_job(tmp_path, monkeypatch):
@@ -267,7 +289,46 @@ def test_malformed_file_is_refused_locally_before_any_call(tmp_path, monkeypatch
 
     assert exc.value.exit_code != 0
     assert client.method_calls == []
-    assert "bundle.yaml" in _flat(capsys)
+    assert "bundle contract rejected" in _flat(capsys).lower()
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "schema_version: 1\ninput_invariants:\n  - id: a\n    value: 2000-01-01\n",
+        "schema_version: 1\ninput_invariants: []\nschema_version: 1\n",
+    ],
+)
+def test_non_json_content_or_duplicate_keys_are_refused_before_any_call(tmp_path, monkeypatch, capsys, raw):
+    _project(tmp_path, raw=raw)
+    client = _engine(advertised=True)
+    _wire(monkeypatch, tmp_path, client)
+
+    with pytest.raises(typer.Exit) as exc:
+        _run()
+
+    assert exc.value.exit_code != 0
+    assert client.method_calls == []
+    assert "bundle contract rejected" in _flat(capsys).lower()
+
+
+def test_unquoted_date_message_tells_the_author_to_quote_dates(tmp_path):
+    _project(tmp_path, raw="schema_version: 1\ninput_invariants:\n  - value: 2000-01-01\n")
+    with pytest.raises(generate_cmd.BundleContractError, match="quote"):
+        generate_cmd._load_bundle_contract(tmp_path)
+
+
+def test_absent_file_with_unreadable_project_warns_and_continues(tmp_path, monkeypatch, capsys):
+    _project(tmp_path)
+    client = _engine(advertised=True)
+    client.get_project.side_effect = AethisAPIError(500, "boom")
+    _wire(monkeypatch, tmp_path, client)
+
+    _run(poll=False)
+
+    client.set_bundle_contract.assert_not_called()
+    client.generate.assert_called_once()
+    assert "could not be checked" in _flat(capsys)
 
 
 def test_engine_422_is_shown_and_stops_the_command(tmp_path, monkeypatch, capsys):
@@ -332,3 +393,10 @@ def test_set_bundle_contract_puts_the_body_unchanged():
 
     assert seen["body"] == CONTRACT
     assert result["bundle_contract_digest"] == DIGEST
+
+
+def test_a_loaded_contract_encodes_through_the_real_http_layer(tmp_path):
+    _project(tmp_path, CONTRACT)
+    loaded = generate_cmd._load_bundle_contract(tmp_path)
+    request = httpx.Request("PUT", f"{BASE}/x", json=loaded)
+    assert json.loads(request.content) == CONTRACT
