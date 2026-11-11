@@ -1513,6 +1513,17 @@ def _run_generate(
         # Local field validation first: nothing below may reach the engine
         # (guidance accumulates on the project) for a vocabulary that is invalid.
         _validate_project_fields(project_dir)
+        # The bundle contract is checked before any engine call: a malformed
+        # file, or an engine that cannot hold it, must not leave a half-sent run.
+        bundle_contract = _load_bundle_contract(project_dir)
+        bundle_advertised: Optional[bool] = None
+        if bundle_contract is not None:
+            bundle_advertised = client.supports_bundle_contract()
+            if bundle_advertised is not True:
+                raise BundleContractError(
+                    "contracts/bundle.yaml is present but this engine does not advertise the bundle contract "
+                    "route; stopping before any upload or generation"
+                )
         # Parse, validate, canonicalise and capability-check the complete test
         # plan before project creation, guidance, source, field or test writes.
         # The frozen snapshot is the payload uploaded later in this run.
@@ -1565,6 +1576,10 @@ def _run_generate(
         _upload_rulebook_guidance(client, pid, project_dir)
         _upload_field_vocabulary(client, pid, project_dir)
 
+        if bundle_contract is None:
+            bundle_advertised = client.supports_bundle_contract()
+        bundle_digest = _send_bundle_contract(client, pid, bundle_contract, bundle_advertised)
+
         # Upload the exact test payload prepared before any project mutation.
         _upload_prepared_test_cases(client, pid, prepared_tests)
 
@@ -1599,12 +1614,20 @@ def _run_generate(
             console.print(f"[{_style}]{_rem} {_noun} left in the current 24h window.[/{_style}]")
 
         if not poll:
+            if bundle_digest:
+                console.print(f"Bundle contract digest {bundle_digest}: check it against the job status later.")
             console.print("Use 'aethis status' to check progress.")
             return
 
         # Poll with progress spinner
         outcome = _poll_until_done(
-            client, pid, project_dir, timeout, no_publish=no_publish, shown_thinking_warnings=shown_thinking_warnings
+            client,
+            pid,
+            project_dir,
+            timeout,
+            no_publish=no_publish,
+            shown_thinking_warnings=shown_thinking_warnings,
+            expected_bundle_digest=bundle_digest,
         )
 
         # Surface how the produced field vocabulary compares to what was pinned,
@@ -1620,6 +1643,10 @@ def _run_generate(
 
     except AcceptanceContractError as e:
         console.print(f"[red]Acceptance contract rejected: {e}[/red]")
+        raise typer.Exit(code=1)
+
+    except BundleContractError as e:
+        console.print(f"[red]Bundle contract rejected: {escape(safe_text(str(e)))}[/red]")
         raise typer.Exit(code=1)
 
     except AethisAPIError as e:
@@ -1648,6 +1675,89 @@ def _run_generate(
         render_transport_error(e, base_url=cfg.base_url)
         _invalidate_stale_pointer(project_dir, "error", produced_id=outcome.ruleset_id if outcome else None)
         raise typer.Exit(code=1)
+
+
+class BundleContractError(Exception):
+    """The local bundle contract file cannot safely reach an engine."""
+
+
+_BUNDLE_CONTRACT_KEYS = ("schema_version", "input_invariants")
+
+
+def _load_bundle_contract(project_dir: Path) -> Optional[bytes]:
+    """Load, check and serialise ``contracts/bundle.yaml`` in one guarded step.
+
+    Returns the exact JSON bytes to send, or ``None`` when there is no file.
+    Anything that goes wrong while reading, parsing, checking or serialising is
+    one refusal that names the file, so no other encoder can disagree with the
+    body that was checked.  Only the top-level shape is checked here; the engine
+    validates the invariants themselves.
+    """
+    path = project_dir / "contracts" / "bundle.yaml"
+    if not path.is_file():
+        return None
+    try:
+        return _check_bundle_contract(path)
+    except BundleContractError:
+        raise
+    except Exception as e:  # noqa: BLE001 - every failure here is the same refusal
+        raise BundleContractError(
+            f"{path} could not be read as a bundle contract ({type(e).__name__}: {e}); "
+            'quote dates and other special values, for example "2000-01-01"'
+        ) from None
+
+
+def _check_bundle_contract(path: Path) -> bytes:
+    raw = yaml.load(path.read_text(encoding="utf-8"), Loader=_UniqueKeyLoader)
+    if not isinstance(raw, dict):
+        raise BundleContractError(f"{path} must be a YAML mapping with schema_version: 1 and input_invariants")
+    unknown = [k for k in raw if k not in _BUNDLE_CONTRACT_KEYS]
+    if unknown:
+        raise BundleContractError(
+            f"{path} has unknown top-level key(s) {', '.join(repr(str(k)) for k in unknown)}; "
+            f"the allowed keys are {', '.join(_BUNDLE_CONTRACT_KEYS)}"
+        )
+    version = raw.get("schema_version")
+    if type(version) is not int or version != 1:
+        raise BundleContractError(f"{path} must set schema_version: 1 (an integer)")
+    invariants = raw.get("input_invariants")
+    if not isinstance(invariants, list) or not invariants:
+        raise BundleContractError(
+            f"{path} must set input_invariants to a non-empty list; "
+            "to clear the stored contract, delete the file instead"
+        )
+    return json.dumps(raw, allow_nan=False).encode("utf-8")
+
+
+def _stored_digest(payload: Any) -> Optional[str]:
+    digest = payload.get("bundle_contract_digest") if isinstance(payload, dict) else None
+    return digest if isinstance(digest, str) and digest else None
+
+
+def _send_bundle_contract(
+    client: AethisClient, pid: str, contract: Optional[bytes], advertised: Optional[bool]
+) -> Optional[str]:
+    """Send the contract (or, with no file, clear a stale one); return the engine's digest."""
+    if contract is not None:
+        result = client.set_bundle_contract(pid, contract)
+        digest = _stored_digest(result)
+        if digest is None:
+            raise BundleContractError("the engine did not return a bundle contract digest; stopping before generation")
+        info(f"Bundle contract stored ({digest})")
+        return digest
+    if advertised is None:
+        warn("A stored bundle contract could not be checked (the engine's API schema could not be read); continuing.")
+        return None
+    if advertised is True:
+        try:
+            stored = _stored_digest(client.get_project(pid))
+        except (AethisAPIError, httpx.HTTPError):
+            warn("A stored bundle contract could not be checked (the project lookup failed); continuing.")
+            return None
+        if stored is not None:
+            client.set_bundle_contract(pid, b'{"schema_version": 1}')
+            info("No contracts/bundle.yaml: cleared the bundle contract stored on the project")
+    return None
 
 
 def _upload_test_cases(
@@ -2091,6 +2201,7 @@ def _poll_until_done(
     *,
     no_publish: bool = False,
     shown_thinking_warnings: Optional[set[tuple[str, str]]] = None,
+    expected_bundle_digest: Optional[str] = None,
 ) -> GenerationOutcome:
     """Poll a generation to completion and report how it ended.
 
@@ -2168,6 +2279,16 @@ def _poll_until_done(
                 # stays as the fallback because engines that record nothing on
                 # the job still have to yield something usable.
                 ruleset_id = _resolved_ruleset_id(result)
+                if expected_bundle_digest is not None:
+                    seen = job.get("bundle_contract_digest")
+                    if seen != expected_bundle_digest:
+                        console.print()
+                        console.print(
+                            "[bold red]Bundle contract not captured:[/bold red] the build reports "
+                            f"{escape(safe_text(str(seen)))} but the stored contract is {expected_bundle_digest}. "
+                            "Nothing was published."
+                        )
+                        return GenerationOutcome("contract_mismatch", ruleset_id, job.get("value_spaces_resolved"))
                 # The status payload the source questions are read from: the
                 # engine attaches them only once the job names its ruleset, so
                 # keep the latest one the re-poll below fetches.

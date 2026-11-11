@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.54.0 (2026-11-11)
+
+- `aethis generate` and `aethis refine` now send a project's bundle contract to the engine. Put it in `contracts/bundle.yaml` next to `fields/` and `tests/`:
+
+  ```yaml
+  schema_version: 1
+  input_invariants:
+    - id: end_not_before_start
+      expr:
+        type: op
+        operator: "<="
+        args:
+          - {type: field_ref, key: period.start_date}
+          - {type: field_ref, key: period.end_date}
+      error_fields: [period.end_date]
+      message: The end date must not be before the start date.
+  ```
+
+  An input invariant is a consistency rule across inputs. When every input it references is present and the rule is false, the decision is `undetermined` and your message is returned in `field_errors` for the named fields.
+- The contract is sent after the field spec and before the generation job starts, and the CLI prints the digest the engine reports. When polling, the run fails (and publishes nothing) unless the finished build reports the same digest. With `--no-poll` the digest is printed so you can check it later.
+- The file is checked locally before the project is touched, and the checked JSON is exactly what is sent. The only allowed top-level keys are `schema_version` (the integer `1`) and `input_invariants` (a non-empty list); the engine validates the invariants themselves and its error is shown if it refuses the contract. Anything else is refused with a message naming the file: an unknown or repeated key, an empty or missing `input_invariants`, or a value that cannot be sent as JSON (quote dates, for example `"2000-01-01"`).
+- If `contracts/bundle.yaml` exists but the engine does not advertise the bundle contract route, the command stops before any upload or job.
+- To clear a stored contract, delete the file. If the file is absent, the engine supports the route and the project has a stored contract, the stored contract is cleared and the CLI says so. If the engine's API schema or the project cannot be read, the CLI warns that a stored contract could not be checked and carries on.
+
 ## 0.53.2 (2026-11-04)
 
 - `aethis generate` and `aethis refine` on a member ruleset no longer stop because the enclosing rulebook's `fields.yaml` has a `collection` row with no `items`, when the member does not declare that field itself. A member never sends a rulebook-only row, and a rulebook may leave such a row's items to its own release step. Every other check on the rulebook's file still applies. A collection the member does declare still needs `items`, and so does any collection in a standalone project.
