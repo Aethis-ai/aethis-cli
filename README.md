@@ -264,6 +264,10 @@ If a publish fails after files were uploaded, those files stay in the project
 and are reused on the next attempt (matched by `sha256`), so retrying does not
 duplicate them.
 
+### Bundle contract (input invariants)
+
+Add `contracts/bundle.yaml` to the project folder (beside `fields/` and `tests/`) to declare consistency rules across inputs, for example that an end date must not be before a start date. `aethis generate` and `aethis refine` send it before generation and confirm the build captured it. If the file is removed, the next run clears the stored contract. See the CHANGELOG entry for 0.54.0 for the file format.
+
 ### Guidance (project-level)
 
 Project guidance lives in `.aethis/guidance/hints.yaml` and is uploaded by `aethis generate`. These commands manage hints server-side after upload.

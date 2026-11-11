@@ -42,6 +42,7 @@ def _setup_generate_mocks(mock_router, project_id: str = "proj_1") -> object:
     mock_router.get(f"/api/v1/public/projects/{project_id}").mock(
         return_value=httpx.Response(200, json={"project_id": project_id})
     )
+    mock_router.get("/openapi.json").mock(return_value=httpx.Response(200, json={"paths": {}}))
     mock_router.post(f"/api/v1/public/projects/{project_id}/generate").mock(
         return_value=httpx.Response(202, json={"job_id": "j1"})
     )

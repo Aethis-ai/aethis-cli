@@ -133,6 +133,7 @@ class AethisClient:
         # upload?" — one probe per client, not one per call.
         self._test_replace_support: Any = _UNPROBED
         self._test_acceptance_contract_support: Any = _UNPROBED
+        self._bundle_contract_support: Any = _UNPROBED
         # Cached property names the engine advertises, per schema model — one
         # probe per model per client, not one per call.
         self._field_spec_properties: dict[str, Optional[set[str]]] = {}
@@ -420,10 +421,33 @@ class AethisClient:
         return answer
 
     def supports_bundle_contract(self) -> Optional[bool]:
-        return None
+        """Whether this engine advertises the project bundle-contract route.
+
+        True only when the published API lists a ``PUT`` operation on
+        ``.../projects/{project_id}/bundle-contract``.  An unreadable schema is
+        ``None``, which is not an answer about the engine.
+        """
+        if self._bundle_contract_support is not _UNPROBED:
+            return self._bundle_contract_support  # type: ignore[return-value]
+        try:
+            resp = self._client.get("/openapi.json", timeout=15.0)
+            resp.raise_for_status()
+            paths = resp.json()["paths"]
+            answer: Optional[bool] = any(
+                isinstance(path, str)
+                and path.endswith("/projects/{project_id}/bundle-contract")
+                and isinstance(item, dict)
+                and "put" in item
+                for path, item in paths.items()
+            )
+        except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError):
+            answer = None
+        self._bundle_contract_support = answer
+        return answer
 
     def set_bundle_contract(self, project_id: str, contract: dict) -> dict:
-        return {}
+        """Store (or, with no ``input_invariants``, clear) the project's bundle contract."""
+        return self._request("PUT", f"/api/v1/public/projects/{project_id}/bundle-contract", json=contract)
 
     def _schema_properties(self, model: str) -> Optional[set[str]]:
         """The property names this engine advertises on ``model``.

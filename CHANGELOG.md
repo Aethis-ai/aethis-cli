@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.54.0 (2026-11-11)
+
+- `aethis generate` and `aethis refine` now send a project's bundle contract to the engine. Put it in `contracts/bundle.yaml` next to `fields/` and `tests/`:
+
+  ```yaml
+  schema_version: 1
+  input_invariants:
+    - id: end_not_before_start
+      expr:
+        type: op
+        operator: "<="
+        args:
+          - {type: field_ref, key: period.start_date}
+          - {type: field_ref, key: period.end_date}
+      error_fields: [period.end_date]
+      message: The end date must not be before the start date.
+  ```
+
+  An input invariant is a consistency rule across inputs. When every input it references is present and the rule is false, the decision is `undetermined` and your message is returned in `field_errors` for the named fields.
+- The contract is sent after the field spec and before the generation job starts, and the CLI prints the digest the engine reports. When polling, the run fails (and publishes nothing) unless the finished build reports the same digest. With `--no-poll` the digest is printed so you can check it later.
+- The CLI checks only that the file is a mapping with `schema_version: 1` and, if present, a list `input_invariants`; the engine validates the rest and its error is shown if it refuses the contract.
+- If `contracts/bundle.yaml` exists but the engine does not advertise the bundle contract route, the command stops before any upload or job. If the file is absent and the project has a stored contract, the stored contract is cleared, so a removed file cannot leave a stale contract behind.
+
 ## 0.53.2 (2026-11-04)
 
 - `aethis generate` and `aethis refine` on a member ruleset no longer stop because the enclosing rulebook's `fields.yaml` has a `collection` row with no `items`, when the member does not declare that field itself. A member never sends a rulebook-only row, and a rulebook may leave such a row's items to its own release step. Every other check on the rulebook's file still applies. A collection the member does declare still needs `items`, and so does any collection in a standalone project.
