@@ -47,6 +47,11 @@ CONTRACT = {
 }
 
 
+def _body(contract) -> bytes:
+    """What the loader is expected to return for ``contract``: the exact JSON to send."""
+    return json.dumps(contract, allow_nan=False).encode("utf-8")
+
+
 def _flat(capsys) -> str:
     return re.sub(r"\s+", " ", _ANSI.sub("", capsys.readouterr().out))
 
@@ -98,6 +103,16 @@ def _engine(*, advertised, stored=None, put_digest=DIGEST, job_digest=DIGEST) ->
     return client
 
 
+def _assert_put_bytes(client, project_dir) -> None:
+    """The PUT carries exactly the bytes the loader produced (one encoder, no second opinion)."""
+    client.set_bundle_contract.assert_called_once()
+    pid, sent = client.set_bundle_contract.call_args.args
+    assert pid == "proj_abc"
+    assert isinstance(sent, bytes)
+    assert sent == generate_cmd._load_bundle_contract(project_dir)
+    assert json.loads(sent) == CONTRACT
+
+
 def _names(client) -> list[str]:
     return [c[0] for c in client.method_calls]
 
@@ -117,7 +132,7 @@ def test_present_and_advertised_puts_it_before_the_job_and_prints_the_digest(tmp
 
     _run(mode)
 
-    client.set_bundle_contract.assert_called_once_with("proj_abc", CONTRACT)
+    _assert_put_bytes(client, tmp_path)
     names = _names(client)
     assert names.index("set_bundle_contract") < names.index("generate")
     assert DIGEST in _squash(capsys)
@@ -154,7 +169,7 @@ def test_refine_command_is_wired_to_the_same_path(tmp_path, monkeypatch):
         acceptance_contract=None,
     )
 
-    client.set_bundle_contract.assert_called_once_with("proj_abc", CONTRACT)
+    _assert_put_bytes(client, tmp_path)
 
 
 # --- absent x advertised ----------------------------------------------------
@@ -168,7 +183,8 @@ def test_absent_with_stored_contract_clears_it_and_says_so(tmp_path, monkeypatch
 
     _run(mode, poll=False)
 
-    client.set_bundle_contract.assert_called_once_with("proj_abc", {"schema_version": 1})
+    client.set_bundle_contract.assert_called_once()
+    assert json.loads(client.set_bundle_contract.call_args.args[1]) == {"schema_version": 1}
     assert "cleared" in _flat(capsys)
     names = _names(client)
     assert names.index("set_bundle_contract") < names.index("generate")
@@ -196,35 +212,6 @@ def test_absent_and_not_advertised_does_nothing(tmp_path, monkeypatch):
 
         client.set_bundle_contract.assert_not_called()
         client.generate.assert_called_once()
-
-
-@pytest.mark.parametrize(
-    "raw",
-    ["schema_version: 1\n", "schema_version: 1\ninput_invariants:\n", "schema_version: 1\ninput_invariants: []\n"],
-)
-def test_file_without_invariants_clears_a_stored_contract_and_skips_the_digest_check(
-    tmp_path, monkeypatch, capsys, raw
-):
-    _project(tmp_path, raw=raw)
-    client = _engine(advertised=True, stored=DIGEST, put_digest=None, job_digest=None)
-    _wire(monkeypatch, tmp_path, client)
-
-    _run()
-
-    client.set_bundle_contract.assert_called_once_with("proj_abc", {"schema_version": 1})
-    assert "cleared" in _flat(capsys)
-    client.publish.assert_called_once_with("proj_abc")
-
-
-def test_file_without_invariants_sends_nothing_when_nothing_is_stored(tmp_path, monkeypatch):
-    _project(tmp_path, raw="schema_version: 1\ninput_invariants: []\n")
-    client = _engine(advertised=True, stored=None, put_digest=None, job_digest=None)
-    _wire(monkeypatch, tmp_path, client)
-
-    _run()
-
-    client.set_bundle_contract.assert_not_called()
-    client.publish.assert_called_once_with("proj_abc")
 
 
 # --- readback after polling -------------------------------------------------
@@ -297,18 +284,36 @@ def test_server_response_without_a_digest_stops_before_the_job(tmp_path, monkeyp
 # --- local shape check and engine refusal -----------------------------------
 
 
-@pytest.mark.parametrize(
-    "raw",
-    [
-        "- just\n- a list\n",
-        "input_invariants: []\n",
-        "schema_version: 2\n",
-        "schema_version: true\n",
-        "schema_version: 1\ninput_invariants: not-a-list\n",
-        "schema_version: 1\ninput_invariants: [",
-    ],
-)
-def test_malformed_file_is_refused_locally_before_any_call(tmp_path, monkeypatch, capsys, raw):
+REFUSED = [
+    "- just\n- a list\n",
+    "input_invariants: []\n",
+    "schema_version: 2\ninput_invariants: [{id: a}]\n",
+    "schema_version: true\ninput_invariants: [{id: a}]\n",
+    "schema_version: '1'\ninput_invariants: [{id: a}]\n",
+    "schema_version: 1.0\ninput_invariants: [{id: a}]\n",
+    "schema_version: 1\ninput_invariants: not-a-list\n",
+    "schema_version: 1\ninput_invariants: [",
+    # a present file with no invariants is refused: delete the file to clear
+    "schema_version: 1\n",
+    "schema_version: 1\ninput_invariants:\n",
+    "schema_version: 1\ninput_invariants: []\n",
+    # closed top-level keys
+    "schema_version: 1\ninput_invariant: [{id: a}]\n",
+    "schema_version: 1\ninput_invariants: [{id: a}]\nextra: 1\n",
+    # content that cannot be sent as JSON
+    "schema_version: 1\ninput_invariants:\n  - id: a\n    value: 2000-01-01\n",
+    "schema_version: 1\ninput_invariants:\n  - id: a\n    value: .nan\n",
+    "schema_version: 1\ninput_invariants:\n  - id: a\n    value: .inf\n",
+    "schema_version: 1\ninput_invariants:\n  - ? [1, 2]\n    : x\n",
+    "schema_version: 1\ninput_invariants:\n  - !!set {a, b}\n",
+    "schema_version: 1\ninput_invariants:\n  - !!binary aGk=\n",
+    # duplicate keys
+    "schema_version: 1\ninput_invariants: [{id: a}]\nschema_version: 1\n",
+]
+
+
+@pytest.mark.parametrize("raw", REFUSED)
+def test_bad_file_is_refused_locally_naming_the_file_before_any_call(tmp_path, monkeypatch, capsys, raw):
     _project(tmp_path, raw=raw)
     client = _engine(advertised=True)
     _wire(monkeypatch, tmp_path, client)
@@ -317,34 +322,83 @@ def test_malformed_file_is_refused_locally_before_any_call(tmp_path, monkeypatch
         _run()
 
     assert exc.value.exit_code != 0
-    assert client.method_calls == []
-    assert "bundle contract rejected" in _flat(capsys).lower()
+    assert client.method_calls == []  # no probe, no project lookup or creation, no upload
+    out = capsys.readouterr().out
+    assert "bundle contract rejected" in re.sub(r"\s+", " ", _ANSI.sub("", out)).lower()
+    assert "bundle.yaml" in re.sub(r"\s+", "", _ANSI.sub("", out))
 
 
-@pytest.mark.parametrize(
-    "raw",
-    [
-        "schema_version: 1\ninput_invariants:\n  - id: a\n    value: 2000-01-01\n",
-        "schema_version: 1\ninput_invariants: []\nschema_version: 1\n",
-    ],
-)
-def test_non_json_content_or_duplicate_keys_are_refused_before_any_call(tmp_path, monkeypatch, capsys, raw):
-    _project(tmp_path, raw=raw)
-    client = _engine(advertised=True)
-    _wire(monkeypatch, tmp_path, client)
+def test_refusal_does_not_depend_on_the_probe_answer(tmp_path, monkeypatch):
+    for advertised in (True, False, None):
+        _project(tmp_path, raw="schema_version: 1\ninput_invariants: []\n")
+        client = _engine(advertised=advertised, stored=DIGEST)
+        _wire(monkeypatch, tmp_path, client)
+        with pytest.raises(typer.Exit):
+            _run()
+        client.set_bundle_contract.assert_not_called()
 
-    with pytest.raises(typer.Exit) as exc:
-        _run()
 
-    assert exc.value.exit_code != 0
-    assert client.method_calls == []
-    assert "bundle contract rejected" in _flat(capsys).lower()
+def test_refusal_of_an_empty_file_says_to_delete_it_to_clear(tmp_path):
+    _project(tmp_path, raw="schema_version: 1\ninput_invariants: []\n")
+    with pytest.raises(generate_cmd.BundleContractError, match="delete"):
+        generate_cmd._load_bundle_contract(tmp_path)
 
 
 def test_unquoted_date_message_tells_the_author_to_quote_dates(tmp_path):
     _project(tmp_path, raw="schema_version: 1\ninput_invariants:\n  - value: 2000-01-01\n")
     with pytest.raises(generate_cmd.BundleContractError, match="quote"):
         generate_cmd._load_bundle_contract(tmp_path)
+
+
+def test_unknown_top_level_key_is_named_with_the_allowed_keys(tmp_path):
+    _project(tmp_path, raw="schema_version: 1\ninput_invariant: [{id: a}]\n")
+    with pytest.raises(generate_cmd.BundleContractError) as exc:
+        generate_cmd._load_bundle_contract(tmp_path)
+    assert "input_invariant" in str(exc.value)
+    assert "input_invariants" in str(exc.value)
+
+
+def test_loader_returns_the_exact_json_to_send(tmp_path):
+    _project(tmp_path, CONTRACT)
+    body = generate_cmd._load_bundle_contract(tmp_path)
+    assert isinstance(body, bytes)
+    assert json.loads(body) == CONTRACT
+
+
+def test_absent_file_returns_none(tmp_path):
+    assert generate_cmd._load_bundle_contract(tmp_path) is None
+
+
+def test_absent_file_with_unreadable_probe_warns_that_a_stored_contract_was_not_checked(tmp_path, monkeypatch, capsys):
+    _project(tmp_path)
+    client = _engine(advertised=None)
+    _wire(monkeypatch, tmp_path, client)
+
+    _run(poll=False)
+
+    client.set_bundle_contract.assert_not_called()
+    client.generate.assert_called_once()
+    assert "could not be checked" in _flat(capsys)
+
+
+def test_absent_file_and_route_not_advertised_is_silent(tmp_path, monkeypatch, capsys):
+    _project(tmp_path)
+    client = _engine(advertised=False)
+    _wire(monkeypatch, tmp_path, client)
+
+    _run(poll=False)
+
+    assert "bundle contract" not in _flat(capsys).lower()
+
+
+def test_cleared_line_is_never_printed_when_a_file_exists(tmp_path, monkeypatch, capsys):
+    _project(tmp_path, CONTRACT)
+    client = _engine(advertised=True, stored=DIGEST)
+    _wire(monkeypatch, tmp_path, client)
+
+    _run(poll=False)
+
+    assert "cleared" not in _flat(capsys)
 
 
 def test_absent_file_with_unreadable_project_warns_and_continues(tmp_path, monkeypatch, capsys):
@@ -409,24 +463,21 @@ def test_probe_is_none_when_the_schema_cannot_be_read(response):
             assert client.supports_bundle_contract() is None
 
 
-def test_set_bundle_contract_puts_the_body_unchanged():
+def test_set_bundle_contract_puts_the_exact_bytes_with_a_json_content_type(tmp_path):
+    _project(tmp_path, CONTRACT)
+    loaded = generate_cmd._load_bundle_contract(tmp_path)
     seen: dict = {}
 
     def put(request: httpx.Request) -> httpx.Response:
-        seen["body"] = json.loads(request.content)
+        seen["raw"] = request.content
+        seen["type"] = request.headers.get("content-type", "")
         return httpx.Response(200, json={"bundle_contract_digest": DIGEST})
 
     with respx.mock(base_url=BASE) as m:
         m.put("/api/v1/public/projects/proj/bundle-contract").mock(side_effect=put)
         with AethisClient("key", BASE) as client:
-            result = client.set_bundle_contract("proj", CONTRACT)
+            result = client.set_bundle_contract("proj", loaded)
 
-    assert seen["body"] == CONTRACT
+    assert seen["raw"] == loaded
+    assert seen["type"].startswith("application/json")
     assert result["bundle_contract_digest"] == DIGEST
-
-
-def test_a_loaded_contract_encodes_through_the_real_http_layer(tmp_path):
-    _project(tmp_path, CONTRACT)
-    loaded = generate_cmd._load_bundle_contract(tmp_path)
-    request = httpx.Request("PUT", f"{BASE}/x", json=loaded)
-    assert json.loads(request.content) == CONTRACT
