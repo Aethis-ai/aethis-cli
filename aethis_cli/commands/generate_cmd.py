@@ -1516,6 +1516,10 @@ def _run_generate(
         # The bundle contract is checked before any engine call: a malformed
         # file, or an engine that cannot hold it, must not leave a half-sent run.
         bundle_contract = _load_bundle_contract(project_dir)
+        if bundle_contract is not None and not bundle_contract.get("input_invariants"):
+            # A contract with no invariants means "no contract": the engine
+            # clears on it, so it takes the same path as an absent file.
+            bundle_contract = None
         bundle_advertised: Optional[bool] = None
         if bundle_contract is not None:
             bundle_advertised = client.supports_bundle_contract()
@@ -1699,7 +1703,7 @@ def _load_bundle_contract(project_dir: Path) -> Optional[dict[str, Any]]:
     version = raw.get("schema_version")
     if type(version) is not int or version != 1:
         raise BundleContractError(f"{path} must set schema_version: 1")
-    if "input_invariants" in raw and not isinstance(raw["input_invariants"], list):
+    if raw.get("input_invariants") is not None and not isinstance(raw["input_invariants"], list):
         raise BundleContractError(f"{path}: input_invariants must be a list")
     try:
         json.dumps(raw)

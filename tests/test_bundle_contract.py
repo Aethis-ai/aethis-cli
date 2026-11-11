@@ -198,6 +198,35 @@ def test_absent_and_not_advertised_does_nothing(tmp_path, monkeypatch):
         client.generate.assert_called_once()
 
 
+@pytest.mark.parametrize(
+    "raw",
+    ["schema_version: 1\n", "schema_version: 1\ninput_invariants:\n", "schema_version: 1\ninput_invariants: []\n"],
+)
+def test_file_without_invariants_clears_a_stored_contract_and_skips_the_digest_check(
+    tmp_path, monkeypatch, capsys, raw
+):
+    _project(tmp_path, raw=raw)
+    client = _engine(advertised=True, stored=DIGEST, put_digest=None, job_digest=None)
+    _wire(monkeypatch, tmp_path, client)
+
+    _run()
+
+    client.set_bundle_contract.assert_called_once_with("proj_abc", {"schema_version": 1})
+    assert "cleared" in _flat(capsys)
+    client.publish.assert_called_once_with("proj_abc")
+
+
+def test_file_without_invariants_sends_nothing_when_nothing_is_stored(tmp_path, monkeypatch):
+    _project(tmp_path, raw="schema_version: 1\ninput_invariants: []\n")
+    client = _engine(advertised=True, stored=None, put_digest=None, job_digest=None)
+    _wire(monkeypatch, tmp_path, client)
+
+    _run()
+
+    client.set_bundle_contract.assert_not_called()
+    client.publish.assert_called_once_with("proj_abc")
+
+
 # --- readback after polling -------------------------------------------------
 
 
