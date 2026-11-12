@@ -16,7 +16,7 @@
           member.renewal_date: The renewal date must not be before the joined date.
   ```
 
-  `field_errors` maps each field id to the exact message the rule produces. It must be a non-empty object of non-empty strings, is only valid when the outcome is `undetermined`, and can be combined with `pending_reviews` and `useful_unknown_fields`. Anything else is refused locally with the path of the offending value. Contracts that do not use `field_errors` are sent exactly as before. An API host that does not yet support the key will reject the request, and its message is shown.
+  `field_errors` maps each field id to the exact message the rule produces. It must be a non-empty object of non-empty strings, is only valid when the outcome is `undetermined`, and can be combined with `pending_reviews` and `useful_unknown_fields`. Anything else is refused locally with the path of the offending value. Contracts that do not use `field_errors` are sent exactly as before. A `field_errors` key placed at case level or at the top of a contract (where it was previously ignored) is now refused as misplaced, so a mistaken placement is reported instead of silently dropped. An API host that does not yet support the key will reject the request, and its message is shown.
 
 ## 0.54.0 (2026-11-11)
 

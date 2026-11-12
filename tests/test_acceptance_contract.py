@@ -710,8 +710,22 @@ def test_field_errors_may_sit_beside_other_expectations(tmp_path):
 
 def test_contract_without_field_errors_is_unchanged(tmp_path):
     loaded = generate_cmd._load_acceptance_contract(_write_contract(tmp_path, _contract()))
-    assert generate_cmd._acceptance_contract_digest(loaded) == generate_cmd._acceptance_contract_digest(_contract())
     assert loaded == _contract()
+    # Literal computed on the previous release (origin/main before field_errors) for this exact contract.
+    assert (
+        generate_cmd._acceptance_contract_digest(loaded)
+        == "sha256:15acfcf51d581642f276188f7d55a761dace4290eb8b013a2a8c89b125b04841"
+    )
+
+
+def test_field_error_message_boundaries_and_whitespace(tmp_path):
+    for message in ("m" * 20000, "   "):
+        case = _field_errors_case()
+        case["expectations"] = {"field_errors": {"f": message}}
+        loaded = generate_cmd._load_acceptance_contract(
+            _write_contract(tmp_path, {"contract_version": 1, "test_cases": [case]})
+        )
+        assert loaded["test_cases"][0]["expectations"]["field_errors"] == {"f": message}
 
 
 @pytest.mark.parametrize(
@@ -723,10 +737,9 @@ def test_contract_without_field_errors_is_unchanged(tmp_path):
         ({"": "msg"}, "undetermined", r"expectations\.field_errors keys must be non-empty strings"),
         ({"f": 3}, "undetermined", r"expectations\.field_errors\['f'\] must be a non-empty string"),
         ({"f": ""}, "undetermined", r"expectations\.field_errors\['f'\] must be a non-empty string"),
-        ({"f": "  "}, "undetermined", r"expectations\.field_errors\['f'\] must be a non-empty string"),
         ({"f": None}, "undetermined", r"expectations\.field_errors\['f'\] must be a non-empty string"),
         ({"f" * 301: "msg"}, "undetermined", r"keys must be at most 300"),
-        ({"f": "m" * 2001}, "undetermined", r"must be at most 2000"),
+        ({"f": "m" * 20001}, "undetermined", r"must be at most 20000"),
         ({"f": "msg"}, "eligible", r"field_errors is only valid when expected_outcome is undetermined"),
         ({"f": "msg"}, "not_eligible", r"field_errors is only valid when expected_outcome is undetermined"),
     ],

@@ -44,7 +44,7 @@ _MAX_ACCEPTANCE_CASES = 500
 _MAX_LEGACY_CASES = 100
 _MAX_ACCEPTANCE_ID_LENGTH = 300
 _MAX_ACCEPTANCE_LIST_LENGTH = 500
-_MAX_FIELD_ERROR_MESSAGE_LENGTH = 2000
+_MAX_FIELD_ERROR_MESSAGE_LENGTH = 20000
 _KNOWN_CONTRACT_SEMANTIC_KEYS = {
     "contract_version",
     "expected_review_bindings",
@@ -119,7 +119,7 @@ def _strict_field_errors(value: Any, path: str) -> dict[str, str]:
             raise AcceptanceContractError(f"{path} keys must be non-empty strings")
         if len(key) > _MAX_ACCEPTANCE_ID_LENGTH:
             raise AcceptanceContractError(f"{path} keys must be at most {_MAX_ACCEPTANCE_ID_LENGTH} code points")
-        if not isinstance(message, str) or not message.strip():
+        if not isinstance(message, str) or not message:
             raise AcceptanceContractError(f"{path}[{key!r}] must be a non-empty string")
         if len(message) > _MAX_FIELD_ERROR_MESSAGE_LENGTH:
             raise AcceptanceContractError(
