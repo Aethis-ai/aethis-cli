@@ -692,8 +692,8 @@ def test_field_errors_in_expect_author_shape_is_normalised(tmp_path):
 """,
         encoding="utf-8",
     )
-    contract = generate_cmd._load_scenarios_contract(tmp_path)
-    case = contract["test_cases"][0] if "test_cases" in contract else contract["tests"][0]
+    contract, _name = generate_cmd._load_scenarios_contract(tmp_path)
+    case = contract["test_cases"][0]
     assert case["expected_outcome"] == "undetermined"
     assert case["expectations"] == {"field_errors": _FIELD_ERRORS}
 

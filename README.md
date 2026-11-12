@@ -432,7 +432,19 @@ tests:
       space.medical.cert_valid: false
     expect:
       outcome: not_eligible
+  - name: "Undetermined — renewal before joined"
+    inputs:
+      member.joined_date: "2026-05-01"
+      member.renewal_date: "2026-04-01"
+    expect:
+      outcome: undetermined
+      field_errors:
+        member.renewal_date: The renewal date must not be before the joined date.
 ```
+
+`field_errors` asserts that a rule from `contracts/bundle.yaml` rejected the input:
+it maps each field id to the exact message you authored, and is only valid with
+`outcome: undetermined`. An older API host may reject the key; the host's message is shown as-is.
 
 This file is the authoritative suite: `aethis generate` uploads it in full and
 **replaces** the project's test cases with it, so running generate twice leaves

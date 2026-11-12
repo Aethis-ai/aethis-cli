@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.55.0 (2026-11-12)
+
+- A test case can now assert that an input rule from your bundle contract fired. In `tests/scenarios.yaml` (or a versioned acceptance contract passed with `--acceptance-contract`), add `field_errors` beside `outcome: undetermined`:
+
+  ```yaml
+  tests:
+    - name: renewal before joined
+      inputs:
+        member.joined_date: "2026-05-01"
+        member.renewal_date: "2026-04-01"
+      expect:
+        outcome: undetermined
+        field_errors:
+          member.renewal_date: The renewal date must not be before the joined date.
+  ```
+
+  `field_errors` maps each field id to the exact message the rule produces. It must be a non-empty object of non-empty strings, is only valid when the outcome is `undetermined`, and can be combined with `pending_reviews` and `useful_unknown_fields`. Anything else is refused locally with the path of the offending value. Contracts that do not use `field_errors` are sent exactly as before. An API host that does not yet support the key will reject the request, and its message is shown.
+
 ## 0.54.0 (2026-11-11)
 
 - `aethis generate` and `aethis refine` now send a project's bundle contract to the engine. Put it in `contracts/bundle.yaml` next to `fields/` and `tests/`:

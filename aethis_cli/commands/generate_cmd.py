@@ -44,6 +44,7 @@ _MAX_ACCEPTANCE_CASES = 500
 _MAX_LEGACY_CASES = 100
 _MAX_ACCEPTANCE_ID_LENGTH = 300
 _MAX_ACCEPTANCE_LIST_LENGTH = 500
+_MAX_FIELD_ERROR_MESSAGE_LENGTH = 2000
 _KNOWN_CONTRACT_SEMANTIC_KEYS = {
     "contract_version",
     "expected_review_bindings",
@@ -59,6 +60,7 @@ _KNOWN_CONTRACT_SEMANTIC_KEYS = {
     "resolution_fields",
     "unmapped_count",
     "useful_unknown_fields",
+    "field_errors",
 }
 
 
@@ -107,10 +109,29 @@ def _strict_string_list(value: Any, path: str) -> list[str]:
     return value
 
 
+def _strict_field_errors(value: Any, path: str) -> dict[str, str]:
+    if not isinstance(value, dict) or not value:
+        raise AcceptanceContractError(f"{path} must be a non-empty object mapping field ids to messages")
+    if len(value) > _MAX_ACCEPTANCE_LIST_LENGTH:
+        raise AcceptanceContractError(f"{path} must contain at most {_MAX_ACCEPTANCE_LIST_LENGTH} entries")
+    for key, message in value.items():
+        if not isinstance(key, str) or not key.strip():
+            raise AcceptanceContractError(f"{path} keys must be non-empty strings")
+        if len(key) > _MAX_ACCEPTANCE_ID_LENGTH:
+            raise AcceptanceContractError(f"{path} keys must be at most {_MAX_ACCEPTANCE_ID_LENGTH} code points")
+        if not isinstance(message, str) or not message.strip():
+            raise AcceptanceContractError(f"{path}[{key!r}] must be a non-empty string")
+        if len(message) > _MAX_FIELD_ERROR_MESSAGE_LENGTH:
+            raise AcceptanceContractError(
+                f"{path}[{key!r}] must be at most {_MAX_FIELD_ERROR_MESSAGE_LENGTH} code points"
+            )
+    return dict(value)
+
+
 def _normalise_expectations(value: Any, path: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise AcceptanceContractError(f"{path} must be an object")
-    unknown = set(value) - {"pending_reviews", "useful_unknown_fields"}
+    unknown = set(value) - {"pending_reviews", "useful_unknown_fields", "field_errors"}
     if unknown:
         raise AcceptanceContractError(f"{path} contains unsupported key(s): {', '.join(sorted(unknown))}")
     if not value:
@@ -138,6 +159,8 @@ def _normalise_expectations(value: Any, path: str) -> dict[str, Any]:
         out["useful_unknown_fields"] = _strict_string_list(
             value["useful_unknown_fields"], f"{path}.useful_unknown_fields"
         )
+    if "field_errors" in value:
+        out["field_errors"] = _strict_field_errors(value["field_errors"], f"{path}.field_errors")
     return out
 
 
@@ -177,13 +200,21 @@ def _normalise_test_cases(cases: Any, path: str, *, yaml_shape: bool) -> list[di
         if yaml_shape:
             values = case.get("inputs", {})
             expect = case.get("expect", {})
-            if not isinstance(expect, dict) or set(expect) - {"outcome", "pending_reviews", "useful_unknown_fields"}:
+            if not isinstance(expect, dict) or set(expect) - {
+                "outcome",
+                "pending_reviews",
+                "useful_unknown_fields",
+                "field_errors",
+            }:
                 raise AcceptanceContractError(
-                    f"{case_path}.expect may contain only outcome, pending_reviews, and useful_unknown_fields"
+                    f"{case_path}.expect may contain only outcome, pending_reviews, useful_unknown_fields, "
+                    "and field_errors"
                 )
             outcome = expect.get("outcome", "eligible")
             expectations = {
-                key: expect[key] for key in ("pending_reviews", "useful_unknown_fields") if key in expect
+                key: expect[key]
+                for key in ("pending_reviews", "useful_unknown_fields", "field_errors")
+                if key in expect
             } or None
         else:
             values = case.get("field_values")
@@ -202,6 +233,10 @@ def _normalise_test_cases(cases: Any, path: str, *, yaml_shape: bool) -> list[di
         normal = {"name": name, "field_values": values, "expected_outcome": outcome}
         if expectations is not None:
             normal["expectations"] = _normalise_expectations(expectations, f"{case_path}.expectations")
+            if "field_errors" in normal["expectations"] and outcome != "undetermined":
+                raise AcceptanceContractError(
+                    f"{case_path}.expectations.field_errors is only valid when expected_outcome is undetermined"
+                )
         out.append(normal)
     return out
 
