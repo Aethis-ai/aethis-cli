@@ -653,3 +653,121 @@ def test_run_rejects_contract_boundaries_before_any_remote_call(tmp_path, monkey
 
     assert raised.value.exit_code == 1
     assert client.method_calls == []
+
+
+# --- field_errors expectation -------------------------------------------------
+
+_FIELD_ERRORS = {"member.renewal_date": "The renewal date must not be before the joined date."}
+
+
+def _field_errors_case(**overrides: object) -> dict:
+    case: dict = {
+        "name": "renewal before joined",
+        "field_values": {"member.joined_date": "2026-05-01", "member.renewal_date": "2026-04-01"},
+        "expected_outcome": "undetermined",
+        "expectations": {"field_errors": dict(_FIELD_ERRORS)},
+    }
+    case.update(overrides)
+    return case
+
+
+def test_field_errors_in_normalised_shape_is_accepted_and_transported(tmp_path):
+    contract = {"contract_version": 1, "test_cases": [_field_errors_case()]}
+    loaded = generate_cmd._load_acceptance_contract(_write_contract(tmp_path, contract))
+    assert loaded["test_cases"][0]["expected_outcome"] == "undetermined"
+    assert loaded["test_cases"][0]["expectations"] == {"field_errors": _FIELD_ERRORS}
+
+
+def test_field_errors_in_expect_author_shape_is_normalised(tmp_path):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "scenarios.yaml").write_text(
+        """tests:
+  - name: renewal before joined
+    inputs: {member.joined_date: "2026-05-01", member.renewal_date: "2026-04-01"}
+    expect:
+      outcome: undetermined
+      field_errors:
+        member.renewal_date: The renewal date must not be before the joined date.
+""",
+        encoding="utf-8",
+    )
+    contract = generate_cmd._load_scenarios_contract(tmp_path)
+    case = contract["test_cases"][0] if "test_cases" in contract else contract["tests"][0]
+    assert case["expected_outcome"] == "undetermined"
+    assert case["expectations"] == {"field_errors": _FIELD_ERRORS}
+
+
+def test_field_errors_may_sit_beside_other_expectations(tmp_path):
+    case = _field_errors_case()
+    case["expectations"]["useful_unknown_fields"] = ["member.joined_date"]
+    case["expectations"]["pending_reviews"] = {"resolution_fields": ["member.joined_date"], "unmapped_count": 0}
+    loaded = generate_cmd._load_acceptance_contract(
+        _write_contract(tmp_path, {"contract_version": 1, "test_cases": [case]})
+    )
+    assert loaded["test_cases"][0]["expectations"] == case["expectations"]
+
+
+def test_contract_without_field_errors_is_unchanged(tmp_path):
+    loaded = generate_cmd._load_acceptance_contract(_write_contract(tmp_path, _contract()))
+    assert generate_cmd._acceptance_contract_digest(loaded) == generate_cmd._acceptance_contract_digest(_contract())
+    assert loaded == _contract()
+
+
+@pytest.mark.parametrize(
+    ("field_errors", "outcome", "message"),
+    [
+        ({}, "undetermined", r"expectations\.field_errors must be a non-empty object"),
+        ([], "undetermined", r"expectations\.field_errors must be a non-empty object"),
+        ("x", "undetermined", r"expectations\.field_errors must be a non-empty object"),
+        ({"": "msg"}, "undetermined", r"expectations\.field_errors keys must be non-empty strings"),
+        ({"f": 3}, "undetermined", r"expectations\.field_errors\['f'\] must be a non-empty string"),
+        ({"f": ""}, "undetermined", r"expectations\.field_errors\['f'\] must be a non-empty string"),
+        ({"f": "  "}, "undetermined", r"expectations\.field_errors\['f'\] must be a non-empty string"),
+        ({"f": None}, "undetermined", r"expectations\.field_errors\['f'\] must be a non-empty string"),
+        ({"f" * 301: "msg"}, "undetermined", r"keys must be at most 300"),
+        ({"f": "m" * 2001}, "undetermined", r"must be at most 2000"),
+        ({"f": "msg"}, "eligible", r"field_errors is only valid when expected_outcome is undetermined"),
+        ({"f": "msg"}, "not_eligible", r"field_errors is only valid when expected_outcome is undetermined"),
+    ],
+)
+def test_field_errors_refusals_in_normalised_shape(tmp_path, field_errors, outcome, message):
+    case = _field_errors_case(expected_outcome=outcome)
+    case["expectations"] = {"field_errors": field_errors}
+    path = _write_contract(tmp_path, {"contract_version": 1, "test_cases": [case]})
+    with pytest.raises(generate_cmd.AcceptanceContractError, match=message):
+        generate_cmd._load_acceptance_contract(path)
+
+
+@pytest.mark.parametrize("outcome", ["eligible", "not_eligible"])
+def test_field_errors_refused_for_wrong_outcome_in_expect_shape(tmp_path, outcome):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "scenarios.yaml").write_text(
+        f"""tests:
+  - name: wrong outcome
+    inputs: {{}}
+    expect:
+      outcome: {outcome}
+      field_errors: {{member.renewal_date: Too early.}}
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(generate_cmd.AcceptanceContractError, match="only valid when expected_outcome is undetermined"):
+        generate_cmd._load_scenarios_contract(tmp_path)
+
+
+def test_field_errors_refused_in_expect_shape_when_outcome_defaults(tmp_path):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "scenarios.yaml").write_text(
+        """tests:
+  - name: default outcome
+    inputs: {}
+    expect:
+      field_errors: {member.renewal_date: Too early.}
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(generate_cmd.AcceptanceContractError, match="only valid when expected_outcome is undetermined"):
+        generate_cmd._load_scenarios_contract(tmp_path)
