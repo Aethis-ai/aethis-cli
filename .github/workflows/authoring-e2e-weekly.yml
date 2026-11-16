@@ -59,8 +59,17 @@ jobs:
           if [ -z "${CLERK_SECRET_KEY_DEV_TOOLS:-}" ]; then echo "::error::CLERK_SECRET_KEY_DEV_TOOLS secret is not set"; missing=1; fi
           if [ -z "${CLERK_E2E_DX_USER_ID:-}" ]; then echo "::error::CLERK_E2E_DX_USER_ID var is not set"; missing=1; fi
           if [ "$missing" -ne 0 ]; then exit 1; fi
-          code=$(curl -s -o /dev/null -w "%{http_code}" -m 20 "$AETHIS_BASE_URL/openapi.json" || echo 000)
-          if [ "$code" != "200" ]; then echo "::error::staging unreachable ($AETHIS_BASE_URL/openapi.json → HTTP $code)"; exit 1; fi
+          # Staging scales to zero and a cold instance takes ~20s to answer
+          # (measured 2026-11-16: 19.7s and 21.3s for the first request after
+          # idle). Same patient probe as the nightly lane.
+          code=""
+          for attempt in 1 2 3 4 5; do
+            code=$(curl -s -o /dev/null -m 60 -w "%{http_code}" "$AETHIS_BASE_URL/openapi.json" || true)
+            if [ "$code" = "200" ]; then break; fi
+            echo "staging not ready (attempt $attempt/5): HTTP ${code:-000}"
+            sleep 10
+          done
+          if [ "$code" != "200" ]; then echo "::error::staging unreachable ($AETHIS_BASE_URL/openapi.json → HTTP ${code:-000})"; exit 1; fi
           echo "guard ok"
 
       - name: Mint a staging key for authoring
@@ -119,9 +128,15 @@ jobs:
           fi
 
       - name: Fail the job if the lane failed
-        if: always()
+        # Skipped when an earlier step already failed the job: there is no
+        # pytest exit code to judge, and a bare "pytest exit " hides the reason.
+        if: always() && steps.pytest.outcome != 'skipped'
         run: |
           code="${{ steps.pytest.outputs.exit_code }}"
+          if [ -z "$code" ]; then
+            echo "::error::authoring e2e lane did not report a pytest exit code"
+            exit 1
+          fi
           if [ "$code" != "0" ]; then
             echo "::error::authoring e2e lane failed (pytest exit $code)"
             exit 1
