@@ -57,15 +57,26 @@ jobs:
           if [ -z "${CLERK_SECRET_KEY_DEV_TOOLS:-}" ]; then echo "::error::CLERK_SECRET_KEY_DEV_TOOLS secret is not set"; missing=1; fi
           if [ -z "${CLERK_E2E_DX_USER_ID:-}" ]; then echo "::error::CLERK_E2E_DX_USER_ID var is not set"; missing=1; fi
           if [ "$missing" -ne 0 ]; then exit 1; fi
-          code=$(curl -s -o /dev/null -w "%{http_code}" -m 20 "$AETHIS_BASE_URL/openapi.json" || echo 000)
-          if [ "$code" != "200" ]; then echo "::error::staging unreachable ($AETHIS_BASE_URL/openapi.json → HTTP $code)"; exit 1; fi
+          # Staging scales to zero, and a cold instance can take ~20s to answer
+          # (measured 2026-11-16: 19.7s and 21.3s for the first request after
+          # idle). A single request with the old 20s cap timed out on most
+          # nights and reported a bare "HTTP 000000" (curl's own 000 plus the
+          # fallback's 000). Be patient, then fail loud if it is really down.
+          code=""
+          for attempt in 1 2 3 4 5; do
+            code=$(curl -s -o /dev/null -m 60 -w "%{http_code}" "$AETHIS_BASE_URL/openapi.json" || true)
+            if [ "$code" = "200" ]; then break; fi
+            echo "staging not ready (attempt $attempt/5): HTTP ${code:-000}"
+            sleep 10
+          done
+          if [ "$code" != "200" ]; then echo "::error::staging unreachable ($AETHIS_BASE_URL/openapi.json → HTTP ${code:-000})"; exit 1; fi
           echo "guard ok: secrets present, staging reachable"
 
       - name: Capture engine + CLI versions
         id: versions
         run: |
           set -euo pipefail
-          engine=$(curl -s -m 20 "$AETHIS_BASE_URL/openapi.json" | python3 -c 'import sys,json; print(json.load(sys.stdin)["info"]["version"])')
+          engine=$(curl -s -m 60 "$AETHIS_BASE_URL/openapi.json" | python3 -c 'import sys,json; print(json.load(sys.stdin)["info"]["version"])')
           cli=$(uv run python -c 'from aethis_cli._version import __version__; print(__version__)')
           echo "engine=$engine" >> "$GITHUB_OUTPUT"
           echo "cli=$cli" >> "$GITHUB_OUTPUT"
@@ -135,9 +146,16 @@ jobs:
           if-no-files-found: error
 
       - name: Fail the job if the lane failed
-        if: always()
+        # Skipped when the guard above already failed the job: there is no
+        # pytest exit code to judge, and a bare "pytest exit " hid the real
+        # reason (staging unreachable) in the annotation.
+        if: always() && steps.pytest.outcome != 'skipped'
         run: |
           code="${{ steps.pytest.outputs.exit_code }}"
+          if [ -z "$code" ]; then
+            echo "::error::staging integration lane did not report a pytest exit code"
+            exit 1
+          fi
           if [ "$code" != "0" ]; then
             echo "::error::staging integration lane failed (pytest exit $code)"
             exit 1
